@@ -128,6 +128,9 @@ const GENERALS = {
   yuejin:        { id:'yuejin',        name:'乐进',   maxHp:4, skill:'骁果',
     desc:'其他角色的结束阶段,你可以弃置一张基本牌,然后该角色选择一项:弃置一张装备牌,你摸一张牌;或受到你造成的1点伤害。',
     caps:{ xiaoguo:true } },
+  zhanghe:       { id:'zhanghe',       name:'张郃',   maxHp:4, skill:'巧变(简化版)',
+    desc:'出牌阶段限一次,你可以弃置一张手牌,跳过这个阶段,然后你可以将场上一张装备牌移到另一名角色的对应空槽,或将一张延时锦囊移到另一名角色没有同名锦囊的判定区。',
+    caps:{ qiaobian:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

@@ -21,6 +21,13 @@ function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 // 乐进【骁果】:点"发动"进选牌模式(纯客户端,不入库),只有基本牌可点,点了直接提交(仿鬼才)。
 let xiaoguoMode = false;
 function resetXiaoguo(){ xiaoguoMode=false; }
+// 张郃【巧变】:出牌阶段点"发动巧变"——① 点一张手牌选中(任意牌) → ② 从"整个牌桌"动态列出
+// 的装备/判定牌里选一个来源(或直接"不移动,仅跳过阶段") → ③ 从合法目的地里选一个,一次性
+// 提交 qiaoBian(cardIdx, move)。全程纯客户端状态机,不入库,不需要任何其他玩家响应。
+let qiaobianMode = false;        // false | 'card' | 'source' | 'target'
+let qiaobianCardIdx = null;      // 已选中要弃置的手牌下标
+let qiaobianSrc = null;          // 已选中的来源 {kind:'equip'|'delay', seat, slot|idx, name}
+function resetQiaobian(){ qiaobianMode=false; qiaobianCardIdx=null; qiaobianSrc=null; }
 let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
@@ -38,7 +45,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQiaobian(); };
   showConfirm(message,
     ()=>{ cleanup(); actionFn(); },
     ()=>{ cleanup(); render(currentG); });
@@ -59,6 +66,32 @@ function playConfirmMsg(g, actionId, card, targetSeat){
 // 或以后更多人,只要座位号不同、颜色必然不同——不会因为名字巧合 hash 到相近色。
 const NAME_COLORS = ['#3B82C4','#2FBF71','#C4519B','#B8A22F','#8B5FBF','#D9713C','#4FA8A8','#C4C44F'];
 function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COLORS.length)%NAME_COLORS.length]; }
+
+// ===== 张郃【巧变】:动态扫描整个牌桌,现算"可选来源"/"合法目的地"清单(不预存进 pending) =====
+const EQUIP_SLOT_LABEL={ weapon:'武器', armor:'防具', plus1:'防御马', minus1:'进攻马' };
+// qiaobianSources: 所有存活玩家的非空装备槽 + 判定区里的每张延时锦囊,各生成一条来源记录。
+function qiaobianSources(g){
+  const list=[];
+  g.players.forEach((p,i)=>{
+    if(!p || !p.alive) return;
+    EQUIP_SLOTS.forEach(slot=>{ if(p.equips && p.equips[slot]){
+      list.push({kind:'equip', seat:i, slot, name:p.equips[slot].name, label:p.name+' 的'+EQUIP_SLOT_LABEL[slot]+'【'+p.equips[slot].name+'】'});
+    }});
+    (p.delays||[]).forEach((c,idx)=>{
+      list.push({kind:'delay', seat:i, idx, name:c.name, label:p.name+' 判定区的【'+c.name+'】'});
+    });
+  });
+  return list;
+}
+// qiaobianTargets: 给定一条来源,列出合法的目的地玩家(排除来源本人)——
+// 装备要求该玩家对应槽为空;延时锦囊要求该玩家判定区没有同名的牌。
+function qiaobianTargets(g, src){
+  return g.players.map((p,i)=>({p,i})).filter(o=>{
+    if(!o.p || !o.p.alive || o.i===src.seat) return false;
+    if(src.kind==='equip') return !o.p.equips[src.slot];
+    return !(o.p.delays||[]).some(c=>c.name===src.name);
+  }).map(o=>({seat:o.i, label:o.p.name}));
+}
 
 // ---------- render ----------
 function render(g){
@@ -83,6 +116,8 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetDuanliang();
   // 同款兜底:一旦不在"轮到自己响应骁果"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
+  // 同款兜底:只要不在「自己的出牌阶段」,就退出巧变选牌/选源/选目标模式。
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQiaobian();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
   (g.players||[]).forEach((p,i)=>{
@@ -578,7 +613,41 @@ function renderControls(g){
     const canSha = !g.shaUsed || hasCap(me,'unlimitedSha');
     if(zhangbaMode && !canSha) resetZhangba(); // 选牌途中次数变得不可用 → 安全退出,不卡在选牌模式
     if(duanliangMode && g.duanliangUsed) resetDuanliang(); // 选牌途中变得不可用(理论上不会,双重保险)
-    if(duanliangMode){
+    if(qiaobianMode && g.qiaobianUsed) resetQiaobian(); // 同款双重保险
+    if(qiaobianMode==='card'){
+      hint.textContent='【巧变】选择一张要弃置的手牌(任意牌都行)。';
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
+    } else if(qiaobianMode==='source'){
+      const sources=qiaobianSources(g);
+      hint.textContent='【巧变】选择要移动的装备/判定牌(也可以不移动,仅跳过这个阶段)。';
+      sources.forEach(s=>{
+        const b=document.createElement('button');
+        b.textContent=s.label; b.onclick=()=>{ qiaobianSrc=s; qiaobianMode='target'; render(g); };
+        c.appendChild(b);
+      });
+      const skip=document.createElement('button'); skip.className='primary';
+      skip.textContent='不移动,仅跳过阶段'; skip.onclick=()=>{ const idx=qiaobianCardIdx; resetQiaobian(); qiaoBian(idx, null); };
+      c.appendChild(skip);
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
+    } else if(qiaobianMode==='target'){
+      const targets=qiaobianTargets(g, qiaobianSrc);
+      hint.textContent='【巧变】把'+qiaobianSrc.label+'移动到哪位角色?'+(targets.length===0?'(没有合法的目的地)':'');
+      targets.forEach(t=>{
+        const b=document.createElement('button');
+        b.textContent='移动到 '+t.label; b.onclick=()=>{
+          const idx=qiaobianCardIdx, src=qiaobianSrc;
+          resetQiaobian();
+          qiaoBian(idx, {kind:src.kind, srcSeat:src.seat, slot:src.slot, idx:src.idx, dstSeat:t.seat});
+        };
+        c.appendChild(b);
+      });
+      const back=document.createElement('button'); back.className='ghost';
+      back.textContent='重新选来源'; back.onclick=()=>{ qiaobianSrc=null; qiaobianMode='source'; render(g); }; c.appendChild(back);
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
+    } else if(duanliangMode){
       // 断粮选牌+选目标模式:先选一张手牌(任意牌都行),再点上方一名其他玩家提交。提供取消。
       hint.textContent = duanliangCardIdx===null
         ? '【断粮】选择一张要弃置的手牌(任意牌都行)。'
@@ -604,17 +673,22 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    if(!zhangbaMode && !duanliangMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
+    if(!zhangbaMode && !duanliangMode && !qiaobianMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);
     }
     // 断粮入口:出牌阶段限一次,手牌非空才值得开这个入口(没牌可弃就跟没有技能一样不渲染)。
-    if(!zhangbaMode && !duanliangMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && (me.hand||[]).length>0){
+    if(!zhangbaMode && !duanliangMode && !qiaobianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && (me.hand||[]).length>0){
       const db=document.createElement('button'); db.className='ghost';
       db.textContent='发动【断粮】'; db.onclick=()=>{ selectedCardIdx=null; duanliangMode=true; duanliangCardIdx=null; render(g); }; c.appendChild(db);
     }
+    // 巧变入口:出牌阶段限一次,手牌非空才值得开这个入口。
+    if(!zhangbaMode && !duanliangMode && !qiaobianMode && selectedCardIdx===null && hasCap(me,'qiaobian') && !g.qiaobianUsed && (me.hand||[]).length>0){
+      const qb=document.createElement('button'); qb.className='ghost';
+      qb.textContent='发动【巧变】'; qb.onclick=()=>{ selectedCardIdx=null; qiaobianMode='card'; qiaobianCardIdx=null; qiaobianSrc=null; render(g); }; c.appendChild(qb);
+    }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQiaobian();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -654,6 +728,10 @@ function renderHand(g){
       // 骁果选牌模式:只有基本牌(杀/闪/桃)可选,其余牌照常灰显不可点
       usable = BASIC_CARDS.includes(card.name);
       if(usable) onClick=()=>{ resetXiaoguo(); respondXiaoguo(true, idx); };
+    } else if(g.phase==='play'&&myTurn&&qiaobianMode==='card'){
+      // 巧变选牌模式:任意一张牌都可以选(不检查牌名),选中后立即进入"选来源"阶段
+      usable=true;
+      onClick=()=>{ qiaobianCardIdx=idx; qiaobianMode='source'; render(g); };
     } else if(g.phase==='play'&&myTurn&&duanliangMode){
       // 断粮选牌模式:任意一张牌都可以选(不检查牌名),点= 切换选中(单选,再点别的牌会换选中)
       usable=true;

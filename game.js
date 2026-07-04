@@ -134,6 +134,8 @@ function normalize(g){
   if(typeof g.skipDraw!=='boolean') g.skipDraw=false;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
   if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
+  // 张郃【巧变】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
+  if(typeof g.qiaobianUsed!=='boolean') g.qiaobianUsed=false;
   return g;
 }
 function pushLog(log, msg){
@@ -649,6 +651,54 @@ function duanLiang(cardIdx, targetSeat){
     startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:{name:'兵粮寸断', virtual:true}});
     return g;
   });
+}
+// qiaoBian: 张郃【巧变】(简化版)——出牌阶段限一次,弃一张手牌、跳过这个阶段,可选把场上
+// 一张装备/延时锦囊移到另一名角色身上。全程只有张郃自己做选择,不需要任何其他玩家响应,
+// 不引入新的服务端阶段,客户端选好 move 后一次性提交,服务端独立重新校验(不信任客户端)。
+// move 为 null(不移动,仅跳过阶段)或 {kind:'equip'|'delay', srcSeat, slot(kind==='equip'时)
+// 或 idx(kind==='delay'时,src.delays 下标), dstSeat}。
+function qiaoBian(cardIdx, move){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!hasCap(me,'qiaobian') || g.qiaobianUsed) return g;
+    const card=me.hand[cardIdx];
+    if(!card) return g;
+    g.qiaobianUsed=true;
+    me.hand.splice(cardIdx,1);
+    g.discard.push(card);
+    g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【巧变】,跳过出牌阶段');
+    if(move) doQiaobianMove(g, move);
+    g.phase='discard';
+    return g;
+  });
+}
+// doQiaobianMove: 独立重新校验合法性后执行移动;不合法就安静跳过(巧变本身——弃牌+跳过
+// 阶段——已经生效,不受影响,只是这次没有移动发生)。装备移动触发 onLoseEquip(和拆装备/
+// 换装同性质,源玩家视为失去这件装备);延时锦囊移动不触发任何钩子(项目里没有对应的
+// "失去判定牌"钩子)。
+function doQiaobianMove(g, move){
+  const src=g.players[move.srcSeat], dst=g.players[move.dstSeat];
+  if(!src || !dst || !src.alive || !dst.alive || move.srcSeat===move.dstSeat) return;
+  if(move.kind==='equip'){
+    const slot=move.slot;
+    if(!EQUIP_SLOTS.includes(slot)) return;
+    const card=src.equips[slot];
+    if(!card || dst.equips[slot]) return; // 源槽为空,或目标同类型槽已被占用
+    src.equips[slot]=null;
+    dst.equips[slot]=card;
+    g.log=pushLog(g.log, '【巧变】把 '+src.name+' 的装备【'+card.name+'】移到了 '+dst.name);
+    triggerHook(g, move.srcSeat, 'onLoseEquip', {count:1});
+  } else if(move.kind==='delay'){
+    const idx=move.idx;
+    const card=(src.delays||[])[idx];
+    if(!card) return;
+    dst.delays = dst.delays || [];
+    if(dst.delays.some(c=>c.name===card.name)) return; // 目标判定区已有同名延时锦囊
+    src.delays.splice(idx,1);
+    dst.delays.push(card);
+    g.log=pushLog(g.log, '【巧变】把 '+src.name+' 判定区的【'+card.name+'】移到了 '+dst.name+' 的判定区');
+  }
 }
 // ===== 伤害 / 胜负 统一处理(为日后武将技能铺路) =====
 // dealDamage: 只负责扣血 + 死亡判定挂起 + 相关日志,不推进阶段、不判胜负。
@@ -1195,7 +1245,7 @@ function respondXiaoguoChoice(choice){
 // startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
 // 顺序:先声明轮到谁,再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
 function startTurn(g, seat){
-  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false;
+  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.qiaobianUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueDelayResolution(g, seat);
 }
