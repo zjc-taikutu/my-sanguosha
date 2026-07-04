@@ -72,6 +72,18 @@ function playConfirmMsg(g, actionId, card, targetSeat){
 const NAME_COLORS = ['#3B82C4','#2FBF71','#C4519B','#B8A22F','#8B5FBF','#D9713C','#4FA8A8','#C4C44F'];
 function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COLORS.length)%NAME_COLORS.length]; }
 
+// ===== 座位环形布局 第2步:槽位分配(仿张郃巧变等"纯前端现算"风格,不入库) =====
+// 只按"总座位数"(加入顺序,开局后不再变)算槽位,和"是否存活"无关——阵亡只变暗、不挪位置,
+// 避免消化"有人死了"这条信息的同时还要处理布局跳动。约定:从我起顺时针(回合顺序)第一个
+// 对手在我右侧('tr'),第二个在我左侧('tl');只有1个对手时居中在正上方('top')。
+// 座位数未来若超过3(SEATS 现在封顶3),多出的对手会退化堆进'tl',先不深做(现状用不到)。
+function seatSlot(n, mySeat, seatIdx){
+  if(seatIdx===mySeat) return 'me';
+  if(n<=2) return 'top';
+  const rel=((seatIdx-mySeat)%n+n)%n; // 1..n-1,越小=回合顺序上离我越近
+  return rel===1 ? 'tr' : 'tl';
+}
+
 // ===== 张郃【巧变】:动态扫描整个牌桌,现算"可选来源"/"合法目的地"清单(不预存进 pending) =====
 const EQUIP_SLOT_LABEL={ weapon:'武器', armor:'防具', plus1:'防御马', minus1:'进攻马' };
 // qiaobianSources: 所有存活玩家的非空装备槽 + 判定区里的每张延时锦囊,各生成一条来源记录。
@@ -127,10 +139,17 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetJiedao();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
+  const seatN=(g.players||[]).length;
+  // 容器 class 决定用哪套 grid-template(1个对手 vs 2个对手,形状不同,不能共用一套列模板);
+  // 这个数由"总座位数"决定,开局后不随存活人数变化,不会因为死亡触发布局重排。
+  // 注意:className 是整体覆盖,必须把静态 HTML 里原有的 'seats' 一起写回去,否则会把它冲掉,
+  // 导致 CSS 里 .seats.opp2 这种"要求同时命中两个 class"的选择器永远匹配不上(曾经在这里踩过)。
+  seatsEl.className = 'seats opp'+Math.max(1, seatN-1);
   (g.players||[]).forEach((p,i)=>{
     if(!p) return;
     const d=document.createElement('div');
-    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'');
+    const slot = (mySeat===null) ? 'top' : seatSlot(seatN, mySeat, i);
+    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+' slot-'+slot;
     const gen=getGeneral(p.general); // 可能为 null(大厅/旧数据)
     // 大厅(未开局)武将未定,不显示具体血条格数,避免"占位4格→开局3格"的误导跳变
     const hearts = g.started

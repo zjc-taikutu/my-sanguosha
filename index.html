@@ -69,15 +69,51 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
   .row>div{flex:1;min-width:120px;}
 
-  /* opponents */
-  .seats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
-  .seat{
-    flex:1;min-width:150px;background:#1d1916;border:1px solid var(--line);
-    border-radius:12px;padding:12px 14px;position:relative;
+  /* ===== 座位环形布局(第2步:JS 现算槽位 class + CSS 命名区域精确定位)=====
+     容器按"对手数量"(总座位数-1,开局后不随存活人数变化)分两套列模板:
+     .opp1(2人局,1个对手)只有居中的 top 一列;.opp2(3人局,2个对手)左右各一列(tl/tr),
+     不再像第1步那样用 auto-fit 让浏览器"猜"该分几列——现在 render.js 的 seatSlot() 已经
+     算好每个座位具体该在哪个命名区域,这里只需要把区域摆对位置。
+     阵亡不重排:.dead 只变暗/去色,不改变 grid 位置(避免布局跳动打断"有人死了"这条信息的消化)。 */
+  .seats{
+    display:grid;
+    align-items:start;
+    justify-items:center;
+    gap:14px;
+    margin-bottom:6px;
   }
+  .seats.opp1{
+    grid-template-columns:minmax(150px,320px);
+    grid-template-areas:"top" "me";
+  }
+  .seats.opp2{
+    grid-template-columns:minmax(120px,1fr) minmax(120px,1fr);
+    grid-template-areas:"tl tr" "me me";
+  }
+  .seat{
+    background:#1d1916;border:1px solid var(--line);
+    border-radius:12px;padding:12px 14px;position:relative;
+    width:100%;
+  }
+  .seat.slot-top{grid-area:top;}
+  .seat.slot-tl{grid-area:tl;}
+  .seat.slot-tr{grid-area:tr;}
   .seat.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;}
   .seat.dead{opacity:.45;filter:grayscale(.6);}
-  .seat.me{border-color:var(--cinnabar);}
+  .seat.me{
+    grid-area:me;
+    border-color:var(--cinnabar);
+    justify-self:center;
+    width:100%;
+    max-width:420px;
+    padding:16px 20px;
+  }
+  /* 自己的座位卡片信息量最大(武将+技能/体力/装备/攻击距离/手牌数),额外放大字号/间距,
+     减轻拥挤感——只影响 .me 这一张卡片,其他人的卡片(信息量本来就少)保持原尺寸不变。 */
+  .seat.me .nm{font-size:18px;}
+  .seat.me .hp{font-size:21px;margin-top:8px;}
+  .seat.me .equips{font-size:12.5px;gap:5px 16px;margin-top:8px;}
+  .seat.me .meta{font-size:13px;margin-top:6px;}
   .seat .nm{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;}
   .seat .tag{font-size:10px;letter-spacing:.1em;background:#332b24;color:var(--paper-dim);
     border-radius:4px;padding:1px 6px;}
@@ -141,6 +177,23 @@
   }
   .backs{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
   .backs .cardback{width:20px;height:28px;}
+
+  /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
+  @media (max-width:640px){
+    .seats{gap:8px;}
+    .seats.opp1{grid-template-columns:minmax(120px,1fr);}
+    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);}
+    .seat{padding:9px 10px;}
+    .seat.me{max-width:100%;padding:12px 14px;}
+    .seat .nm{font-size:14px;gap:6px;}
+    .seat.me .nm{font-size:15px;}
+    .hp{font-size:15px;letter-spacing:1px;}
+    .seat.me .hp{font-size:17px;}
+    .meta{font-size:11px;}
+    .seat.me .meta{font-size:11.5px;}
+    .equips{font-size:10px;gap:2px 8px;}
+    .seat.me .equips{font-size:11px;gap:3px 10px;}
+  }
 
   .hint{color:var(--gold);font-size:13px;text-align:center;margin-top:8px;min-height:18px;}
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
