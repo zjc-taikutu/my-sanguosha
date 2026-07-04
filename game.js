@@ -82,6 +82,8 @@ function normalize(g){
     p.equips = Object.assign(emptyEquips(), p.equips || {});
     // 濒死标记:纯 UI 提示用的布尔标量,和 alive 同款防御
     if(typeof p.dying!=='boolean') p.dying=false;
+    // 判定区(延时锦囊):和 p.hand 同款防御,Firebase 吞空数组
+    p.delays = p.delays || [];
   } });
   // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
   if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
@@ -228,7 +230,7 @@ function startGame(){
     g.players.forEach((p,i)=>{
       p.general = randomGeneralId();           // 随机分配武将(允许重复)
       p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false;
+      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.delays=[];
       p.equips = emptyEquips();                // 装备区:开局四槽全空
       drawN(g,i,START_HAND);
     });
@@ -312,6 +314,24 @@ const equipPlay = {
   effect:(g,me,card)=> equipCard(g,me,card)
 };
 Object.keys(EQUIPS).forEach(name=>{ CARD_PLAYS[name] = equipPlay; });
+// 延时锦囊:所有延时锦囊共用同一个 spec。noDiscard=true → 不立即进弃牌堆,效果是"放进目标判定区"
+// (真正放置动作在 startTrick 打开的无懈窗口问完之后,见 resolveTrick 的 DELAY_TRICKS 分支)。
+// allowSelf=true:playCard 默认拒绝自选目标,闪电这类"只能选自己"的延时锦囊需要放行这条限制。
+// 加新延时锦囊只需往 DELAY_TRICKS 加一项,下面的循环自动挂进 CARD_PLAYS(actionId=牌名)。
+const delayTrickPlay = {
+  target:true,
+  noDiscard:true,
+  allowSelf:true,
+  canPlay:(g,me,card)=> !!DELAY_TRICKS[card.name],
+  canTarget:(g,me,card,targetSeat)=> DELAY_TRICKS[card.name].onlySelf ? targetSeat===mySeat : targetSeat!==mySeat,
+  effect:(g,me,card,targetSeat)=>{
+    g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【'+card.name+'】');
+    // 打出时的无懈窗口:和决斗/顺手/拆桥同一套 startTrick,card 透传进 pending,
+    // 供 finishWuxieRound(被无懈挡下→进弃牌堆)/resolveTrick(未被挡下→放进判定区)使用。
+    startTrick(g, {trick:card.name, from:mySeat, to:targetSeat, card});
+  }
+};
+Object.keys(DELAY_TRICKS).forEach(name=>{ CARD_PLAYS[name] = delayTrickPlay; });
 // equipCard: 把已出手(被 playCard 从手牌 splice 出、且未进弃牌堆)的装备牌放进对应槽;同槽旧装备进弃牌堆。
 function equipCard(g, me, card){
   const slot = getEquip(card.name).slot;
@@ -361,7 +381,7 @@ function aoeEffect(g, me, card){
   g.log=pushLog(g.log, me.name+' 使用【'+card.name+'】');
   aoeAdvance(g, mySeat); // 从下家起结算第一个目标
 }
-// playCard: 统一校验(阶段/回合、取牌、身份+独特前置、目标存活非自己)、出牌入弃牌堆(noDiscard 的装备牌除外),再执行该牌独特效果。
+// playCard: 统一校验(阶段/回合、取牌、身份+独特前置、目标存活、默认非自己)、出牌入弃牌堆(noDiscard 的装备/延时锦囊除外),再执行该牌独特效果。
 function playCard(cardIdx, actionId, targetSeat){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
@@ -370,7 +390,8 @@ function playCard(cardIdx, actionId, targetSeat){
     const spec=CARD_PLAYS[actionId];
     if(!spec || !spec.canPlay(g,me,card)) return g;
     if(spec.target){
-      if(targetSeat===mySeat||!g.players[targetSeat]||!g.players[targetSeat].alive) return g;
+      // 默认拒绝自选目标;spec.allowSelf(如闪电这类延时锦囊)放行
+      if((targetSeat===mySeat && !spec.allowSelf) || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
       if(spec.canTarget && !spec.canTarget(g,me,card,targetSeat)) return g; // 额外目标限制(如杀的攻击距离)
     }
     me.hand.splice(cardIdx,1);
@@ -500,9 +521,7 @@ function finishDying(g, actuallyDied){
   if(checkWin(g)) return;
   if(resume.type==='duel'){
     if(!g.players[g.turn].alive){
-      const nxt=nextAlive(g, g.turn);
-      g.turn=nxt; g.phase='draw'; g.shaUsed=false;
-      g.log=pushLog(g.log, '轮到 '+g.players[nxt].name);
+      startTurn(g, nextAlive(g, g.turn));
     } else {
       g.phase='play';
     }
@@ -583,9 +602,7 @@ function duelResponse(useSha){
     if(checkWin(g)) return g;
     // 若回合玩家在决斗中阵亡,直接换下家;否则回合玩家继续出牌阶段
     if(!g.players[g.turn].alive){
-      const nxt=nextAlive(g, g.turn);
-      g.turn=nxt; g.phase='draw'; g.shaUsed=false;
-      g.log=pushLog(g.log, '轮到 '+g.players[nxt].name);
+      startTurn(g, nextAlive(g, g.turn));
     } else {
       g.phase='play';
     }
@@ -607,7 +624,9 @@ function nextAskee(g, from, current){
 // startTrick: 锦囊牌已进弃牌堆后调用。初始化无懈询问轮次(exclude/depth 见 openWuxieRound 注释),
 // 交给 openWuxieRound 统一处理"算下一个问谁/问不到人就直接收尾"。
 function startTrick(g, info){
-  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, exclude:info.from, depth:0};
+  // card(可选):延时锦囊的物理牌对象,随 pending 透传,供 finishWuxieRound(被挡下→弃牌堆)/
+  // resolveTrick(未被挡下→放进判定区)使用。普通锦囊不传,undefined 对它们是无操作。
+  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, card:info.card, exclude:info.from, depth:0};
   g.phase='wuxie';
   openWuxieRound(g);
 }
@@ -627,12 +646,19 @@ function openWuxieRound(g){
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
 function finishWuxieRound(g){
-  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to};
+  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card};
   const blocked = (g.pending.depth % 2)===1;
   if(g.pending.ctx==='aoe'){
     if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
   } else {
-    if(blocked){ g.pending=null; g.phase='play'; } else { resolveTrick(g, info); }
+    if(blocked){
+      // 延时锦囊的物理牌在 playCard 那步是 noDiscard(没进弃牌堆);被无懈挡下=放置失败,这里补进弃牌堆。
+      // 普通锦囊 info.card 恒为 undefined,这条判断对它们是无操作(它们的牌在 playCard 时已经进了弃牌堆)。
+      if(info.card) g.discard.push(info.card);
+      g.pending=null; g.phase='play';
+    } else {
+      resolveTrick(g, info);
+    }
   }
 }
 // resolveTrick: 锦囊真正生效。决斗 -> 进入 duel 弃杀;顺手/拆桥 -> 作用于"手牌+装备",
@@ -649,6 +675,15 @@ function resolveTrick(g, info){
     drawN(g, info.from, 2);
     g.pending=null; g.phase='play';
     g.log=pushLog(g.log, g.players[info.from].name+' 【无中生有】生效,摸两张牌');
+    return;
+  }
+  if(DELAY_TRICKS[info.trick]){
+    // 放置未被无懈挡下:延时锦囊的物理牌(info.card)进目标判定区,不进弃牌堆,不立即生效——
+    // 等目标下次回合开始时,resolveDelayTricks 才会翻判定、调具体牌的 effect、决定去向。
+    tgt.delays = tgt.delays || [];
+    tgt.delays.push(info.card);
+    g.pending=null; g.phase='play';
+    g.log=pushLog(g.log, tgt.name+' 的判定区放置了【'+info.trick+'】');
     return;
   }
   // 顺手/拆桥:目标手牌(隐藏,整体算1个"随机手牌"选项) + 每件已装备(公开,各1个具体选项)
@@ -848,11 +883,38 @@ function endTurn(){
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
     if(me.hand.length>me.hp && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
-    const nxt=nextAlive(g, mySeat);
-    g.turn=nxt; g.phase='draw'; g.shaUsed=false;
-    g.log=pushLog(g.log, '轮到 '+g.players[nxt].name);
+    startTurn(g, nextAlive(g, mySeat));
     return g;
   });
+}
+// startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
+// 顺序:先声明轮到谁,再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
+function startTurn(g, seat){
+  g.turn=seat; g.shaUsed=false;
+  g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
+  resolveDelayTricks(g, seat);
+  g.phase='draw';
+}
+// resolveDelayTricks: 按放置顺序(数组顺序,先放先判——真实规则里玩家可自选顺序,这里简化成固定顺序)
+// 结算判定区里的延时锦囊。地基阶段 DELAY_TRICKS 是空表,循环体不会跑到任何具体效果,只占好位置。
+// 判定阶段本身不开无懈窗口(简化,见 CLAUDE.md);effect 返回数字座位号 = 传给该玩家,否则进弃牌堆。
+function resolveDelayTricks(g, seat){
+  const p=g.players[seat];
+  while(p.delays && p.delays.length>0){
+    const card=p.delays[0];
+    const spec=DELAY_TRICKS[card.name];
+    if(!spec){ p.delays.shift(); g.discard.push(card); continue; } // 未知/尚未实现的延时锦囊,安全丢弃防卡死
+    const judgeCard=judge(g);
+    p.delays.shift();
+    const passTo=spec.effect(g, seat, judgeCard, card);
+    if(typeof passTo==='number' && g.players[passTo]){
+      g.players[passTo].delays = g.players[passTo].delays || [];
+      g.players[passTo].delays.push(card);
+      g.log=pushLog(g.log, '【'+card.name+'】传给了 '+g.players[passTo].name);
+    } else {
+      g.discard.push(card);
+    }
+  }
 }
 function newGame(){
   tx(g=>{
@@ -861,7 +923,7 @@ function newGame(){
     g.players.forEach(p=>{
       p.general = randomGeneralId();     // 每局重新随机换将
       p.maxHp = generalMaxHp(p.general); // 异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false;
+      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.delays=[];
       p.equips = emptyEquips();          // 装备区:每局重置为四槽全空
     });
     g.log=pushLog(g.log,'重置房间,可再次开始');

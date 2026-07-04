@@ -26,6 +26,13 @@ const EQUIPS = {
 };
 function getEquip(name){ return EQUIPS[name] || null; } // 唯一查询入口
 
+// ---------- 延时锦囊(判定区)地基:seam 已搭好,三张具体牌(闪电/乐不思蜀/兵粮寸断)尚未实现 ----------
+// name -> { onlySelf(是否只能对自己使用,如日后的闪电), effect(g,seat,judgeCard,card)=>可选返回"传给谁"的座位号 }。
+// effect 在 game.js 的 resolveDelayTricks(回合开始的判定阶段)里被调用:seat=正在结算判定区的玩家,
+// judgeCard=judge(g)翻出的判定牌,card=延时锦囊牌本身。返回数字座位号=传给该玩家(判定区各自独立,不进弃牌堆);
+// 不返回(undefined)=判定完就弃置。加新延时锦囊:1) 这里加一项 2) buildDeck 里加牌——和 EQUIPS 表同一套约定。
+const DELAY_TRICKS = {};
+
 // ---------- 武将定义表(数据结构 + 技能均已实现) ----------
 // 技能有两种表达:被动能力挂 caps(经 generalHasCap/generalCapValue 查),触发型挂 hooks(经 triggerHook 分发);统一经 getGeneral(id) 取用。
 const GENERALS = {

@@ -104,6 +104,8 @@ function render(g){
         (g.started&&gen?' · '+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+'</div>'+
       '<div class="hp">'+hearts+'</div>'+
       equipRow+
+      // 判定区(延时锦囊)最简显示:公开信息,直接写牌名;地基阶段先只做到"看得见",样式留给以后的 UI 大改版
+      (g.started && (p.delays||[]).length>0 ? '<div class="meta">判定区: '+p.delays.map(c=>escapeHtml(c.name)).join('、')+'</div>' : '')+
       // 自己的座位卡显示当前攻击距离(= attackRange,无武器默认1),让玩家一眼知道能打多远
       (i===mySeat && g.started ? '<div class="meta">攻击距离 '+attackRange(g,mySeat)+'</div>' : '')+
       '<div class="meta">手牌 '+(p.hand||[]).length+' 张</div>'+
