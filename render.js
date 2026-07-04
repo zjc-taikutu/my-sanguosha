@@ -206,21 +206,22 @@ function renderControls(g){
     return;
   }
   if(g.phase==='wuxie' && g.pending && g.pending.asking===mySeat){
-    // 两个按钮外观对所有人一致(都不 disable),旁观者无法判断本人是否持有无懈
+    // 此分支只在"被询问者本人"的客户端渲染(旁观者走下面 asking!==mySeat 分支,只看到等待提示、
+    // 完全不渲染这两个按钮),所以按钮是否 disable 只影响本人自己的界面,不会向其他人泄露谁有无懈。
+    const hasWuxie = me.hand.some(card=>card.name==='无懈可击');
     const b1=document.createElement('button'); b1.className='primary';
     b1.textContent='打出【无懈可击】';
+    b1.disabled = !hasWuxie;
     b1.onclick=()=>{
-      // 没牌:仅本地私下提示,不改共享状态、不公开、不自动跳过,仍停在本人这一轮
-      if(!me.hand.some(card=>card.name==='无懈可击')){
-        hint.textContent='你没有【无懈可击】,请点「不出」。';
-        return;
-      }
+      if(!hasWuxie) return; // 双重保险:即便被点到也不生效,不改共享状态
       respondWuxie(true);
     };
     const b2=document.createElement('button');
     b2.textContent='不出'; b2.onclick=()=>respondWuxie(false);
     c.appendChild(b1); c.appendChild(b2);
-    hint.textContent='是否对 '+g.players[g.pending.from].name+' 的【'+g.pending.trick+'】打出【无懈可击】?';
+    hint.textContent = hasWuxie
+      ? '是否对 '+g.players[g.pending.from].name+' 的【'+g.pending.trick+'】打出【无懈可击】?'
+      : '你没有【无懈可击】,只能点「不出」。';
     return;
   }
   if(g.phase==='wuxie' && g.pending){
