@@ -4,6 +4,37 @@ let selectedCardIdx = null;
 let zhangbaMode = false;
 let zhangbaPicks = [];          // 已选手牌下标,最多 2 个
 function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
+let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
+
+// ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
+function showConfirm(message, onOk, onCancel){
+  const m=document.getElementById('confirmModal');
+  m.innerHTML='<div class="confirm-panel"><div class="confirm-msg">'+escapeHtml(message)+'</div>'
+    +'<div class="confirm-btns"><button class="ghost" id="confirmCancel">取消</button><button class="primary" id="confirmOk">确定</button></div></div>';
+  m.classList.remove('hidden');
+  const hide=()=>{ m.classList.add('hidden'); m.innerHTML=''; };
+  m.querySelector('#confirmOk').onclick=()=>{ hide(); onOk(); };
+  m.querySelector('#confirmCancel').onclick=()=>{ hide(); onCancel(); };
+  m.onclick=(e)=>{ if(e.target===m){ hide(); onCancel(); } };
+}
+// confirmAndPlay: 出牌四类触发点(选目标/不选目标/丈八两张当杀)统一委托的包装——
+// 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
+// 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
+function confirmAndPlay(message, actionFn){
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); };
+  showConfirm(message,
+    ()=>{ cleanup(); actionFn(); },
+    ()=>{ cleanup(); render(currentG); });
+}
+// playConfirmMsg: 按牌类型生成确认文案。装备用"装备"(spec.noDiscard 是装备牌的统一标志,不硬编码牌名),
+// 其余用"使用";带目标的加上目标姓名;杀由非'杀'名的牌顶替时(赵云的闪)标注"当【杀】"。
+function playConfirmMsg(g, actionId, card, targetSeat){
+  const spec = CARD_PLAYS[actionId];
+  if(spec && spec.noDiscard) return '装备【'+card.name+'】？';
+  const label = (actionId==='杀' && card.name!=='杀') ? '【'+card.name+'】当【杀】' : '【'+card.name+'】';
+  if(spec && spec.target) return '对 '+g.players[targetSeat].name+' 使用'+label+'？';
+  return '使用'+label+'？';
+}
 
 // ---------- 按座位号分配固定颜色(纯身份标识,不参与任何游戏状态,不入库) ----------
 // 冷色调 8 色,按 hue 均匀展开(每两色间隔约24°),刻意避开现有语义色(朱红=--cinnabar/回合朱红框、
@@ -14,6 +45,7 @@ function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COL
 
 // ---------- render ----------
 function render(g){
+  currentG = g; // 供确认弹窗的取消回调异步刷新界面用(回调触发时早已不在 render 的调用栈里)
   if(!g){
     // room was deleted by someone (or doesn't exist) while we're in-game -> return to lobby
     if(!document.getElementById('game').classList.contains('hidden')){
@@ -84,10 +116,10 @@ function render(g){
       if(targetable){
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
-        d.onclick=()=>{ const idx=selectedCardIdx; selectedCardIdx=null;
+        d.onclick=()=>{ const idx=selectedCardIdx;
           const c0=((g.players[mySeat].hand||[])[idx])||{};
           const actionId = canUseAs(g.players[mySeat],c0,'杀') ? '杀' : c0.name; // 闪(赵云)→'杀'
-          playCard(idx, actionId, i); };
+          confirmAndPlay(playConfirmMsg(g, actionId, c0, i), ()=>playCard(idx, actionId, i)); };
       } else if(isShaSel && i!==mySeat && p.alive && !inRange){
         // 够不着:选了杀但超出攻击距离 —— 暗色点线 + 角标 + 悬浮说明,不可点
         d.style.outline='2px dotted #6b5b4d';
@@ -101,7 +133,8 @@ function render(g){
       if(i!==mySeat && p.alive && reach){
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
-        d.onclick=()=>{ const a=zhangbaPicks[0], b=zhangbaPicks[1]; resetZhangba(); playZhangbaSha(a, b, i); };
+        d.onclick=()=>{ const a=zhangbaPicks[0], b=zhangbaPicks[1];
+          confirmAndPlay('对 '+g.players[i].name+' 使用两张牌当【杀】？', ()=>playZhangbaSha(a, b, i)); };
       } else if(i!==mySeat && p.alive && !reach){
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
@@ -374,8 +407,7 @@ function renderHand(g){
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
         if(spec.target){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g);} ; } // 目标牌:点=选中
-        else if(actionId==='桃'){ onClick=()=>playCard(idx,'桃'); } // 桃:保持原样不清选中
-        else { onClick=()=>{ selectedCardIdx=null; playCard(idx, actionId); } ; } // 无中生有/AOE:清选中后出牌
+        else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
       }
     } else if(g.phase==='discard'&&myTurn&&me.hand.length>me.hp){
       usable=true; onClick=()=>discardCard(idx);

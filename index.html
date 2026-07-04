@@ -168,6 +168,13 @@
   .info-panel .item{margin:9px 0;font-size:15px;line-height:1.55;}
   .info-panel .item b{color:var(--gold);}
   a{color:var(--gold);}
+  /* 出牌确认弹窗:独立于 #infoModal,语义是"确定/取消"而非"关闭",不复用 info-panel 的按钮结构。 */
+  #confirmModal{position:fixed;inset:0;z-index:110;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
+  #confirmModal.hidden{display:none;}
+  .confirm-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:420px;width:100%;
+    padding:20px 18px;color:var(--paper);}
+  .confirm-panel .confirm-msg{font-size:17px;line-height:1.6;margin-bottom:16px;text-align:center;}
+  .confirm-panel .confirm-btns{display:flex;gap:10px;justify-content:center;}
   .hidden{display:none!important;}
 </style>
 </head>
@@ -175,6 +182,7 @@
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
 <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <div id="infoModal" class="hidden"></div>
+<div id="confirmModal" class="hidden"></div>
 <div class="wrap">
   <h1><span class="seal">杀</span>极简三国杀</h1>
   <div class="sub">三 人 联 机 · 第 一 版</div>
