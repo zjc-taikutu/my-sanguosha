@@ -99,10 +99,10 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
-  // 鬼才改判阶段:seat 应是数字座位号,judgeCard 应有 suit/rank,resume.type 应是字符串;任一不对就整体判无效
+  // 鬼才改判阶段:seat/asking 都应是数字座位号,judgeCard 应有 suit/rank,resume.kind 应是字符串;任一不对就整体判无效
   if(g.pending && g.pending.type==='guicai'){
     const d=g.pending;
-    if(typeof d.seat!=='number' || !d.judgeCard || !d.judgeCard.suit || !d.resume || typeof d.resume.type!=='string'){
+    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.judgeCard || !d.judgeCard.suit || !d.resume || typeof d.resume.kind!=='string'){
       g.pending=null; g.phase='play';
     }
   }
@@ -161,11 +161,7 @@ function tryBagua(g, seat, resumeInfo){
   g.log=pushLog(g.log, p.name+' 发动【八卦阵】');
   const card=judge(g);
   if(!card) return false; // 无牌可判,视为未发动
-  // 鬼才(简化版:仅"判定的这个人自己"是鬼才拥有者时可改判):有牌可换才值得开一个等待阶段
-  if(hasCap(p,'guicai') && (p.hand||[]).length>0){
-    startGuicai(g, seat, card, resumeInfo);
-    return 'pending';
-  }
+  if(maybeGuicai(g, seat, card, Object.assign({kind:'bagua'}, resumeInfo))==='pending') return 'pending';
   return finishBaguaColor(g, card);
 }
 // finishBaguaColor: 八卦阵判定的红黑结算(独立出来,供 tryBagua 直接判 和 finishGuicai 改判后判 共用)。
@@ -173,42 +169,80 @@ function finishBaguaColor(g, card){
   if(isRed(card)){ g.log=pushLog(g.log, '判定为红,视为打出【闪】'); return true; }
   g.log=pushLog(g.log, '判定为黑,【八卦阵】未生效'); return false;
 }
-// ===== 鬼才(简化版):判定牌亮出后,判定者本人(若是司马懿)可打出一张手牌替换 =====
-// 扩展路径(日后要支持"攻击范围内他人的判定"时):把 tryBagua 里"谁可以发起鬼才"的判断
-// 从"只查 hasCap(判定者,'guicai')"扩成"判定者自己(优先)+ 其余存活玩家里 hasCap(p,'guicai')
-// && canReachSha(g,p座位,判定者座位) 的人",按座位顺序逐个问(复用 nextAskee)。
-// startGuicai/respondGuicai/finishGuicai 这套挂起-恢复机制不用改,只改"问谁"的枚举。
-function startGuicai(g, seat, judgeCard, resume){
-  g.pending={type:'guicai', seat, judgeCard, resume};
-  g.phase='guicai';
-  g.log=pushLog(g.log, g.players[seat].name+' 判定得到 '+judgeCard.suit+rankText(judgeCard.rank)+',是否发动【鬼才】替换判定牌…');
+// ===== 鬼才:判定牌亮出后,判定者自己(优先)或攻击范围内的其他鬼才拥有者可打出一张手牌替换 =====
+// 四个判定场景(八卦阵 tryBagua、闪电/乐不思蜀/兵粮寸断的 processOneDelayCard)都调用 maybeGuicai,
+// 不各自实现一遍"谁可以发起"的枚举。
+// nextGuicaiAsker: 从 current 的下家起,按座位顺序找下一个"有资格发起鬼才"的候选人——
+// 存活 + hasCap(p,'guicai') + 手牌非空 + 攻击范围够到 judgedSeat(candidateSeat→judgedSeat
+// 距离<=candidateSeat攻击范围,用 canReachSha)。绕回 judgedSeat 即问完一圈,返回 null。
+function nextGuicaiAsker(g, judgedSeat, current){
+  const n=g.players.length;
+  for(let k=1;k<=n;k++){
+    const s=(current+k)%n;
+    if(s===judgedSeat) return null;
+    const p=g.players[s];
+    if(p && p.alive && hasCap(p,'guicai') && (p.hand||[]).length>0 && canReachSha(g, s, judgedSeat)) return s;
+  }
+  return null;
 }
-// respondGuicai: 仅 pending.seat 本人可响应。替换:打出一张手牌(移出手牌/进弃牌堆),用它的花色结算;
-// 不替换:直接用原判定牌结算。两种情况都调用 finishGuicai 走回原被打断的流程。
+// firstGuicaiAsker: 判定者自己优先(若有资格);否则按座位顺序找第一个有资格的其他人。
+function firstGuicaiAsker(g, judgedSeat){
+  const p=g.players[judgedSeat];
+  if(p && hasCap(p,'guicai') && (p.hand||[]).length>0) return judgedSeat;
+  return nextGuicaiAsker(g, judgedSeat, judgedSeat);
+}
+// maybeGuicai: 判定牌亮出后统一入口。若存在有资格的候选人,挂起询问,返回 'pending'
+// (调用方应立即 return,原有处理延后到 finishGuicai 按 resume.kind 接回);没人有资格
+// 则不挂起,返回 undefined,调用方照常用原判定牌结算。
+// resume 记录"改判解决后用哪条逻辑消费最终判定牌"——resume.kind:'bagua'(走 finishBaguaColor,
+// resume.type 是 sha/aoe,和原本一致)或 'delayJudge'(走 DELAY_TRICKS[trickName].effect)。
+function maybeGuicai(g, judgedSeat, card, resume){
+  const asker=firstGuicaiAsker(g, judgedSeat);
+  if(asker===null) return;
+  g.pending={type:'guicai', seat:judgedSeat, asking:asker, judgeCard:card, resume};
+  g.phase='guicai';
+  g.log=pushLog(g.log, g.players[judgedSeat].name+' 判定得到 '+card.suit+rankText(card.rank)+',询问 '+g.players[asker].name+' 是否发动【鬼才】替换判定牌…');
+  return 'pending';
+}
+// respondGuicai: 仅当前被问的人(pending.asking)可响应。替换:打出一张手牌(移出手牌/进弃牌堆),
+// 用它的花色/内容结算,调 finishGuicai;不替换:推进到下一个候选人(nextGuicaiAsker),
+// 问完一圈(绕回判定者自己)才用原判定牌结算——和无懈可击"不出→问下一个"同一套结构。
 function respondGuicai(useReplace, cardIdx){
   tx(g=>{
     if(g.phase!=='guicai'||!g.pending||g.pending.type!=='guicai') return g;
-    if(g.pending.seat!==mySeat) return g;
+    if(g.pending.asking!==mySeat) return g;
     const me=g.players[mySeat];
-    let finalCard=g.pending.judgeCard;
     if(useReplace){
       const card=(me.hand||[])[cardIdx];
       if(!card) return g; // 没这张牌:状态不变(双重保险)
       me.hand.splice(cardIdx,1);
       g.discard.push(card);
-      finalCard=card;
       g.log=pushLog(g.log, me.name+' 发动【鬼才】,打出'+card.suit+rankText(card.rank)+' 替换判定牌');
+      finishGuicai(g, card);
+      return g;
     }
-    finishGuicai(g, finalCard);
+    g.log=pushLog(g.log, me.name+'：不发动【鬼才】');
+    const nxt=nextGuicaiAsker(g, g.pending.seat, mySeat);
+    if(nxt===null){ finishGuicai(g, g.pending.judgeCard); return g; }
+    g.pending.asking=nxt;
+    g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否发动【鬼才】替换判定牌…');
     return g;
   });
 }
-// finishGuicai: 鬼才改判解决(不管替换与否)。按 resume.type 接回被 tryBagua 打断的那条流程的尾巴——
-// 和 finishDying 按 resume.type 分支接回一样的模式,原调用点的收尾代码原样搬到这里、只是延后执行。
+// finishGuicai: 鬼才改判解决(不管替换与否)。按 resume.kind 分派——
+// 'bagua':和原来一样走 finishBaguaColor + resume.type(sha/aoe)接回被打断的流程;
+// 'delayJudge':用最终判定牌重新调用该延时锦囊的 effect,处理去向后继续该玩家判定区剩余的牌。
 function finishGuicai(g, finalCard){
   const resume=g.pending.resume;
-  const red = finishBaguaColor(g, finalCard);
   g.pending=null;
+  if(resume.kind==='delayJudge'){
+    const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], finalCard, resume.card);
+    if(result==='pending') return; // 又挂起了(嵌套濒死或嵌套鬼才),g.pending/g.phase 已经被内部设好
+    continueDelayResolution(g, resume.seat);
+    return;
+  }
+  // kind==='bagua'
+  const red = finishBaguaColor(g, finalCard);
   if(resume.type==='sha'){
     if(red){ g.phase='play'; }
     else { g.pending={from:resume.from, to:resume.to}; g.phase='respond'; }
@@ -545,13 +579,12 @@ function finishDying(g, actuallyDied){
     aoeAdvance(g, seat);
   } else if(resume.type==='delay'){
     // 判定区的牌(如闪电)致命挂起后的接回:真死了就换到下一个存活玩家的回合(该玩家的判定阶段
-    // 从头 startTurn);被桃救回就继续处理这位玩家判定区剩余的牌(可能再次挂起,机制天然支持连续多张)。
+    // 从头 startTurn);被桃救回就继续处理这位玩家判定区剩余的牌(可能再次挂起濒死或鬼才,机制
+    // 天然支持连续多张——具体怎么继续、怎么区分"新挂起是濒死还是鬼才",见 continueDelayResolution)。
     if(!g.players[resume.seat].alive){
       startTurn(g, nextAlive(g, resume.seat));
-    } else if(resolveDelayTricks(g, resume.seat)==='pending'){
-      g.pending.resume={type:'delay', seat:resume.seat};
     } else {
-      enterDrawPhase(g);
+      continueDelayResolution(g, resume.seat);
     }
   } else { // 'sha' 及其它:攻击者继续出牌阶段
     g.phase='play';
@@ -915,17 +948,10 @@ function endTurn(){
 }
 // startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
 // 顺序:先声明轮到谁,再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
-// 注意:判定区里的牌(如闪电)可能造成伤害而挂起濒死流程(resolveDelayTricks 返回 'pending')——
-// 这时 phase 已经被 startDying 定成 'dying',这里绝不能再把它覆盖成 'draw',
-// 而是记 g.pending.resume={type:'delay',seat},濒死解决后由 finishDying 接回来继续处理剩余的牌。
 function startTurn(g, seat){
   g.turn=seat; g.shaUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
-  if(resolveDelayTricks(g, seat)==='pending'){
-    g.pending.resume={type:'delay', seat};
-    return;
-  }
-  enterDrawPhase(g);
+  continueDelayResolution(g, seat);
 }
 // enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。
@@ -950,30 +976,53 @@ function enterDrawPhase(g){
   }
 }
 // resolveDelayTricks: 按放置顺序(数组顺序,先放先判——真实规则里玩家可自选顺序,这里简化成固定顺序)
-// 结算判定区里的延时锦囊。地基阶段 DELAY_TRICKS 是空表,循环体不会跑到任何具体效果,只占好位置。
-// 判定阶段本身不开无懈窗口(简化,见 CLAUDE.md);effect 返回:数字座位号=传给该玩家,
-// 'pending'=这张牌的判定触发了濒死挂起(牌本身仍正常进弃牌堆,和是否致命无关),
-// 否则(undefined)=正常作废进弃牌堆。返回 'pending' 时立刻停止处理该玩家判定区剩余的牌,
-// 把控制权交还给调用方(startTurn/finishDying),不然会在 phase 已经是 'dying' 时继续瞎跑。
+// 结算判定区里的延时锦囊,逐张调用 processOneDelayCard;返回 'pending'(某张牌挂起了,可能是鬼才
+// 改判或效果内部触发的濒死,立刻停止处理该玩家判定区剩余的牌,把控制权交还给调用方)或 'done'。
 function resolveDelayTricks(g, seat){
   const p=g.players[seat];
   while(p.delays && p.delays.length>0){
-    const card=p.delays[0];
-    const spec=DELAY_TRICKS[card.name];
-    if(!spec){ p.delays.shift(); g.discard.push(card); continue; } // 未知/尚未实现的延时锦囊,安全丢弃防卡死
-    const judgeCard=judge(g);
-    p.delays.shift();
-    const result=spec.effect(g, seat, judgeCard, card);
-    if(typeof result==='number' && g.players[result]){
-      g.players[result].delays = g.players[result].delays || [];
-      g.players[result].delays.push(card);
-      g.log=pushLog(g.log, '【'+card.name+'】传给了 '+g.players[result].name);
-    } else {
-      g.discard.push(card); // 包括 undefined(正常作废)和 'pending'(挂起濒死,牌仍需归入弃牌堆)
-    }
-    if(result==='pending') return 'pending';
+    if(processOneDelayCard(g, seat)==='pending') return 'pending';
   }
   return 'done';
+}
+// processOneDelayCard: 处理 seat 判定区最前面一张牌——judge 翻牌 + 鬼才改判窗口(maybeGuicai)。
+// 若无人有资格发起鬼才,直接用原判定牌走 finishDelayCard;否则挂起,返回 'pending'(收尾延后到
+// finishGuicai 按 resume.kind==='delayJudge' 接回,用最终判定牌重新调 finishDelayCard)。
+function processOneDelayCard(g, seat){
+  const p=g.players[seat];
+  const card=p.delays[0];
+  const spec=DELAY_TRICKS[card.name];
+  if(!spec){ p.delays.shift(); g.discard.push(card); return 'done'; } // 未知/尚未实现的延时锦囊,安全丢弃防卡死
+  const judgeCard=judge(g);
+  p.delays.shift();
+  if(maybeGuicai(g, seat, judgeCard, {kind:'delayJudge', seat, trickName:card.name, card})==='pending') return 'pending';
+  return finishDelayCard(g, seat, spec, judgeCard, card);
+}
+// finishDelayCard: 用最终判定牌(可能被鬼才替换过)调用该延时锦囊的 effect,处理去向(传下家/弃置)。
+// 返回 'pending'=effect 内部触发了濒死(如闪电致命,牌本身仍正常进弃牌堆,和是否致命无关)、'done'=处理完毕。
+function finishDelayCard(g, seat, spec, finalCard, card){
+  const result=spec.effect(g, seat, finalCard, card);
+  if(typeof result==='number' && g.players[result]){
+    g.players[result].delays = g.players[result].delays || [];
+    g.players[result].delays.push(card);
+    g.log=pushLog(g.log, '【'+card.name+'】传给了 '+g.players[result].name);
+  } else {
+    g.discard.push(card);
+  }
+  return result==='pending' ? 'pending' : 'done';
+}
+// continueDelayResolution: resolveDelayTricks(g,seat) 结果的统一处理——startTurn、finishDying 的
+// resume.type==='delay' 分支、finishGuicai 的 resume.kind==='delayJudge' 分支三处共用。
+// 'pending' 时:若新挂起是濒死(g.pending.type==='dying'),它的 resume 只有 {type:'delay'}(因为
+// dealDamage/startDying 只知道 srcType 字符串,不知道 seat),这里补上 seat;若新挂起是鬼才
+// (g.pending.type==='guicai'),它的 resume 在 maybeGuicai 里已经自带完整信息,绝不能覆盖。
+// 'done' 时统一走 enterDrawPhase,进入(或跳过)摸牌阶段。
+function continueDelayResolution(g, seat){
+  if(resolveDelayTricks(g, seat)==='pending'){
+    if(g.pending.type==='dying') g.pending.resume={type:'delay', seat};
+    return;
+  }
+  enterDrawPhase(g);
 }
 function newGame(){
   tx(g=>{

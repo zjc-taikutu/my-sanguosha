@@ -62,7 +62,7 @@ function render(g){
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
-  if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.seat===mySeat)) resetGuicai();
+  if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
   (g.players||[]).forEach((p,i)=>{
@@ -185,8 +185,8 @@ function render(g){
     bn.innerHTML='<div class="banner">'+escapeHtml(text)+'</div>';
   }
   if(g.phase==='guicai'&&g.pending&&g.pending.type==='guicai'){
-    const p=g.players[g.pending.seat], jc=g.pending.judgeCard;
-    bn.innerHTML='<div class="banner">'+escapeHtml(p?p.name:'?')+' 判定得到 '+escapeHtml(jc.suit+rankText(jc.rank))+',是否发动【鬼才】替换判定牌…</div>';
+    const p=g.players[g.pending.seat], asker=g.players[g.pending.asking], jc=g.pending.judgeCard;
+    bn.innerHTML='<div class="banner">'+escapeHtml(p?p.name:'?')+' 判定得到 '+escapeHtml(jc.suit+rankText(jc.rank))+',正在询问 '+escapeHtml(asker?asker.name:'?')+' 是否发动【鬼才】替换判定牌…</div>';
   }
   if(g.phase==='dying'&&g.pending&&g.pending.type==='dying'){
     const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking];
@@ -294,10 +294,12 @@ function renderControls(g){
     hint.textContent='等待 '+asking+' 决定是否'+(g.pending.depth>0?'反制':'使用')+'【无懈可击】…';
     return;
   }
-  if(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.seat===mySeat){
+  if(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat){
     const jc=g.pending.judgeCard;
+    const isSelf = g.pending.seat===mySeat;
+    const judgedName = g.players[g.pending.seat].name;
     if(guicaiMode){
-      hint.textContent='【鬼才】选择一张手牌替换判定牌(当前判定：'+jc.suit+rankText(jc.rank)+')。';
+      hint.textContent='【鬼才】选择一张手牌替换'+(isSelf?'':'('+judgedName+' 的)')+'判定牌(当前判定：'+jc.suit+rankText(jc.rank)+')。';
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetGuicai(); render(g); }; c.appendChild(cb);
     } else {
@@ -305,15 +307,17 @@ function renderControls(g){
       b1.textContent='发动【鬼才】替换判定牌'; b1.onclick=()=>{ guicaiMode=true; render(g); };
       c.appendChild(b1);
       const b2=document.createElement('button');
-      b2.textContent='不替换'; b2.onclick=()=>respondGuicai(false);
+      b2.textContent='不发动'; b2.onclick=()=>respondGuicai(false);
       c.appendChild(b2);
-      hint.textContent='判定得到 '+jc.suit+rankText(jc.rank)+',是否发动【鬼才】用一张手牌替换?';
+      hint.textContent = isSelf
+        ? '你的判定得到 '+jc.suit+rankText(jc.rank)+',是否发动【鬼才】用一张手牌替换?'
+        : judgedName+' 判定得到 '+jc.suit+rankText(jc.rank)+',是否打出一张手牌替换 '+judgedName+' 的判定牌?';
     }
     return;
   }
   if(g.phase==='guicai' && g.pending && g.pending.type==='guicai'){
-    const p=g.players[g.pending.seat];
-    hint.textContent='等待 '+(p?p.name:'?')+' 决定是否发动【鬼才】替换判定牌…';
+    const asker=g.players[g.pending.asking];
+    hint.textContent='等待 '+(asker?asker.name:'?')+' 决定是否发动【鬼才】替换判定牌…';
     return;
   }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===mySeat){
@@ -463,7 +467,7 @@ function renderHand(g){
     el.innerHTML='<div class="corner">'+(cardFace(card)||card.name)+'</div><div class="big">'+card.name+'</div><div class="corner br">'+card.name+'</div>';
 
     let usable=false, onClick=null;
-    if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.seat===mySeat){
+    if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.asking===mySeat){
       // 鬼才选牌模式:任意一张手牌都可以打出替换判定牌
       usable=true; onClick=()=>respondGuicai(true, idx);
     } else if(g.phase==='play'&&myTurn&&zhangbaMode){
