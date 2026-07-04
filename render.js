@@ -519,7 +519,7 @@ function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml(
 // 帮助按钮:一次性列出全部牌/武将/装备说明
 function showHelp(){
   let html='<div class="sec">基础牌 / 锦囊</div>';
-  ['杀','闪','桃','决斗','无中生有','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀'].forEach(n=>{
+  ['杀','闪','桃','决斗','无中生有','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀','兵粮寸断'].forEach(n=>{
     html+='<div class="item"><b>'+escapeHtml(n)+'</b>：'+escapeHtml(getCardDesc(n))+'</div>'; });
   html+='<div class="sec">武将</div>';
   GENERAL_IDS.forEach(id=>{ const gg=getGeneral(id);

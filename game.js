@@ -110,6 +110,8 @@ function normalize(g){
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   // 乐不思蜀:跳过出牌阶段的标志位,和 p.dying 同款防御
   if(typeof g.skipPlay!=='boolean') g.skipPlay=false;
+  // 兵粮寸断:跳过摸牌阶段的标志位,和 g.skipPlay 同款防御
+  if(typeof g.skipDraw!=='boolean') g.skipDraw=false;
   return g;
 }
 function pushLog(log, msg){
@@ -549,7 +551,7 @@ function finishDying(g, actuallyDied){
     } else if(resolveDelayTricks(g, resume.seat)==='pending'){
       g.pending.resume={type:'delay', seat:resume.seat};
     } else {
-      g.phase='draw';
+      enterDrawPhase(g);
     }
   } else { // 'sha' 及其它:攻击者继续出牌阶段
     g.phase='play';
@@ -923,7 +925,29 @@ function startTurn(g, seat){
     g.pending.resume={type:'delay', seat};
     return;
   }
-  g.phase='draw';
+  enterDrawPhase(g);
+}
+// enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、
+// finishDying 的 delay-resume 分支都走这里,别各自重复判断)。
+// 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段进 play(不摸牌)。
+// 边界:若同一玩家判定区里兵粮寸断(跳摸牌)和乐不思蜀(跳出牌)同时命中——
+// skipDraw 一旦跳过 'draw' 阶段,doDraw 就永远不会被调用,乐不思蜀的 skipPlay
+// 会失去消费的机会(变成悬空标志,污染到下一回合)。所以这里一并检查 skipPlay:
+// 两者都命中时直接跳到 discard,两个标志同时清零,不留残留。
+function enterDrawPhase(g){
+  if(g.skipDraw){
+    g.skipDraw=false;
+    g.log=pushLog(g.log, g.players[g.turn].name+' 因【兵粮寸断】跳过摸牌阶段');
+    if(g.skipPlay){
+      g.skipPlay=false;
+      g.log=pushLog(g.log, g.players[g.turn].name+' 因【乐不思蜀】跳过出牌阶段');
+      g.phase='discard';
+    } else {
+      g.phase='play';
+    }
+  } else {
+    g.phase='draw';
+  }
 }
 // resolveDelayTricks: 按放置顺序(数组顺序,先放先判——真实规则里玩家可自选顺序,这里简化成固定顺序)
 // 结算判定区里的延时锦囊。地基阶段 DELAY_TRICKS 是空表,循环体不会跑到任何具体效果,只占好位置。
