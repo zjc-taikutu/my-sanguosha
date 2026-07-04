@@ -265,7 +265,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -451,6 +451,21 @@ function renderControls(g){
   }
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice'){
     hint.textContent='等待 '+g.players[g.pending.seatA].name+' 选择对 '+g.players[g.pending.seatB].name+' 使用【杀】或弃置武器…';
+    return;
+  }
+  if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
+    const picker=g.pending.order[g.pending.idx];
+    if(picker===mySeat){
+      g.pending.pool.forEach((card,pi)=>{
+        const b=document.createElement('button');
+        b.innerHTML='挑选 '+(cardFace(card)||card.name)+' '+card.name;
+        b.onclick=()=>wuguPick(pi);
+        c.appendChild(b);
+      });
+      hint.textContent='【五谷丰登】轮到你挑选,公共池:'+g.pending.pool.map(c=>(cardFace(c)||'')+c.name).join('、');
+    } else {
+      hint.textContent='【五谷丰登】等待 '+g.players[picker].name+' 挑选。公共池:'+g.pending.pool.map(c=>(cardFace(c)||'')+c.name).join('、');
+    }
     return;
   }
   if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen' && g.pending.seat===mySeat){
@@ -850,7 +865,7 @@ function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml(
 // 帮助按钮:一次性列出全部牌/武将/装备说明
 function showHelp(){
   let html='<div class="sec">基础牌 / 锦囊</div>';
-  ['杀','闪','桃','决斗','无中生有','桃园结义','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀','兵粮寸断','借刀杀人'].forEach(n=>{
+  ['杀','闪','桃','决斗','无中生有','桃园结义','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀','兵粮寸断','借刀杀人','五谷丰登'].forEach(n=>{
     html+='<div class="item"><b>'+escapeHtml(n)+'</b>：'+escapeHtml(getCardDesc(n))+'</div>'; });
   html+='<div class="sec">武将</div>';
   GENERAL_IDS.forEach(id=>{ const gg=getGeneral(id);

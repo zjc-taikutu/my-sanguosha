@@ -126,6 +126,14 @@ function normalize(g){
   if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
     g.pending=null; g.phase='play';
   }
+  // 五谷丰登挑选阶段:pool/order 是数组(Firebase 吞空数组),from/idx 应是数字;不对就整体判无效
+  if(g.pending && g.pending.type==='wugu'){
+    g.pending.pool = g.pending.pool || [];
+    g.pending.order = g.pending.order || [];
+    if(typeof g.pending.from!=='number' || typeof g.pending.idx!=='number' || g.pending.order.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
@@ -177,6 +185,18 @@ function judge(g){
   g.discard.push(card);
   g.log=pushLog(g.log, '判定牌:'+card.suit+rankText(card.rank));
   return card;
+}
+// revealPool: 批量亮出牌堆顶 n 张牌,只放进一个数组返回(不进弃牌堆、不记判定日志)——
+// 和 judge() 语义不同:judge 是"翻一张+立刻进弃牌堆+判定日志",这里是"批量暂存到公共池,
+// 之后可能被人挑走进手牌、也可能被无懈/挑完剩余弃入弃牌堆",五谷丰登专用。
+// 牌堆(含重洗弃牌堆)不够 n 张时,能亮多少算多少(不报错、不阻断)。
+function revealPool(g, n){
+  const pool=[];
+  for(let i=0;i<n;i++){
+    if(!ensureDeck(g)) break;
+    pool.push(g.deck.pop());
+  }
+  return pool;
 }
 // 八卦阵:被要求出【闪】时先判定,红=视为打出一张【闪】(免这次伤害),黑=判定失败(仍走正常出闪/受伤)。
 // 只在「需要出闪」的响应点调用。能力来源=装备(cap:'bagua'),走 hasCap 不硬编码牌名。
@@ -422,6 +442,16 @@ const CARD_PLAYS = {
       g.players.some((B,bi)=> B && B.alive && bi!==ai && canReachSha(g,ai,bi))
     ),
     effect:()=>{} // 正常流程不会走到这里(见上方注释);留空防御,避免万一被绕过时报错
+  },
+  '五谷丰登': {
+    target:false,
+    canPlay:(g,me,card)=> card.name==='五谷丰登',
+    effect:(g,me,card)=>{
+      const pool = revealPool(g, aliveCount(g));
+      g.log=pushLog(g.log, me.name+' 使用【五谷丰登】,亮出'+pool.length+'张牌');
+      // 目标是自己(占位,和无中生有/桃园结义同一模板):无懈抵消的是整体效果(亮出的牌全部作废进弃牌堆)
+      startTrick(g, {trick:'五谷丰登', from:mySeat, to:mySeat, pool});
+    }
   },
   '顺手牵羊': {
     target:true,
@@ -991,7 +1021,8 @@ function startTrick(g, info){
   // resolveTrick(未被挡下→放进判定区)使用。普通锦囊不传,undefined 对它们是无操作。
   // seatB(可选):借刀杀人的第二个目标(被杀/被弃武器的那个人),同样随 pending 透传给 resolveTrick;
   // 其它锦囊不传,undefined 对它们是无操作。
-  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, card:info.card, seatB:info.seatB, exclude:info.from, depth:0};
+  // pool(可选):五谷丰登亮出的公共池(牌数组),同样随 pending 透传;其它锦囊不传,undefined 无操作。
+  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, card:info.card, seatB:info.seatB, pool:info.pool, exclude:info.from, depth:0};
   g.phase='wuxie';
   openWuxieRound(g);
 }
@@ -1011,7 +1042,7 @@ function openWuxieRound(g){
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
 function finishWuxieRound(g){
-  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card, seatB:g.pending.seatB};
+  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card, seatB:g.pending.seatB, pool:g.pending.pool};
   const blocked = (g.pending.depth % 2)===1;
   if(g.pending.ctx==='aoe'){
     if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
@@ -1021,6 +1052,8 @@ function finishWuxieRound(g){
       // (虚拟牌如徐晃【断粮】用 discardOrVanish 直接消失,不进弃牌堆重新流通)。
       // 普通锦囊 info.card 恒为 undefined,这条判断对它们是无操作(它们的牌在 playCard 时已经进了弃牌堆)。
       if(info.card) discardOrVanish(g, info.card);
+      // 五谷丰登被无懈:亮出的公共池是真实牌(不是虚拟牌),整体弃入弃牌堆,谁都拿不到
+      if(info.pool && info.pool.length) g.discard.push(...info.pool);
       g.pending=null; g.phase='play';
     } else {
       resolveTrick(g, info);
@@ -1048,6 +1081,19 @@ function resolveTrick(g, info){
     g.players.forEach(p=>{ if(p && p.alive && p.hp<p.maxHp) p.hp++; });
     g.pending=null; g.phase='play';
     g.log=pushLog(g.log, g.players[info.from].name+' 【桃园结义】生效,所有存活角色回复1点体力');
+    return;
+  }
+  if(info.trick==='五谷丰登'){
+    // 挑选顺序:从发起者起,按存活玩家环形顺序转一整圈(此刻的存活人数可能已和亮牌时不同,
+    // 若无懈询问期间有人阵亡,顺序就按现在的存活玩家算——多出的牌在挑完一圈后兜底弃入弃牌堆,
+    // 不追求"重新分配"这种复杂规则,只保证不会卡死)。
+    if(!info.pool || info.pool.length===0){ g.pending=null; g.phase='play'; return; }
+    const order=[info.from];
+    let s=info.from;
+    for(let k=1;k<aliveCount(g);k++){ s=nextAlive(g,s); if(s===info.from) break; order.push(s); }
+    g.pending={type:'wugu', from:info.from, pool:info.pool.slice(), order, idx:0};
+    g.phase='wugu';
+    g.log=pushLog(g.log, '【五谷丰登】开始,从 '+g.players[info.from].name+' 起依次挑选');
     return;
   }
   if(info.trick==='借刀杀人'){
@@ -1124,6 +1170,29 @@ function pickResolve(choice){
       applyTrickOnEquip(g, info, choice);
     }
     g.pending=null; g.phase='play';
+    return g;
+  });
+}
+// wuguPick: 五谷丰登挑选。仅当前轮到的人(order[idx])可操作;poolIdx 校验后从公共池移除、
+// 收入挑选者手牌;idx 推进到下一个人,挑完一整圈(idx===order.length)则收尾——若池里还有剩牌
+// (阵亡导致 order 比 pool 短的边界),兜底弃入弃牌堆,不做复杂的重新分配,只保证不卡死。
+function wuguPick(poolIdx){
+  tx(g=>{
+    if(g.phase!=='wugu'||!g.pending||g.pending.type!=='wugu') return g;
+    const { order, idx, pool } = g.pending;
+    if(order[idx]!==mySeat) return g;
+    const card = pool[poolIdx];
+    if(!card) return g;
+    const me=g.players[mySeat];
+    pool.splice(poolIdx,1);
+    me.hand.push(card);
+    g.log=pushLog(g.log, me.name+' 从【五谷丰登】挑选了一张牌');
+    g.pending.idx = idx+1;
+    if(g.pending.idx>=order.length){
+      if(pool.length) g.discard.push(...pool); // 兜底:阵亡边界导致池未分完的剩牌
+      g.pending=null; g.phase='play';
+      g.log=pushLog(g.log, '【五谷丰登】结算完毕');
+    }
     return g;
   });
 }
