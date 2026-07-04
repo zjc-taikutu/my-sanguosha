@@ -9,7 +9,7 @@ function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
 // 冷色调 8 色,按 hue 均匀展开(每两色间隔约24°),刻意避开现有语义色(朱红=--cinnabar/回合朱红框、
 // 金=--gold/回合金框、玉=--jade)所在的暖色/绿色区间。按座位号(非名字)分配,同局内 SEATS(≤3)人
 // 或以后更多人,只要座位号不同、颜色必然不同——不会因为名字巧合 hash 到相近色。
-const NAME_COLORS = ['#4fac93','#4f9bab','#5586c4','#6b74c9','#8763c9','#a65fc0','#b95ba3','#b95b7e'];
+const NAME_COLORS = ['#3B82C4','#2FBF71','#C4519B','#B8A22F','#8B5FBF','#D9713C','#4FA8A8','#C4C44F'];
 function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COLORS.length)%NAME_COLORS.length]; }
 
 // ---------- render ----------
