@@ -5,6 +5,15 @@ let zhangbaMode = false;
 let zhangbaPicks = [];          // 已选手牌下标,最多 2 个
 function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
 
+// ---------- 按名字生成固定颜色(纯身份标识,不参与任何游戏状态,不入库) ----------
+// 冷色调 8 色,刻意避开现有语义色(朱红=--cinnabar/回合朱红框、金=--gold/回合金框、玉=--jade)
+const NAME_COLORS = ['#6f93b8','#8d72ad','#4f9d97','#6f7fc4','#b3768f','#5f9bb0','#9b72c4','#7a8fa0'];
+function nameColor(name){
+  let h=0;
+  for(let i=0;i<(name||'').length;i++){ h=(h*31+name.charCodeAt(i))|0; }
+  return NAME_COLORS[Math.abs(h)%NAME_COLORS.length];
+}
+
 // ---------- render ----------
 function render(g){
   if(!g){
@@ -50,7 +59,8 @@ function render(g){
         }).join('')+'</div>'
       : '';
     d.innerHTML =
-      '<div class="nm">'+escapeHtml(p.name)+
+      // 姓名文字染身份色(纯识别用,不碰边框/outline——那些留给回合/选目标等状态高亮,优先级更高)
+      '<div class="nm"><span style="color:'+nameColor(p.name)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
       '</div>'+
@@ -109,7 +119,10 @@ function render(g){
   const bn=document.getElementById('banner'); bn.innerHTML='';
   if(g.phase==='respond'&&g.pending){
     const to=g.players[g.pending.to].name, from=g.players[g.pending.from].name;
-    bn.innerHTML='<div class="banner">'+from+' 对 '+to+' 出【杀】,等待 '+to+' 响应…</div>';
+    // 攻击者/目标名字各自染身份色,一眼看出"谁在打谁"(仅此 banner;日志是纯文本存储,escapeHtml 后无法带色,不做)
+    const fromSpan='<span style="color:'+nameColor(from)+'">'+escapeHtml(from)+'</span>';
+    const toSpan='<span style="color:'+nameColor(to)+'">'+escapeHtml(to)+'</span>';
+    bn.innerHTML='<div class="banner">'+fromSpan+' 对 '+toSpan+' 出【杀】,等待'+toSpan+'响应…</div>';
   }
   if(g.phase==='duel'&&g.pending){
     const a=g.players[g.pending.active].name;
