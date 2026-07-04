@@ -106,6 +106,10 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 铁骑判定阶段:from/to 都应是数字座位号;不对就整体判无效
+  if(g.pending && g.pending.type==='tieqi' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
+    g.pending=null; g.phase='play';
+  }
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   // 乐不思蜀:跳过出牌阶段的标志位,和 p.dying 同款防御
@@ -239,6 +243,10 @@ function finishGuicai(g, finalCard){
     const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], finalCard, resume.card);
     if(result==='pending') return; // 又挂起了(嵌套濒死或嵌套鬼才),g.pending/g.phase 已经被内部设好
     continueDelayResolution(g, resume.seat);
+    return;
+  }
+  if(resume.kind==='tieqiJudge'){
+    finishTieqiJudge(g, resume.from, resume.to, finalCard);
     return;
   }
   // kind==='bagua'
@@ -398,6 +406,8 @@ function equipDist(player, slot){
 }
 // distance: from 到 to 的实际距离。环形最近间隔只在"存活玩家"上数(阵亡者不占座位),
 // 再叠加 目标的 +1马 与 from 的 -1马,最小为 1。
+// from 方向的 -1 修正有两个独立来源、直接相加:装备的 -1 马(equipDist)+ 马超【马术】
+// 这类"锁定技距离-1"的 cap(extraMinus1)——两者不互斥,同时存在时效果叠加。
 function distance(g, from, to){
   if(from===to) return 0;
   const alive = g.players.map((p,i)=>i).filter(i=>g.players[i] && g.players[i].alive);
@@ -406,7 +416,8 @@ function distance(g, from, to){
   if(pf<0 || pt<0 || m<2) return 1;                       // 兜底(出杀时双方必存活)
   const cw = (((pt-pf)%m)+m)%m;                            // 顺时针步数(只数存活者)
   const base = Math.min(cw, m-cw);                         // 顺/逆取较小
-  const d = base + equipDist(g.players[to],'plus1') + equipDist(g.players[from],'minus1');
+  const fromMinus1 = equipDist(g.players[from],'minus1') + (hasCap(g.players[from],'extraMinus1') ? -1 : 0);
+  const d = base + equipDist(g.players[to],'plus1') + fromMinus1;
   return Math.max(1, d);
 }
 // attackRange: 该玩家攻击距离 = 武器 range,无武器默认 1。
@@ -448,19 +459,65 @@ function playCard(cardIdx, actionId, targetSeat){
 }
 // resolveShaUse: 杀的结算入口(设次数标记 + pending + 进入响应阶段 + 日志)。
 // 普通杀(CARD_PLAYS['杀'])和丈八蛇矛两张当杀共用,保证响应/距离/次数口径不分叉。
+// 马超【铁骑】:攻击者可选是否发动判定,红色则这张杀不可被闪抵消——这是攻击者自己的选择,
+// 需要挂起等一次响应,原来"设好 pending 后直接走青釭剑/八卦阵/进响应阶段"这段尾巴抽成
+// continueShaAfterTieqi,不管有没有铁骑、发不发动、判红判黑,最终都走这同一条尾巴。
 function resolveShaUse(g, me, targetSeat, usedAs){
-  g.shaUsed=true; g.pending={from:mySeat,to:targetSeat};
+  g.shaUsed=true;
   g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' '+usedAs);
+  if(hasCap(me,'tieqi')){
+    g.pending={type:'tieqi', from:mySeat, to:targetSeat};
+    g.phase='tieqi';
+    g.log=pushLog(g.log, '是否发动【铁骑】进行判定…');
+    return;
+  }
+  continueShaAfterTieqi(g, mySeat, targetSeat, false);
+}
+// continueShaAfterTieqi: 铁骑判定阶段结束后(或从一开始就没有铁骑)接回杀的原有流程。
+// noShan 为真(铁骑判定为红)时,这张杀不可被闪抵消——包括八卦阵这类"视为闪"的效果,
+// 所以直接跳过 tryBagua(根本不给判定机会),进响应阶段但 pending.noShan 标记会挡掉出闪。
+function continueShaAfterTieqi(g, from, to, noShan){
+  const me=g.players[from];
+  g.pending={from, to, noShan};
+  if(noShan){
+    g.log=pushLog(g.log, '【铁骑】判定为红,此【杀】不可被【闪】抵消(含视为闪的效果)');
+    g.phase='respond';
+    return;
+  }
   // 青釭剑:攻击者无视目标防具 → 跳过目标八卦阵判定(八卦阵公开,记一条日志便于阅读)
   if(hasCap(me,'ignoreArmor')){
-    if(hasCap(g.players[targetSeat],'bagua')) g.log=pushLog(g.log, me.name+' 的【青釭剑】无视了 '+g.players[targetSeat].name+' 的防具');
+    if(hasCap(g.players[to],'bagua')) g.log=pushLog(g.log, me.name+' 的【青釭剑】无视了 '+g.players[to].name+' 的防具');
     g.phase='respond'; return; // 目标只能正常出闪/受伤
   }
   // 八卦阵:被杀需出闪前先判定,红=视为出闪 → 杀被抵消,攻击者继续出牌(与正常出闪同结果)
-  const r=tryBagua(g, targetSeat, {type:'sha', from:mySeat, to:targetSeat});
+  const r=tryBagua(g, to, {type:'sha', from, to});
   if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
   if(r){ g.pending=null; g.phase='play'; return; }
   g.phase='respond'; // 黑/无八卦阵:照常进响应,等目标出闪或受伤
+}
+// respondTieqi: 仅攻击者(pending.from)可响应。不发动:直接接原尾巴(noShan=false)。
+// 发动:judge() 翻牌(可被鬼才改判,和其它判定场景同一套 maybeGuicai),红则 noShan=true。
+function respondTieqi(activate){
+  tx(g=>{
+    if(g.phase!=='tieqi'||!g.pending||g.pending.type!=='tieqi'||g.pending.from!==mySeat) return g;
+    const from=g.pending.from, to=g.pending.to;
+    if(!activate){
+      g.log=pushLog(g.log, g.players[from].name+'：不发动【铁骑】');
+      continueShaAfterTieqi(g, from, to, false);
+      return g;
+    }
+    const card=judge(g);
+    if(!card){ continueShaAfterTieqi(g, from, to, false); return g; } // 无牌可判,视为未发动
+    if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to})==='pending') return g;
+    finishTieqiJudge(g, from, to, card);
+    return g;
+  });
+}
+// finishTieqiJudge: 铁骑判定结算(不管是否被鬼才改判过)。红=不可被闪抵消,黑=无事发生。
+function finishTieqiJudge(g, from, to, card){
+  const red=isRed(card);
+  g.log=pushLog(g.log, g.players[from].name+' 发动【铁骑】,判定为'+(red?'红':'黑'));
+  continueShaAfterTieqi(g, from, to, red);
 }
 // playZhangbaSha: 丈八蛇矛特效——任意两张手牌当一个【杀】。与 playCard 平级(playCard 只吃单张)。
 // 次数/距离/目标响应与普通杀完全一致(共用 resolveShaUse);仅"凑杀"方式不同。
@@ -899,6 +956,7 @@ function respondShan(useShan){
     if(g.phase!=='respond'||!g.pending||g.pending.to!==mySeat) return g;
     const me=g.players[mySeat]; const attacker=g.players[g.pending.from];
     if(useShan){
+      if(g.pending.noShan) return g; // 马超【铁骑】判红:此杀不可被闪抵消,服务端兜底(UI 本就不该渲染这个按钮)
       const idx=findUsableAs(me.hand,me,'闪'); // 龙胆:杀可当闪,优先用本名闪
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
