@@ -12,6 +12,12 @@ function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
 let tuxiMode = false;
 let tuxiPicks = [];              // 已选目标座位号,最多 2 个
 function resetTuxi(){ tuxiMode=false; tuxiPicks=[]; }
+// 徐晃【断粮】:出牌阶段点"发动断粮"进选牌+选目标模式(纯客户端,不入库)。
+// 先点一张手牌(任意牌都行,不检查牌名)选中,再点一名其他玩家座位提交;和普通出牌选目标
+// 的交互很像,但不走 CARD_PLAYS/playCard(断粮不认牌名,是独立的技能动作)。
+let duanliangMode = false;
+let duanliangCardIdx = null;    // 已选中要弃置的手牌下标(单选)
+function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
@@ -29,7 +35,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); };
   showConfirm(message,
     ()=>{ cleanup(); actionFn(); },
     ()=>{ cleanup(); render(currentG); });
@@ -70,6 +76,8 @@ function render(g){
   if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
   // 同款兜底:只要不在「自己的摸牌阶段」,就退出突袭选目标模式。
   if(!(g.started && g.phase==='draw' && g.turn===mySeat)) resetTuxi();
+  // 同款兜底:只要不在「自己的出牌阶段」,就退出断粮选牌+选目标模式。
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetDuanliang();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
   (g.players||[]).forEach((p,i)=>{
@@ -158,6 +166,13 @@ function render(g){
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
         d.innerHTML += '<span class="tag" style="position:absolute;top:8px;right:8px;background:#3a2f28">够不着</span>';
       }
+    }
+    // 徐晃【断粮】选目标:已选中一张要弃的牌后,点一名其他存活玩家提交(无距离限制)。
+    if(duanliangMode && duanliangCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
+      d.style.cursor='pointer';
+      d.style.outline='2px dashed var(--cinnabar-bright)';
+      d.onclick=()=>{ const idx=duanliangCardIdx;
+        confirmAndPlay('弃置一张牌,对 '+g.players[i].name+' 发动【断粮】(视为使用【兵粮寸断】)？', ()=>duanLiang(idx, i)); };
     }
     // 张辽【突袭】选目标模式:点存活的其他玩家 = 切换选中/取消,上限 min(2,其他存活玩家数)。
     if(tuxiMode && g.phase==='draw' && g.turn===mySeat && i!==mySeat && p.alive){
@@ -512,7 +527,15 @@ function renderControls(g){
     // 本回合是否还能出杀(与单张杀 canPlay 同口径:未出过 或 有无限杀)
     const canSha = !g.shaUsed || hasCap(me,'unlimitedSha');
     if(zhangbaMode && !canSha) resetZhangba(); // 选牌途中次数变得不可用 → 安全退出,不卡在选牌模式
-    if(zhangbaMode){
+    if(duanliangMode && g.duanliangUsed) resetDuanliang(); // 选牌途中变得不可用(理论上不会,双重保险)
+    if(duanliangMode){
+      // 断粮选牌+选目标模式:先选一张手牌(任意牌都行),再点上方一名其他玩家提交。提供取消。
+      hint.textContent = duanliangCardIdx===null
+        ? '【断粮】选择一张要弃置的手牌(任意牌都行)。'
+        : '已选中要弃置的牌,点上方一名其他玩家,视为对其使用【兵粮寸断】(或点牌取消选中)。';
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetDuanliang(); render(g); }; c.appendChild(cb);
+    } else if(zhangbaMode){
       // 丈八选牌模式:选两张手牌当杀,再点目标。提供取消。
       hint.textContent='丈八蛇矛:选两张手牌当作【杀】(已选 '+zhangbaPicks.length+'/2)'+(zhangbaPicks.length===2?'，攻击距离 '+attackRange(g,mySeat)+'，点上方一名对手作为目标。':'。');
       const cb=document.createElement('button'); cb.className='ghost';
@@ -531,12 +554,17 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    if(!zhangbaMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
+    if(!zhangbaMode && !duanliangMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);
     }
+    // 断粮入口:出牌阶段限一次,手牌非空才值得开这个入口(没牌可弃就跟没有技能一样不渲染)。
+    if(!zhangbaMode && !duanliangMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && (me.hand||[]).length>0){
+      const db=document.createElement('button'); db.className='ghost';
+      db.textContent='发动【断粮】'; db.onclick=()=>{ selectedCardIdx=null; duanliangMode=true; duanliangCardIdx=null; render(g); }; c.appendChild(db);
+    }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -564,13 +592,18 @@ function renderHand(g){
     const cls = card.name==='杀'?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':card.name==='顺手牵羊'?'steal':'trick';
     // 过河拆桥沿用统一锦囊样式 trick
     const picked = zhangbaMode && zhangbaPicks.includes(idx);
-    el.className='card '+cls+((selectedCardIdx===idx||picked)?' selected':'');
+    const duanliangPicked = duanliangMode && duanliangCardIdx===idx;
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked)?' selected':'');
     el.innerHTML='<div class="corner">'+(cardFace(card)||card.name)+'</div><div class="big">'+card.name+'</div><div class="corner br">'+card.name+'</div>';
 
     let usable=false, onClick=null;
     if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.asking===mySeat){
       // 鬼才选牌模式:任意一张手牌都可以打出替换判定牌
       usable=true; onClick=()=>respondGuicai(true, idx);
+    } else if(g.phase==='play'&&myTurn&&duanliangMode){
+      // 断粮选牌模式:任意一张牌都可以选(不检查牌名),点= 切换选中(单选,再点别的牌会换选中)
+      usable=true;
+      onClick=()=>{ duanliangCardIdx = (duanliangCardIdx===idx?null:idx); render(g); };
     } else if(g.phase==='play'&&myTurn&&zhangbaMode){
       // 丈八选牌模式:点牌 = toggle 到 zhangbaPicks(任意牌均可,最多2张;已满则仅允许取消已选)
       usable = picked || zhangbaPicks.length<2;

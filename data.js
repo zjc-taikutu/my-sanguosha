@@ -118,6 +118,9 @@ const GENERALS = {
   huangzhong:    { id:'huangzhong',    name:'黄忠',   maxHp:4, skill:'烈弓',
     desc:'出牌阶段,你使用【杀】指定一名角色为目标后,若该角色手牌数≥你的体力值,或手牌数≤你的攻击范围,你可以令此【杀】不可被【闪】抵消。',
     caps:{ liegong:true } },
+  xuhuang:       { id:'xuhuang',       name:'徐晃',   maxHp:4, skill:'断粮',
+    desc:'出牌阶段限一次,你可以弃置一张牌,然后选择一名其他角色,视为你对其使用一张【兵粮寸断】。',
+    caps:{ duanliang:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

@@ -124,6 +124,8 @@ function normalize(g){
   if(typeof g.skipPlay!=='boolean') g.skipPlay=false;
   // 兵粮寸断:跳过摸牌阶段的标志位,和 g.skipPlay 同款防御
   if(typeof g.skipDraw!=='boolean') g.skipDraw=false;
+  // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
+  if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
   return g;
 }
 function pushLog(log, msg){
@@ -607,6 +609,27 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     return g;
   });
 }
+// duanLiang: 徐晃【断粮】——出牌阶段限一次,弃置任意一张手牌,视为对一名其他角色使用了一张
+// 【兵粮寸断】。不需要真的持有兵粮寸断这张牌:弃掉的牌是真实牌、正常进弃牌堆;判定区里放的
+// 是临时构造的虚拟对象 {name:'兵粮寸断', virtual:true},走和真实兵粮寸断完全一样的
+// startTrick/resolveTrick/回合开始判定流程(可被无懈可击抵消),虚拟牌离场时经 discardOrVanish
+// 直接消失,不会进弃牌堆重新流通、污染牌堆构成。真实规则断粮无距离限制,这里不做距离校验。
+function duanLiang(cardIdx, targetSeat){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!hasCap(me,'duanliang') || g.duanliangUsed) return g;
+    const card=me.hand[cardIdx];
+    if(!card) return g;
+    if(targetSeat===mySeat || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
+    g.duanliangUsed=true;
+    me.hand.splice(cardIdx,1);
+    g.discard.push(card); // 弃置的牌是真实牌,正常进弃牌堆
+    g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【断粮】,视为对 '+g.players[targetSeat].name+' 使用了一张【兵粮寸断】');
+    startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:{name:'兵粮寸断', virtual:true}});
+    return g;
+  });
+}
 // ===== 伤害 / 胜负 统一处理(为日后武将技能铺路) =====
 // dealDamage: 只负责扣血 + 死亡判定挂起 + 相关日志,不推进阶段、不判胜负。
 // 返回值语义:是否已挂起进入濒死流程(true = 调用方应立即 return,后续收尾延后到 finishDying 处理;
@@ -834,9 +857,10 @@ function finishWuxieRound(g){
     if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
   } else {
     if(blocked){
-      // 延时锦囊的物理牌在 playCard 那步是 noDiscard(没进弃牌堆);被无懈挡下=放置失败,这里补进弃牌堆。
+      // 延时锦囊的物理牌在 playCard 那步是 noDiscard(没进弃牌堆);被无懈挡下=放置失败,这里补进弃牌堆
+      // (虚拟牌如徐晃【断粮】用 discardOrVanish 直接消失,不进弃牌堆重新流通)。
       // 普通锦囊 info.card 恒为 undefined,这条判断对它们是无操作(它们的牌在 playCard 时已经进了弃牌堆)。
-      if(info.card) g.discard.push(info.card);
+      if(info.card) discardOrVanish(g, info.card);
       g.pending=null; g.phase='play';
     } else {
       resolveTrick(g, info);
@@ -1073,7 +1097,7 @@ function endTurn(){
 // startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
 // 顺序:先声明轮到谁,再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
 function startTurn(g, seat){
-  g.turn=seat; g.shaUsed=false;
+  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueDelayResolution(g, seat);
 }
@@ -1131,9 +1155,15 @@ function finishDelayCard(g, seat, spec, finalCard, card){
     g.players[result].delays.push(card);
     g.log=pushLog(g.log, '【'+card.name+'】传给了 '+g.players[result].name);
   } else {
-    g.discard.push(card);
+    discardOrVanish(g, card);
   }
   return result==='pending' ? 'pending' : 'done';
+}
+// discardOrVanish: 延时锦囊的牌"离场"时的统一去向——真实牌进弃牌堆;虚拟牌(card.virtual,
+// 如徐晃【断粮】"视为使用一张兵粮寸断"临时构造的牌)用完即焚,直接消失、不进弃牌堆,
+// 否则会被 ensureDeck 当真牌重新洗回牌堆,凭空多出一张不在 buildDeck 统计里的牌、污染牌堆构成。
+function discardOrVanish(g, card){
+  if(!card.virtual) g.discard.push(card);
 }
 // continueDelayResolution: resolveDelayTricks(g,seat) 结果的统一处理——startTurn、finishDying 的
 // resume.type==='delay' 分支、finishGuicai 的 resume.kind==='delayJudge' 分支三处共用。
