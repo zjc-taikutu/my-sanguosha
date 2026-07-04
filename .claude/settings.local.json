@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(node *)",
-      "Bash(node --check render.js)"
+      "Bash(node --check render.js)",
+      "Bash(git fetch *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }

@@ -187,21 +187,27 @@ function renderControls(g){
   }
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
     const hasShan = me.hand.some(card=>canUseAs(me,card,'闪'));
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='出【闪】'; b1.disabled=!hasShan; b1.onclick=()=>respondShan(true);
+    if(hasShan){
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='出【闪】'; b1.onclick=()=>respondShan(true);
+      c.appendChild(b1);
+    }
     const b2=document.createElement('button');
     b2.textContent='不闪（受伤）'; b2.onclick=()=>respondShan(false);
-    c.appendChild(b1); c.appendChild(b2);
+    c.appendChild(b2);
     if(!hasShan) hint.textContent='你没有【闪】,只能受到伤害。';
     return;
   }
   if(g.phase==='duel' && g.pending && g.pending.active===mySeat){
     const hasSha=me.hand.some(card=>canUseAs(me,card,'杀'));
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='打出【杀】'; b1.disabled=!hasSha; b1.onclick=()=>duelResponse(true);
+    if(hasSha){
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='打出【杀】'; b1.onclick=()=>duelResponse(true);
+      c.appendChild(b1);
+    }
     const b2=document.createElement('button');
     b2.textContent='认输（受伤）'; b2.onclick=()=>duelResponse(false);
-    c.appendChild(b1); c.appendChild(b2);
+    c.appendChild(b2);
     if(!hasSha) hint.textContent='你没有【杀】,只能受到伤害。';
     return;
   }
@@ -232,11 +238,14 @@ function renderControls(g){
   if(g.phase==='aoeResp' && g.pending && g.pending.to===mySeat){
     const need=g.pending.need;
     const hasCard=me.hand.some(card=>canUseAs(me,card,need));
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='打出【'+need+'】'; b1.disabled=!hasCard; b1.onclick=()=>aoeRespond(true);
+    if(hasCard){
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='打出【'+need+'】'; b1.onclick=()=>aoeRespond(true);
+      c.appendChild(b1);
+    }
     const b2=document.createElement('button');
     b2.textContent='不出（受伤）'; b2.onclick=()=>aoeRespond(false);
-    c.appendChild(b1); c.appendChild(b2);
+    c.appendChild(b2);
     if(!hasCard) hint.textContent='你没有【'+need+'】,只能受到伤害。';
     return;
   }
