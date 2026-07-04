@@ -92,6 +92,13 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 鬼才改判阶段:seat 应是数字座位号,judgeCard 应有 suit/rank,resume.type 应是字符串;任一不对就整体判无效
+  if(g.pending && g.pending.type==='guicai'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !d.judgeCard || !d.judgeCard.suit || !d.resume || typeof d.resume.type!=='string'){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   return g;
@@ -133,15 +140,77 @@ function judge(g){
   return card;
 }
 // 八卦阵:被要求出【闪】时先判定,红=视为打出一张【闪】(免这次伤害),黑=判定失败(仍走正常出闪/受伤)。
-// 只在「需要出闪」的响应点调用;返回是否判定成功(红)。能力来源=装备(cap:'bagua'),走 hasCap 不硬编码牌名。
-function tryBagua(g, seat){
+// 只在「需要出闪」的响应点调用。能力来源=装备(cap:'bagua'),走 hasCap 不硬编码牌名。
+// 返回三态:true=判定成功(红)、false=判定失败(黑/无牌)、'pending'=挂起等待【鬼才】改判决定
+// (调用方收到 'pending' 应立即 return,收尾延后到 finishGuicai 处理,和 dealDamage 的濒死挂起同一套路)。
+// resumeInfo 由调用方传入,记录"改判解决后该接回哪条被打断的流程"(见 finishGuicai)。
+function tryBagua(g, seat, resumeInfo){
   const p=g.players[seat];
   if(!p || !p.alive || !hasCap(p,'bagua')) return false;
   g.log=pushLog(g.log, p.name+' 发动【八卦阵】');
   const card=judge(g);
   if(!card) return false; // 无牌可判,视为未发动
+  // 鬼才(简化版:仅"判定的这个人自己"是鬼才拥有者时可改判):有牌可换才值得开一个等待阶段
+  if(hasCap(p,'guicai') && (p.hand||[]).length>0){
+    startGuicai(g, seat, card, resumeInfo);
+    return 'pending';
+  }
+  return finishBaguaColor(g, card);
+}
+// finishBaguaColor: 八卦阵判定的红黑结算(独立出来,供 tryBagua 直接判 和 finishGuicai 改判后判 共用)。
+function finishBaguaColor(g, card){
   if(isRed(card)){ g.log=pushLog(g.log, '判定为红,视为打出【闪】'); return true; }
   g.log=pushLog(g.log, '判定为黑,【八卦阵】未生效'); return false;
+}
+// ===== 鬼才(简化版):判定牌亮出后,判定者本人(若是司马懿)可打出一张手牌替换 =====
+// 扩展路径(日后要支持"攻击范围内他人的判定"时):把 tryBagua 里"谁可以发起鬼才"的判断
+// 从"只查 hasCap(判定者,'guicai')"扩成"判定者自己(优先)+ 其余存活玩家里 hasCap(p,'guicai')
+// && canReachSha(g,p座位,判定者座位) 的人",按座位顺序逐个问(复用 nextAskee)。
+// startGuicai/respondGuicai/finishGuicai 这套挂起-恢复机制不用改,只改"问谁"的枚举。
+function startGuicai(g, seat, judgeCard, resume){
+  g.pending={type:'guicai', seat, judgeCard, resume};
+  g.phase='guicai';
+  g.log=pushLog(g.log, g.players[seat].name+' 判定得到 '+judgeCard.suit+rankText(judgeCard.rank)+',是否发动【鬼才】替换判定牌…');
+}
+// respondGuicai: 仅 pending.seat 本人可响应。替换:打出一张手牌(移出手牌/进弃牌堆),用它的花色结算;
+// 不替换:直接用原判定牌结算。两种情况都调用 finishGuicai 走回原被打断的流程。
+function respondGuicai(useReplace, cardIdx){
+  tx(g=>{
+    if(g.phase!=='guicai'||!g.pending||g.pending.type!=='guicai') return g;
+    if(g.pending.seat!==mySeat) return g;
+    const me=g.players[mySeat];
+    let finalCard=g.pending.judgeCard;
+    if(useReplace){
+      const card=(me.hand||[])[cardIdx];
+      if(!card) return g; // 没这张牌:状态不变(双重保险)
+      me.hand.splice(cardIdx,1);
+      g.discard.push(card);
+      finalCard=card;
+      g.log=pushLog(g.log, me.name+' 发动【鬼才】,打出'+card.suit+rankText(card.rank)+' 替换判定牌');
+    }
+    finishGuicai(g, finalCard);
+    return g;
+  });
+}
+// finishGuicai: 鬼才改判解决(不管替换与否)。按 resume.type 接回被 tryBagua 打断的那条流程的尾巴——
+// 和 finishDying 按 resume.type 分支接回一样的模式,原调用点的收尾代码原样搬到这里、只是延后执行。
+function finishGuicai(g, finalCard){
+  const resume=g.pending.resume;
+  const red = finishBaguaColor(g, finalCard);
+  g.pending=null;
+  if(resume.type==='sha'){
+    if(red){ g.phase='play'; }
+    else { g.pending={from:resume.from, to:resume.to}; g.phase='respond'; }
+  } else if(resume.type==='aoe'){
+    if(red){
+      g.log=pushLog(g.log, g.players[resume.target].name+' 以【八卦阵】抵消【'+g.aoe.trick+'】');
+      aoeAdvance(g, resume.target);
+    } else {
+      g.pending={type:'aoeResp', from:g.aoe.from, to:resume.target, need:g.aoe.need};
+      g.phase='aoeResp';
+      g.log=pushLog(g.log, '要求 '+g.players[resume.target].name+' 打出【'+g.aoe.need+'】');
+    }
+  }
 }
 
 // ---------- actions (all via transaction on the whole game) ----------
@@ -312,7 +381,9 @@ function resolveShaUse(g, me, targetSeat, usedAs){
     g.phase='respond'; return; // 目标只能正常出闪/受伤
   }
   // 八卦阵:被杀需出闪前先判定,红=视为出闪 → 杀被抵消,攻击者继续出牌(与正常出闪同结果)
-  if(tryBagua(g, targetSeat)){ g.pending=null; g.phase='play'; return; }
+  const r=tryBagua(g, targetSeat, {type:'sha', from:mySeat, to:targetSeat});
+  if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
+  if(r){ g.pending=null; g.phase='play'; return; }
   g.phase='respond'; // 黑/无八卦阵:照常进响应,等目标出闪或受伤
 }
 // playZhangbaSha: 丈八蛇矛特效——任意两张手牌当一个【杀】。与 playCard 平级(playCard 只吃单张)。
@@ -656,10 +727,14 @@ function aoeAdvance(g, prevSeat){
 // startAoeRespond: 无人无懈后,要求当前目标打出 杀/闪。整体重建 pending。
 function startAoeRespond(g, target){
   // 八卦阵:仅当需要出【闪】(万箭齐发)时先判定,红=视为出闪 → 免这一箭,推进下一目标(与打出闪同一条路)
-  if(g.aoe.need==='闪' && tryBagua(g, target)){
-    g.log=pushLog(g.log, g.players[target].name+' 以【八卦阵】抵消【'+g.aoe.trick+'】');
-    aoeAdvance(g, target);
-    return;
+  if(g.aoe.need==='闪'){
+    const r=tryBagua(g, target, {type:'aoe', target});
+    if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
+    if(r){
+      g.log=pushLog(g.log, g.players[target].name+' 以【八卦阵】抵消【'+g.aoe.trick+'】');
+      aoeAdvance(g, target);
+      return;
+    }
   }
   g.pending={type:'aoeResp', from:g.aoe.from, to:target, need:g.aoe.need};
   g.phase='aoeResp';

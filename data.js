@@ -41,7 +41,8 @@ const GENERALS = {
   sunshangxiang: { id:'sunshangxiang', name:'孙尚香', maxHp:4, skill:'枭姬', desc:'当你失去装备区里的一张装备牌时,你摸两张牌。', hooks:{ onLoseEquip:(g, seat, ctx)=>{ const n = 2 * (ctx && ctx.count || 1); drawN(g, seat, n); g.log=pushLog(g.log, g.players[seat].name+' 发动【枭姬】,摸'+n+'张牌'); } } },
   zhaoyun:       { id:'zhaoyun',       name:'赵云',   maxHp:4, skill:'龙胆', desc:'你可以将【杀】当【闪】、【闪】当【杀】使用(1:1 转化)。', caps:{ longdan:true } },
   lvmeng:        { id:'lvmeng',        name:'吕蒙',   maxHp:4, skill:'克己', desc:'若你于出牌阶段未使用或打出过【杀】,你可以跳过弃牌阶段(手牌超过体力上限也不必弃牌)。', caps:{ keji:true } },
-  simayi:        { id:'simayi',        name:'司马懿', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。',
+  simayi:        { id:'simayi',        name:'司马懿', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
+    caps:{ guicai:true },
     hooks:{
       // 受伤后从伤害来源随机获得一张手牌。ctx={amount, sourceSeat}。
       onDamaged(g, seat, ctx){
