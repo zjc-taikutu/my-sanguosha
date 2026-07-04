@@ -112,6 +112,9 @@ const GENERALS = {
   zhangliao:     { id:'zhangliao',     name:'张辽',   maxHp:4, skill:'突袭',
     desc:'摸牌阶段,你可以放弃摸牌,改为从至多两名其他角色的手牌中各摸一张牌。',
     caps:{ tuxi:true } },
+  guanyu:        { id:'guanyu',        name:'关羽',   maxHp:4, skill:'武圣',
+    desc:'你可以将任意一张红色手牌当【杀】使用或打出。',
+    caps:{ wusheng:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
@@ -149,7 +152,8 @@ function cardFace(card){
   return '<span style="color:'+(isRed(card)?'#b33':'#3a2f28')+'">'+card.suit+rankText(card.rank)+'</span>';
 }
 // 这张牌对该玩家能否充当 role('杀'/'闪')使用。默认本名相符;赵云【龙胆】允许 杀<->闪 双向转化
-// (按名字);甄姬【倾国】允许任意黑色手牌当【闪】(按颜色,不看名字,两条判断互不干扰)。
+// (按名字);甄姬【倾国】允许任意黑色手牌当【闪】、关羽【武圣】允许任意红色手牌当【杀】
+// (都是按颜色,不看名字);三条判断各自独立,互不覆盖。
 function canUseAs(player, card, role){
   if(!card) return false;
   if(card.name===role) return true;
@@ -158,6 +162,7 @@ function canUseAs(player, card, role){
     if(role==='闪' && card.name==='杀') return true;
   }
   if(role==='闪' && hasCap(player,'qingguo') && !isRed(card)) return true;
+  if(role==='杀' && hasCap(player,'wusheng') && isRed(card)) return true;
   return false;
 }
 // 在手牌里找一张能当 role 用的牌:优先本名牌,没有才用可转化的牌。返回索引,无则 -1。
