@@ -1,0 +1,14 @@
+# Windows
+Thumbs.db
+Desktop.ini
+*:Zone.Identifier
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

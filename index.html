@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>极简三国杀 · 三人联机</title>
+
+<!-- Firebase (compat build, loaded from Google's CDN). These only run when you DEPLOY this file. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --ink:#1a1714; --ink-soft:#2c2722; --paper:#e9e1d2; --paper-dim:#cabfa8;
+    --cinnabar:#b1361e; --cinnabar-bright:#d8492c; --gold:#b08d4f;
+    --jade:#5f7a5a; --line:rgba(233,225,210,.14);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    background:
+      radial-gradient(120% 80% at 50% -10%, #2a2420 0%, var(--ink) 60%),
+      var(--ink);
+    color:var(--paper);
+    font-family:"Songti SC","Noto Serif SC",ui-serif,"STSong",serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+    min-height:100%;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:18px 16px 40px;}
+
+  h1{
+    font-size:30px;letter-spacing:.28em;text-indent:.28em;font-weight:700;
+    margin:6px 0 2px;text-align:center;
+  }
+  h1 .seal{
+    display:inline-block;background:var(--cinnabar);color:var(--paper);
+    border-radius:6px;padding:0 .18em;margin-right:.25em;
+    box-shadow:0 0 0 2px rgba(216,73,44,.35);
+  }
+  .sub{text-align:center;color:var(--paper-dim);font-size:13px;letter-spacing:.18em;margin-bottom:18px;}
+
+  .panel{
+    background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.12));
+    border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;
+  }
+
+  label{display:block;font-size:12px;letter-spacing:.14em;color:var(--paper-dim);margin:0 0 6px;}
+  input{
+    width:100%;background:#15120f;border:1px solid var(--line);color:var(--paper);
+    border-radius:8px;padding:10px 12px;font-size:15px;font-family:inherit;
+  }
+  input:focus{outline:none;border-color:var(--gold);}
+
+  button{
+    font-family:inherit;cursor:pointer;border-radius:9px;border:1px solid transparent;
+    padding:9px 16px;font-size:14px;letter-spacing:.08em;background:#241f1b;color:var(--paper);
+    border-color:var(--line);transition:transform .06s ease, background .15s;
+  }
+  button:hover:not(:disabled){background:#2e2823;}
+  button:active:not(:disabled){transform:translateY(1px);}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  button.primary{background:var(--cinnabar);border-color:var(--cinnabar-bright);}
+  button.primary:hover:not(:disabled){background:var(--cinnabar-bright);}
+  button.ghost{background:transparent;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .row>div{flex:1;min-width:120px;}
+
+  /* opponents */
+  .seats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+  .seat{
+    flex:1;min-width:150px;background:#1d1916;border:1px solid var(--line);
+    border-radius:12px;padding:12px 14px;position:relative;
+  }
+  .seat.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;}
+  .seat.dead{opacity:.45;filter:grayscale(.6);}
+  .seat.me{border-color:var(--cinnabar);}
+  .seat .nm{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;}
+  .seat .tag{font-size:10px;letter-spacing:.1em;background:#332b24;color:var(--paper-dim);
+    border-radius:4px;padding:1px 6px;}
+  .seat .tag.turn{background:var(--gold);color:#1a1410;}
+  .hp{margin-top:6px;font-size:18px;letter-spacing:2px;color:var(--cinnabar-bright);}
+  .hp .empty{color:#4a3f37;}
+  .meta{font-size:12px;color:var(--paper-dim);margin-top:4px;}
+  .equips{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-top:6px;font-size:11px;color:var(--paper-dim);}
+  .equips .eslot{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .equips .eslot b{color:var(--gold);font-weight:700;}
+  .equips .empty{color:#4a3f37;}
+
+  /* table center */
+  .table{text-align:center;}
+  .phase-pill{
+    display:inline-block;border:1px solid var(--gold);color:var(--gold);
+    border-radius:999px;padding:4px 14px;font-size:13px;letter-spacing:.18em;margin-bottom:8px;
+  }
+  .deckinfo{font-size:12px;color:var(--paper-dim);margin-bottom:10px;}
+  .banner{
+    background:rgba(177,54,30,.16);border:1px solid var(--cinnabar);border-radius:10px;
+    padding:10px 12px;margin:8px 0;font-size:14px;
+  }
+  .controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:6px;}
+
+  .log{
+    text-align:left;max-height:120px;overflow:auto;font-size:12.5px;color:var(--paper-dim);
+    border-top:1px solid var(--line);margin-top:12px;padding-top:8px;
+  }
+  .log div{padding:1px 0;}
+  .log div:last-child{color:var(--paper);}
+
+  /* hand */
+  .hand-label{font-size:12px;letter-spacing:.14em;color:var(--paper-dim);margin:14px 0 8px;}
+  .hand{display:flex;gap:10px;flex-wrap:wrap;}
+  .card{
+    width:64px;height:92px;border-radius:10px;background:#f1ead9;color:#1a1410;
+    border:1px solid #00000022;position:relative;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 0 rgba(0,0,0,.3);transition:transform .08s;user-select:none;
+  }
+  .card:hover{transform:translateY(-4px);}
+  .card .big{font-size:30px;font-weight:800;}
+  .card .corner{position:absolute;top:5px;left:7px;font-size:13px;font-weight:700;}
+  .card .corner.br{top:auto;left:auto;bottom:5px;right:7px;transform:rotate(180deg);}
+  .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
+  .card.tao .big,.card.tao .corner{color:var(--jade);}
+  .card.shan .big,.card.shan .corner{color:#2f5b86;}
+  .card.trick .big{font-size:14px;line-height:1.15;text-align:center;padding:0 4px;}
+  .card.trick .big,.card.trick .corner{color:#7a5fa0;}
+  .card.trick .corner{font-size:10px;letter-spacing:-.04em;}
+  .card.steal .big{font-size:14px;line-height:1.15;text-align:center;padding:0 4px;}
+  .card.steal .big,.card.steal .corner{color:#1f7a6e;}
+  .card.steal .corner{font-size:10px;letter-spacing:-.04em;}
+  .card.selected{outline:3px solid var(--gold);transform:translateY(-6px);}
+  .card.disabled{opacity:.4;pointer-events:none;}
+  .cardback{
+    width:46px;height:66px;border-radius:8px;
+    background:repeating-linear-gradient(45deg,#3a302a,#3a302a 6px,#2c241f 6px,#2c241f 12px);
+    border:1px solid var(--line);
+  }
+  .backs{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
+  .backs .cardback{width:20px;height:28px;}
+
+  .hint{color:var(--gold);font-size:13px;text-align:center;margin-top:8px;min-height:18px;}
+  .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
+  .footnote{color:var(--paper-dim);font-size:11px;text-align:center;margin-top:26px;line-height:1.7;}
+
+  /* ===== 说明浮层 + "?" 触发角标(手机/电脑通用;查看说明与出牌手势分离,靠 stopPropagation) ===== */
+  .info-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+    border:1px solid var(--gold);color:var(--gold);font-size:13px;font-weight:700;line-height:1;cursor:pointer;
+    background:#1a1410;user-select:none;flex:0 0 auto;}
+  .card .info-badge{position:absolute;top:4px;right:4px;width:26px;height:26px;font-size:15px;pointer-events:auto;z-index:3;}
+  #helpBtn{position:fixed;top:12px;right:12px;z-index:50;width:44px;height:44px;border-radius:50%;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:20px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
+  #infoModal.hidden{display:none;}
+  .info-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:560px;width:100%;
+    max-height:82vh;overflow:auto;padding:18px 18px 22px;position:relative;color:var(--paper);}
+  .info-panel h3{color:var(--gold);margin:0 0 10px;font-size:20px;padding-right:36px;}
+  .info-panel .info-body{font-size:16px;line-height:1.65;}
+  .info-panel .info-close{position:absolute;top:10px;right:12px;width:36px;height:36px;border-radius:50%;
+    border:1px solid var(--line);background:transparent;color:var(--paper);font-size:18px;cursor:pointer;}
+  .info-panel .sec{margin:16px 0 6px;color:var(--gold);font-weight:700;font-size:16px;border-bottom:1px solid var(--line);padding-bottom:4px;}
+  .info-panel .item{margin:9px 0;font-size:15px;line-height:1.55;}
+  .info-panel .item b{color:var(--gold);}
+  a{color:var(--gold);}
+  .hidden{display:none!important;}
+</style>
+</head>
+<body>
+<!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
+<button id="helpBtn" title="规则 / 说明" onclick="showHelp()">?</button>
+<div id="infoModal" class="hidden"></div>
+<div class="wrap">
+  <h1><span class="seal">杀</span>极简三国杀</h1>
+  <div class="sub">三 人 联 机 · 第 一 版</div>
+
+  <!-- ============ CONFIG WARNING ============ -->
+  <div id="configWarn" class="panel hidden" style="border-color:var(--cinnabar)">
+    <b style="color:var(--cinnabar-bright)">还没填 Firebase 配置</b><br>
+    <span style="font-size:13px;color:var(--paper-dim)">
+      打开本文件,把顶部 <code>firebaseConfig</code> 换成你自己 Firebase 项目的配置,再部署。详见底部说明。
+    </span>
+  </div>
+
+  <!-- ============ LOBBY ============ -->
+  <div id="lobby" class="panel">
+    <div class="row">
+      <div>
+        <label>房间号(三人填同一个)</label>
+        <input id="roomInput" placeholder="例如 chibi" value="chibi">
+      </div>
+      <div>
+        <label>你的名字</label>
+        <input id="nameInput" placeholder="例如 玄德">
+      </div>
+      <div style="flex:0 0 auto">
+        <button class="primary" id="joinBtn">进入房间</button>
+      </div>
+    </div>
+    <div id="lobbyErr" class="err"></div>
+  </div>
+
+  <!-- ============ GAME ============ -->
+  <div id="game" class="hidden">
+    <div class="seats" id="seats"></div>
+
+    <div class="panel table">
+      <div class="phase-pill" id="phasePill">等待开始</div>
+      <div class="deckinfo" id="deckInfo"></div>
+      <div id="banner"></div>
+      <div class="controls" id="controls"></div>
+      <div class="hint" id="hint"></div>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div class="hand-label" id="myGeneral"></div>
+    <div class="hand-label">你的手牌</div>
+    <div class="hand" id="hand"></div>
+  </div>
+
+  <div class="footnote">
+    部署后,三人各自打开同一网址、填同一房间号即可。<br>
+    手牌只在你自己界面显示牌面;这是给朋友玩的轻量版,并非加密隐藏。
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="data.js"></script>
+<script src="game.js"></script>
+<script src="render.js"></script>
+</body>
+</html>
