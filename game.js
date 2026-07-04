@@ -302,8 +302,11 @@ function startGame(){
       p.equips = emptyEquips();                // 装备区:开局四槽全空
       drawN(g,i,START_HAND);
     });
-    g.started=true; g.turn=0; g.phase='draw'; g.shaUsed=false; g.pending=null;
-    g.log = pushLog(g.log, '游戏开始！轮到 '+g.players[0].name);
+    g.started=true; g.pending=null;
+    g.log = pushLog(g.log, '游戏开始！');
+    // 第一回合也要走 startTurn(不能手写 g.turn/g.phase),否则会跳过判定区处理和洛神触发链路
+    // ——这正是"开局第一回合甄姬洛神不触发"这个 bug 的根因,第二回合起走 endTurn→startTurn 就正常。
+    startTurn(g, 0);
     return g;
   });
 }
