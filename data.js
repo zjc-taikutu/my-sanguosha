@@ -131,6 +131,9 @@ const GENERALS = {
   zhanghe:       { id:'zhanghe',       name:'张郃',   maxHp:4, skill:'巧变(简化版)',
     desc:'出牌阶段限一次,你可以弃置一张手牌,跳过这个阶段,然后你可以将场上一张装备牌移到另一名角色的对应空槽,或将一张延时锦囊移到另一名角色没有同名锦囊的判定区。',
     caps:{ qiaobian:true } },
+  lvbu:          { id:'lvbu',          name:'吕布',   maxHp:4, skill:'无双(锁定技)',
+    desc:'你使用【杀】指定目标后,该角色需要连续使用两张【闪】才能抵消。你或你的对手使用/成为【决斗】的目标时,每次响应需要连续打出两张【杀】。',
+    caps:{ wushuang:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

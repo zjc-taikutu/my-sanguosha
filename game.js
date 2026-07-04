@@ -859,16 +859,24 @@ function checkWin(g){
   return false;
 }
 // 决斗中由当前 active 玩家响应：打出【杀】则把出杀义务交给对方；认输则受伤、决斗结束。
+// duelResponse: 决斗响应。吕布【无双】(锁定技):决斗任一方(发起者或目标)是吕布时,needed=2——
+// 同一个人这一轮要连续打出两张杀才轮到对方,g.pending.shaCount 记这一轮已出几张;
+// 换人时归零重新计数。选择认输就按原逻辑直接受伤,已出的杀不退回。
 function duelResponse(useSha){
   tx(g=>{
     if(g.phase!=='duel'||!g.pending||g.pending.active!==mySeat) return g;
     const me=g.players[mySeat];
+    const wushuang = hasCap(g.players[g.pending.from],'wushuang') || hasCap(g.players[g.pending.to],'wushuang');
+    const needed = wushuang ? 2 : 1;
     if(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const played=(g.pending.shaCount||0)+1;
+      g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
+      if(played<needed){ g.pending.shaCount=played; return g; } // 吕布【无双】:这一轮还没出满,留在同一个人身上
       g.pending.active = (mySeat===g.pending.from)?g.pending.to:g.pending.from;
-      g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】'));
+      g.pending.shaCount = 0; // 换人,计数归零重新开始
       return g;
     }
     // 认输：受伤
@@ -1115,16 +1123,22 @@ function aoeRespond(useCard){
   });
 }
 
+// respondShan: 出闪响应。吕布【无双】(锁定技):攻击者是吕布时,needed=2——打出一张闪不够,
+// g.pending.shanCount 记差几张,留在 respond 阶段原样再问一次(按钮/阶段都不变,只是 hint
+// 文案会提示"还差几张");不选择继续出闪就按原逻辑直接受伤,已打出的闪不退回、只扣1点血。
 function respondShan(useShan){
   tx(g=>{
     if(g.phase!=='respond'||!g.pending||g.pending.to!==mySeat) return g;
     const me=g.players[mySeat]; const attacker=g.players[g.pending.from];
+    const needed = hasCap(attacker,'wushuang') ? 2 : 1;
     if(useShan){
       if(g.pending.noShan) return g; // 马超【铁骑】判红:此杀不可被闪抵消,服务端兜底(UI 本就不该渲染这个按钮)
       const idx=findUsableAs(me.hand,me,'闪'); // 龙胆:杀可当闪,优先用本名闪
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
-      g.log=pushLog(g.log, me.name+(card.name==='闪'?' 使用【闪】抵消':' 使用【'+card.name+'】当【闪】抵消'));
+      const played=(g.pending.shanCount||0)+1;
+      g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
+      if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
     } else {
       const dying = dealDamage(g, mySeat, 1, g.pending.from, '不闪', 'sha');
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理

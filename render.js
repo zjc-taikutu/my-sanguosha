@@ -432,8 +432,12 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不闪（受伤）'; b2.onclick=()=>respondShan(false);
     c.appendChild(b2);
+    // 吕布【无双】:攻击者是吕布时需要连续两张闪,shanCount 记已打出几张
+    const shanNeeded = hasCap(g.players[g.pending.from],'wushuang') ? 2 : 1;
     if(g.pending.noShan) hint.textContent='对方发动了【铁骑】且判定为红,此杀不可被闪抵消,只能受到伤害。';
     else if(!hasShan) hint.textContent='你没有【闪】,只能受到伤害。';
+    else if(shanNeeded>1 && g.pending.shanCount>0) hint.textContent='对方是吕布【无双】,已打出'+g.pending.shanCount+'/'+shanNeeded+'张【闪】,还需再打出一张才能抵消!';
+    else if(shanNeeded>1) hint.textContent='对方是吕布【无双】,需要连续打出2张【闪】才能抵消。';
     return;
   }
   if(g.phase==='duel' && g.pending && g.pending.active===mySeat){
@@ -446,7 +450,11 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='认输（受伤）'; b2.onclick=()=>duelResponse(false);
     c.appendChild(b2);
+    // 吕布【无双】:决斗任一方是吕布时每轮需要连续两张杀,shaCount 记这一轮已出几张
+    const shaNeeded = (hasCap(g.players[g.pending.from],'wushuang') || hasCap(g.players[g.pending.to],'wushuang')) ? 2 : 1;
     if(!hasSha) hint.textContent='你没有【杀】,只能受到伤害。';
+    else if(shaNeeded>1 && g.pending.shaCount>0) hint.textContent='决斗涉及吕布【无双】,这一轮已打出'+g.pending.shaCount+'/'+shaNeeded+'张【杀】,还需再打出一张!';
+    else if(shaNeeded>1) hint.textContent='决斗涉及吕布【无双】,这一轮需要连续打出2张【杀】。';
     return;
   }
   if(g.phase==='wuxie' && g.pending && g.pending.asking===mySeat){
