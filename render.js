@@ -156,7 +156,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -168,7 +168,12 @@ function render(g){
     // (仅此 banner;日志是纯文本存储,escapeHtml 后无法带色,不做)
     const fromSpan='<span style="color:'+seatColor(g.pending.from)+'">'+escapeHtml(from)+'</span>';
     const toSpan='<span style="color:'+seatColor(g.pending.to)+'">'+escapeHtml(to)+'</span>';
-    bn.innerHTML='<div class="banner">'+fromSpan+' 对 '+toSpan+' 出【杀】,等待'+toSpan+'响应…</div>';
+    const noShanTag = g.pending.noShan ? '(【铁骑】判红,不可被闪抵消)' : '';
+    bn.innerHTML='<div class="banner">'+fromSpan+' 对 '+toSpan+' 出【杀】'+noShanTag+',等待'+toSpan+'响应…</div>';
+  }
+  if(g.phase==='tieqi'&&g.pending&&g.pending.type==='tieqi'){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…</div>';
   }
   if(g.phase==='duel'&&g.pending){
     const a=g.players[g.pending.active].name;
@@ -242,8 +247,23 @@ function renderControls(g){
     hint.textContent='大家看完结果后,点「结束并清理房间」可删除本房间数据。';
     return;
   }
+  if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi' && g.pending.from===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【铁骑】判定'; b1.onclick=()=>respondTieqi(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondTieqi(false);
+    c.appendChild(b2);
+    hint.textContent='是否发动【铁骑】判定,若为红色则此杀不可被闪抵消?';
+    return;
+  }
+  if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi'){
+    hint.textContent='等待 '+g.players[g.pending.from].name+' 决定是否发动【铁骑】…';
+    return;
+  }
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
-    const hasShan = me.hand.some(card=>canUseAs(me,card,'闪'));
+    // 马超【铁骑】判红:此杀不可被闪抵消,连按钮都不给("没有可用手段就不渲染"的一贯风格)
+    const hasShan = !g.pending.noShan && me.hand.some(card=>canUseAs(me,card,'闪'));
     if(hasShan){
       const b1=document.createElement('button'); b1.className='primary';
       b1.textContent='出【闪】'; b1.onclick=()=>respondShan(true);
@@ -252,7 +272,8 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不闪（受伤）'; b2.onclick=()=>respondShan(false);
     c.appendChild(b2);
-    if(!hasShan) hint.textContent='你没有【闪】,只能受到伤害。';
+    if(g.pending.noShan) hint.textContent='对方发动了【铁骑】且判定为红,此杀不可被闪抵消,只能受到伤害。';
+    else if(!hasShan) hint.textContent='你没有【闪】,只能受到伤害。';
     return;
   }
   if(g.phase==='duel' && g.pending && g.pending.active===mySeat){
