@@ -106,6 +106,9 @@ const GENERALS = {
   machao:        { id:'machao',        name:'马超',   maxHp:4, skill:'马术/铁骑',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。铁骑:当你使用【杀】指定一名角色为目标后,你可以进行判定,若结果为红色,此【杀】不可被【闪】抵消(含视为闪的效果,如八卦阵)。',
     caps:{ extraMinus1:true, tieqi:true } },
+  zhenji:        { id:'zhenji',        name:'甄姬',   maxHp:3, skill:'洛神/倾国',
+    desc:'洛神:回合开始时,你可以进行判定,若结果为黑色,你获得这张判定牌(计入手牌),并可以再次发动(直到红色或你选择停止)。倾国:你可以将黑色手牌当【闪】使用或打出。',
+    caps:{ luoshen:true, qingguo:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
@@ -142,7 +145,8 @@ function cardFace(card){
   if(!card || !card.suit) return '';
   return '<span style="color:'+(isRed(card)?'#b33':'#3a2f28')+'">'+card.suit+rankText(card.rank)+'</span>';
 }
-// 这张牌对该玩家能否充当 role('杀'/'闪')使用。默认本名相符;赵云【龙胆】允许 杀<->闪 双向转化。
+// 这张牌对该玩家能否充当 role('杀'/'闪')使用。默认本名相符;赵云【龙胆】允许 杀<->闪 双向转化
+// (按名字);甄姬【倾国】允许任意黑色手牌当【闪】(按颜色,不看名字,两条判断互不干扰)。
 function canUseAs(player, card, role){
   if(!card) return false;
   if(card.name===role) return true;
@@ -150,6 +154,7 @@ function canUseAs(player, card, role){
     if(role==='杀' && card.name==='闪') return true;
     if(role==='闪' && card.name==='杀') return true;
   }
+  if(role==='闪' && hasCap(player,'qingguo') && !isRed(card)) return true;
   return false;
 }
 // 在手牌里找一张能当 role 用的牌:优先本名牌,没有才用可转化的牌。返回索引,无则 -1。

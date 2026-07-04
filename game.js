@@ -110,6 +110,10 @@ function normalize(g){
   if(g.pending && g.pending.type==='tieqi' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
     g.pending=null; g.phase='play';
   }
+  // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
+  if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
+    g.pending=null; g.phase='play';
+  }
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   // 乐不思蜀:跳过出牌阶段的标志位,和 p.dying 同款防御
@@ -247,6 +251,10 @@ function finishGuicai(g, finalCard){
   }
   if(resume.kind==='tieqiJudge'){
     finishTieqiJudge(g, resume.from, resume.to, finalCard);
+    return;
+  }
+  if(resume.kind==='luoshenJudge'){
+    finishLuoshenJudge(g, resume.seat, finalCard);
     return;
   }
   // kind==='bagua'
@@ -1080,7 +1088,55 @@ function continueDelayResolution(g, seat){
     if(g.pending.type==='dying') g.pending.resume={type:'delay', seat};
     return;
   }
+  continueTurnStart(g, seat);
+}
+// ===== 甄姬【洛神】:回合开始阶段(判定区处理完毕之后、摸牌之前)甄姬自己选择要不要发动的循环判定 =====
+// continueTurnStart: 判定区处理完毕后的下一步——轮到的人若有洛神,问是否发动(可连续判定);
+// 没有则直接进摸牌阶段。startTurn/finishDying 的 delay 分支/finishGuicai 的 delayJudge 分支
+// 都经 continueDelayResolution 走到这里,不用各自重复判断。
+function continueTurnStart(g, seat){
+  if(hasCap(g.players[seat],'luoshen')){
+    g.pending={type:'luoshen', seat};
+    g.phase='luoshen';
+    g.log=pushLog(g.log, g.players[seat].name+' 是否发动【洛神】进行判定…');
+    return;
+  }
   enterDrawPhase(g);
+}
+// respondLuoshen: 仅 pending.seat 本人可响应。不发动:直接进摸牌阶段;发动:judge() 翻牌
+// (可被鬼才改判,和其它判定场景同一套 maybeGuicai),结果延后到 finishLuoshenJudge 处理。
+function respondLuoshen(activate){
+  tx(g=>{
+    if(g.phase!=='luoshen'||!g.pending||g.pending.type!=='luoshen'||g.pending.seat!==mySeat) return g;
+    const seat=mySeat;
+    if(!activate){
+      g.log=pushLog(g.log, g.players[seat].name+'：不再发动【洛神】');
+      enterDrawPhase(g);
+      return g;
+    }
+    const card=judge(g);
+    if(!card){ enterDrawPhase(g); return g; } // 无牌可判,视为发动失败,直接进摸牌阶段
+    if(maybeGuicai(g, seat, card, {kind:'luoshenJudge', seat})==='pending') return g;
+    finishLuoshenJudge(g, seat, card);
+    return g;
+  });
+}
+// finishLuoshenJudge: 洛神判定结算(不管是否被鬼才改判过)。红色=判定失败,牌进弃牌堆,洛神结束;
+// 黑色=判定牌归玩家所有——judge(g) 已经把牌推进了 g.discard,这里要把它弹出来改放进手牌,
+// 不能"弃牌堆+手牌各一份"。留在同一个 'luoshen' 阶段,再问一次要不要继续发动(循环判定)。
+function finishLuoshenJudge(g, seat, card){
+  const p=g.players[seat];
+  if(isRed(card)){
+    g.log=pushLog(g.log, p.name+' 发动【洛神】,判定为红,洛神结束');
+    enterDrawPhase(g);
+  } else {
+    const idx=g.discard.lastIndexOf(card);
+    if(idx>=0) g.discard.splice(idx,1); // 从弃牌堆移除,改成玩家获得
+    p.hand.push(card);
+    g.log=pushLog(g.log, p.name+' 发动【洛神】,判定为黑,获得判定牌,可以再次发动');
+    g.pending={type:'luoshen', seat};
+    g.phase='luoshen';
+  }
 }
 function newGame(){
   tx(g=>{

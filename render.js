@@ -156,7 +156,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',luoshen:'洛神判定',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -174,6 +174,10 @@ function render(g){
   if(g.phase==='tieqi'&&g.pending&&g.pending.type==='tieqi'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…</div>';
+  }
+  if(g.phase==='luoshen'&&g.pending&&g.pending.type==='luoshen'){
+    const p=g.players[g.pending.seat];
+    bn.innerHTML='<div class="banner">'+escapeHtml(p.name)+' 是否发动【洛神】进行判定…</div>';
   }
   if(g.phase==='duel'&&g.pending){
     const a=g.players[g.pending.active].name;
@@ -259,6 +263,20 @@ function renderControls(g){
   }
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi'){
     hint.textContent='等待 '+g.players[g.pending.from].name+' 决定是否发动【铁骑】…';
+    return;
+  }
+  if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【洛神】判定'; b1.onclick=()=>respondLuoshen(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不再发动'; b2.onclick=()=>respondLuoshen(false);
+    c.appendChild(b2);
+    hint.textContent='是否发动【洛神】进行判定?黑色可获得判定牌并继续发动,红色则结束。';
+    return;
+  }
+  if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen'){
+    hint.textContent='等待 '+g.players[g.pending.seat].name+' 决定是否发动【洛神】…';
     return;
   }
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
