@@ -357,7 +357,7 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=> canReachSha(g, mySeat, targetSeat), // 只有杀受攻击距离限制
     effect:(g,me,card,targetSeat)=>{
       const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
-      resolveShaUse(g, me, targetSeat, usedAs);
+      resolveShaUse(g, me, targetSeat, usedAs, card);
     }
   },
   '桃': {
@@ -505,9 +505,18 @@ function playCard(cardIdx, actionId, targetSeat){
 // 马超【铁骑】:攻击者可选是否发动判定,红色则这张杀不可被闪抵消——这是攻击者自己的选择,
 // 需要挂起等一次响应,原来"设好 pending 后直接走青釭剑/八卦阵/进响应阶段"这段尾巴抽成
 // continueShaAfterTieqi,不管有没有铁骑、发不发动、判红判黑,最终都走这同一条尾巴。
-function resolveShaUse(g, me, targetSeat, usedAs){
-  g.shaUsed=true;
-  g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' '+usedAs);
+// card(可选):转化后实际打出的物理牌(关羽红牌/龙胆闪牌等),供于禁【毅重】判断颜色;
+// 丈八蛇矛两张当杀没有单一花色,调用方不传(undefined),毅重不生效。
+function resolveShaUse(g, me, targetSeat, usedAs, card){
+  g.shaUsed=true; // 杀被无效化(毅重)不代表没有使用它,次数限制依然计入,不能靠一直打无效杀绕过
+  const target=g.players[targetSeat];
+  // 于禁【毅重】(锁定技):目标无防具 + 这张杀是黑色 → 直接无效,不进响应阶段、不消耗闪、不受伤。
+  if(card && !isRed(card) && hasCap(target,'yizhong') && !(target.equips && target.equips.armor)){
+    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用的黑色【杀】因【毅重】无效');
+    g.phase='play';
+    return;
+  }
+  g.log=pushLog(g.log, me.name+' 对 '+target.name+' '+usedAs);
   if(hasCap(me,'tieqi')){
     g.pending={type:'tieqi', from:mySeat, to:targetSeat};
     g.phase='tieqi';

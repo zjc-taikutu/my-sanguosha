@@ -121,6 +121,9 @@ const GENERALS = {
   xuhuang:       { id:'xuhuang',       name:'徐晃',   maxHp:4, skill:'断粮',
     desc:'出牌阶段限一次,你可以弃置一张牌,然后选择一名其他角色,视为你对其使用一张【兵粮寸断】。',
     caps:{ duanliang:true } },
+  yujin:         { id:'yujin',         name:'于禁',   maxHp:4, skill:'毅重',
+    desc:'锁定技,若你的装备区里没有防具牌,黑色【杀】对你无效。',
+    caps:{ yizhong:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
