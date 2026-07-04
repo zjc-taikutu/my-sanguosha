@@ -60,6 +60,10 @@
   button:active:not(:disabled){transform:translateY(1px);}
   button:disabled{opacity:.4;cursor:not-allowed;}
   button.primary{background:var(--cinnabar);border-color:var(--cinnabar-bright);}
+  /* primary 按钮被 disable 时,仅靠 opacity 淡化朱红看起来还是"暗红"而非"灰"(specificity 打平,
+     opacity 和 background 不是同一属性、不会互相覆盖)。这里用更高优先级(.primary:disabled)
+     强制换成中性暗色背景,让 disabled 真正显示为灰色/暗淡,不再是变暗的红。 */
+  button.primary:disabled{background:#241f1b;border-color:var(--line);}
   button.primary:hover:not(:disabled){background:var(--cinnabar-bright);}
   button.ghost{background:transparent;}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
