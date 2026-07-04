@@ -18,6 +18,9 @@ function resetTuxi(){ tuxiMode=false; tuxiPicks=[]; }
 let duanliangMode = false;
 let duanliangCardIdx = null;    // 已选中要弃置的手牌下标(单选)
 function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
+// 乐进【骁果】:点"发动"进选牌模式(纯客户端,不入库),只有基本牌可点,点了直接提交(仿鬼才)。
+let xiaoguoMode = false;
+function resetXiaoguo(){ xiaoguoMode=false; }
 let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
@@ -78,6 +81,8 @@ function render(g){
   if(!(g.started && g.phase==='draw' && g.turn===mySeat)) resetTuxi();
   // 同款兜底:只要不在「自己的出牌阶段」,就退出断粮选牌+选目标模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetDuanliang();
+  // 同款兜底:一旦不在"轮到自己响应骁果"的状态,退出选牌模式,不留残留。
+  if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
   (g.players||[]).forEach((p,i)=>{
@@ -195,7 +200,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -217,6 +222,14 @@ function render(g){
   if(g.phase==='liegong'&&g.pending&&g.pending.type==='liegong'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【烈弓】…</div>';
+  }
+  if(g.phase==='xiaoguo'&&g.pending&&g.pending.type==='xiaoguo'){
+    const ending=g.players[g.pending.endingSeat].name, asker=g.players[g.pending.asking].name;
+    bn.innerHTML='<div class="banner">'+escapeHtml(ending)+' 结束阶段,正在询问 '+escapeHtml(asker)+' 是否发动【骁果】…</div>';
+  }
+  if(g.phase==='xiaoguoChoice'&&g.pending&&g.pending.type==='xiaoguoChoice'){
+    const from=g.players[g.pending.from].name, ending=g.players[g.pending.endingSeat].name;
+    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 发动【骁果】,'+escapeHtml(ending)+' 选择弃装备或受到1点伤害…</div>';
   }
   if(g.phase==='luoshen'&&g.pending&&g.pending.type==='luoshen'){
     const p=g.players[g.pending.seat];
@@ -320,6 +333,43 @@ function renderControls(g){
   }
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong'){
     hint.textContent='等待 '+g.players[g.pending.from].name+' 决定是否发动【烈弓】…';
+    return;
+  }
+  if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat){
+    const endingName=g.players[g.pending.endingSeat].name;
+    if(xiaoguoMode){
+      hint.textContent='【骁果】选择一张基本牌(杀/闪/桃)弃置(或点已选中的牌取消)。';
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetXiaoguo(); render(g); }; c.appendChild(cb);
+    } else {
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='发动【骁果】'; b1.onclick=()=>{ xiaoguoMode=true; render(g); };
+      c.appendChild(b1);
+      const b2=document.createElement('button');
+      b2.textContent='不发动'; b2.onclick=()=>respondXiaoguo(false);
+      c.appendChild(b2);
+      hint.textContent=endingName+' 结束阶段,是否弃一张基本牌发动【骁果】?';
+    }
+    return;
+  }
+  if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo'){
+    hint.textContent='等待 '+g.players[g.pending.asking].name+' 决定是否发动【骁果】…';
+    return;
+  }
+  if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice' && g.pending.to===mySeat){
+    const target=g.players[mySeat], askerName=g.players[g.pending.from].name;
+    const slotLabel={ weapon:'武器', armor:'防具', plus1:'防御马', minus1:'进攻马' };
+    EQUIP_SLOTS.forEach(s=>{ if(target.equips[s]){
+      const b=document.createElement('button');
+      b.textContent='弃置'+slotLabel[s]+'【'+target.equips[s].name+'】'; b.onclick=()=>respondXiaoguoChoice(s); c.appendChild(b);
+    }});
+    const db=document.createElement('button'); db.className='primary';
+    db.textContent='受到1点伤害'; db.onclick=()=>respondXiaoguoChoice('damage'); c.appendChild(db);
+    hint.textContent=askerName+' 发动【骁果】,请选择:弃置一件装备(对方摸一张牌),或受到1点伤害。';
+    return;
+  }
+  if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice'){
+    hint.textContent='等待 '+g.players[g.pending.to].name+' 选择弃装备或受到1点伤害…';
     return;
   }
   if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen' && g.pending.seat===mySeat){
@@ -600,6 +650,10 @@ function renderHand(g){
     if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.asking===mySeat){
       // 鬼才选牌模式:任意一张手牌都可以打出替换判定牌
       usable=true; onClick=()=>respondGuicai(true, idx);
+    } else if(g.phase==='xiaoguo'&&xiaoguoMode&&g.pending&&g.pending.type==='xiaoguo'&&g.pending.asking===mySeat){
+      // 骁果选牌模式:只有基本牌(杀/闪/桃)可选,其余牌照常灰显不可点
+      usable = BASIC_CARDS.includes(card.name);
+      if(usable) onClick=()=>{ resetXiaoguo(); respondXiaoguo(true, idx); };
     } else if(g.phase==='play'&&myTurn&&duanliangMode){
       // 断粮选牌模式:任意一张牌都可以选(不检查牌名),点= 切换选中(单选,再点别的牌会换选中)
       usable=true;

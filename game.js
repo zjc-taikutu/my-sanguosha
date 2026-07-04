@@ -114,6 +114,14 @@ function normalize(g){
   if(g.pending && g.pending.type==='liegong' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
     g.pending=null; g.phase='play';
   }
+  // 骁果询问阶段:endingSeat/asking 都应是数字座位号;不对就整体判无效
+  if(g.pending && g.pending.type==='xiaoguo' && (typeof g.pending.endingSeat!=='number' || typeof g.pending.asking!=='number')){
+    g.pending=null; g.phase='play';
+  }
+  // 骁果二选一阶段:from/endingSeat/to 都应是数字座位号;不对就整体判无效
+  if(g.pending && g.pending.type==='xiaoguoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.endingSeat!=='number' || typeof g.pending.to!=='number')){
+    g.pending=null; g.phase='play';
+  }
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
@@ -741,6 +749,10 @@ function finishDying(g, actuallyDied){
     } else {
       continueDelayResolution(g, resume.seat);
     }
+  } else if(resume.type==='xiaoguo'){
+    // 骁果"受到1点伤害"选项致命挂起后的接回:不管目标是否真死,都继续找下一个有资格的
+    // 候选乐进(或最终真正切换回合)——resume 在 respondXiaoguoChoice 里已经带上完整信息。
+    advanceXiaoguo(g, resume.endingSeat, resume.lastAsker);
   } else { // 'sha' 及其它:攻击者继续出牌阶段
     g.phase='play';
   }
@@ -1099,7 +1111,81 @@ function endTurn(){
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
     if(me.hand.length>me.hp && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
-    startTurn(g, nextAlive(g, mySeat));
+    // 乐进【骁果】只在"正常走完弃牌阶段、即将结束回合"这里触发,不影响其它切回合路径
+    // (决斗/濒死里回合玩家中途阵亡换人——那个人根本没走到结束阶段,规则本身就不该触发骁果)。
+    advanceXiaoguo(g, mySeat, mySeat);
+    return g;
+  });
+}
+// ===== 乐进【骁果】:其他角色的结束阶段,乐进可以弃基本牌发动,让该角色弃装备(乐进摸牌)或受伤 =====
+// nextXiaoguoAsker: 从 current 的下家起,按座位顺序找下一个"有资格发动骁果"的候选人——
+// 存活 + hasCap(p,'xiaoguo') + 手牌里有基本牌。绕回 endingSeat(即将结束回合的人,永远不会
+// 被当成候选人,天然排除"乐进对自己回合结束触发")即问完一圈,返回 null。
+function nextXiaoguoAsker(g, endingSeat, current){
+  const n=g.players.length;
+  for(let k=1;k<=n;k++){
+    const s=(current+k)%n;
+    if(s===endingSeat) return null;
+    const p=g.players[s];
+    if(p && p.alive && hasCap(p,'xiaoguo') && (p.hand||[]).some(c=>BASIC_CARDS.includes(c.name))) return s;
+  }
+  return null;
+}
+// advanceXiaoguo: (重新)找下一个有资格的候选人问;问完(或从一开始就没人有资格)则真正切换回合。
+// 每个候选人发动或不发动之后都会调这个函数继续找下一个,直到问完一圈——理论上支持多个乐进都发动。
+function advanceXiaoguo(g, endingSeat, current){
+  const asker=nextXiaoguoAsker(g, endingSeat, current);
+  if(asker===null){ startTurn(g, nextAlive(g, endingSeat)); return; }
+  g.pending={type:'xiaoguo', endingSeat, asking:asker};
+  g.phase='xiaoguo';
+  g.log=pushLog(g.log, '结束阶段:询问 '+g.players[asker].name+' 是否发动【骁果】…');
+}
+// respondXiaoguo: 仅当前被问的人(pending.asking)可响应。不发动:推进到下一个候选人;
+// 发动:弃一张基本牌(校验 BASIC_CARDS),交给目标(endingSeat)二选一。
+function respondXiaoguo(activate, cardIdx){
+  tx(g=>{
+    if(g.phase!=='xiaoguo'||!g.pending||g.pending.type!=='xiaoguo'||g.pending.asking!==mySeat) return g;
+    const endingSeat=g.pending.endingSeat;
+    if(!activate){
+      advanceXiaoguo(g, endingSeat, mySeat);
+      return g;
+    }
+    const me=g.players[mySeat];
+    const card=me.hand[cardIdx];
+    if(!card || !BASIC_CARDS.includes(card.name)) return g; // 不是基本牌:不生效,状态不变
+    me.hand.splice(cardIdx,1);
+    g.discard.push(card);
+    g.log=pushLog(g.log, me.name+' 弃置一张【'+card.name+'】,发动【骁果】,询问 '+g.players[endingSeat].name+' 弃装备或受到1点伤害…');
+    g.pending={type:'xiaoguoChoice', from:mySeat, endingSeat, to:endingSeat};
+    g.phase='xiaoguoChoice';
+    return g;
+  });
+}
+// respondXiaoguoChoice: 仅目标(pending.to,即 endingSeat 本人)可响应。choice 是装备槽名
+// (EQUIP_SLOTS 之一)= 弃该装备、乐进摸一张;choice==='damage' = 受到乐进 1 点伤害
+// (可能连锁触发濒死,见 finishDying 的 resume.type==='xiaoguo' 分支)。
+function respondXiaoguoChoice(choice){
+  tx(g=>{
+    if(g.phase!=='xiaoguoChoice'||!g.pending||g.pending.type!=='xiaoguoChoice'||g.pending.to!==mySeat) return g;
+    const from=g.pending.from, endingSeat=g.pending.endingSeat;
+    const target=g.players[endingSeat], asker=g.players[from];
+    if(choice==='damage'){
+      const dying=dealDamage(g, endingSeat, 1, from, '【骁果】', 'xiaoguo');
+      if(dying){ g.pending.resume={type:'xiaoguo', endingSeat, lastAsker:from}; return g; }
+      g.pending=null;
+      if(checkWin(g)) return g;
+      advanceXiaoguo(g, endingSeat, from);
+      return g;
+    }
+    if(!EQUIP_SLOTS.includes(choice) || !target.equips[choice]) return g; // 非法/槽已空
+    const card=target.equips[choice];
+    target.equips[choice]=null;
+    g.discard.push(card);
+    g.log=pushLog(g.log, target.name+' 弃置装备【'+card.name+'】,'+asker.name+' 摸一张牌');
+    triggerHook(g, endingSeat, 'onLoseEquip', {count:1});
+    drawN(g, from, 1);
+    g.pending=null;
+    advanceXiaoguo(g, endingSeat, from);
     return g;
   });
 }

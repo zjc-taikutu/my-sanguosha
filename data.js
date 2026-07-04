@@ -3,6 +3,7 @@ const SEATS = 3;        // 房间容量上限(满 3 不再加入)
 const MIN_PLAYERS = 2;  // 开始游戏的最低人数(2 或 3 人均可开始)
 const MAX_HP = 4; // 大厅占位 / 兜底默认体力上限
 const START_HAND = 4;
+const BASIC_CARDS = ['杀','闪','桃']; // 基本牌:不含锦囊/装备,乐进【骁果】等按"是不是基本牌"判断的地方统一查这个表
 
 // ---------- 装备区(地基:只搭容器+显示;派生属性/距离/射程/效果一律后续经 EQUIPS 常量表 + getEquip 实现,不写进 Firebase) ----------
 // 四槽:weapon 武器 / armor 防具 / plus1 +1马(防御马) / minus1 -1马(进攻马);每槽存一张装备牌对象 {id,name} 或 null(空)。
@@ -124,6 +125,9 @@ const GENERALS = {
   yujin:         { id:'yujin',         name:'于禁',   maxHp:4, skill:'毅重',
     desc:'锁定技,若你的装备区里没有防具牌,黑色【杀】对你无效。',
     caps:{ yizhong:true } },
+  yuejin:        { id:'yuejin',        name:'乐进',   maxHp:4, skill:'骁果',
+    desc:'其他角色的结束阶段,你可以弃置一张基本牌,然后该角色选择一项:弃置一张装备牌,你摸一张牌;或受到你造成的1点伤害。',
+    caps:{ xiaoguo:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
