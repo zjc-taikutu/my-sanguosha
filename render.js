@@ -5,14 +5,12 @@ let zhangbaMode = false;
 let zhangbaPicks = [];          // 已选手牌下标,最多 2 个
 function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
 
-// ---------- 按名字生成固定颜色(纯身份标识,不参与任何游戏状态,不入库) ----------
-// 冷色调 8 色,刻意避开现有语义色(朱红=--cinnabar/回合朱红框、金=--gold/回合金框、玉=--jade)
-const NAME_COLORS = ['#6f93b8','#8d72ad','#4f9d97','#6f7fc4','#b3768f','#5f9bb0','#9b72c4','#7a8fa0'];
-function nameColor(name){
-  let h=0;
-  for(let i=0;i<(name||'').length;i++){ h=(h*31+name.charCodeAt(i))|0; }
-  return NAME_COLORS[Math.abs(h)%NAME_COLORS.length];
-}
+// ---------- 按座位号分配固定颜色(纯身份标识,不参与任何游戏状态,不入库) ----------
+// 冷色调 8 色,按 hue 均匀展开(每两色间隔约24°),刻意避开现有语义色(朱红=--cinnabar/回合朱红框、
+// 金=--gold/回合金框、玉=--jade)所在的暖色/绿色区间。按座位号(非名字)分配,同局内 SEATS(≤3)人
+// 或以后更多人,只要座位号不同、颜色必然不同——不会因为名字巧合 hash 到相近色。
+const NAME_COLORS = ['#4fac93','#4f9bab','#5586c4','#6b74c9','#8763c9','#a65fc0','#b95ba3','#b95b7e'];
+function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COLORS.length)%NAME_COLORS.length]; }
 
 // ---------- render ----------
 function render(g){
@@ -60,7 +58,7 @@ function render(g){
       : '';
     d.innerHTML =
       // 姓名文字染身份色(纯识别用,不碰边框/outline——那些留给回合/选目标等状态高亮,优先级更高)
-      '<div class="nm"><span style="color:'+nameColor(p.name)+'">'+escapeHtml(p.name)+'</span>'+
+      '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
       '</div>'+
@@ -119,9 +117,10 @@ function render(g){
   const bn=document.getElementById('banner'); bn.innerHTML='';
   if(g.phase==='respond'&&g.pending){
     const to=g.players[g.pending.to].name, from=g.players[g.pending.from].name;
-    // 攻击者/目标名字各自染身份色,一眼看出"谁在打谁"(仅此 banner;日志是纯文本存储,escapeHtml 后无法带色,不做)
-    const fromSpan='<span style="color:'+nameColor(from)+'">'+escapeHtml(from)+'</span>';
-    const toSpan='<span style="color:'+nameColor(to)+'">'+escapeHtml(to)+'</span>';
+    // 攻击者/目标名字各自染身份色(按座位号,不按名字,避免撞色),一眼看出"谁在打谁"
+    // (仅此 banner;日志是纯文本存储,escapeHtml 后无法带色,不做)
+    const fromSpan='<span style="color:'+seatColor(g.pending.from)+'">'+escapeHtml(from)+'</span>';
+    const toSpan='<span style="color:'+seatColor(g.pending.to)+'">'+escapeHtml(to)+'</span>';
     bn.innerHTML='<div class="banner">'+fromSpan+' 对 '+toSpan+' 出【杀】,等待'+toSpan+'响应…</div>';
   }
   if(g.phase==='duel'&&g.pending){
