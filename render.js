@@ -119,7 +119,10 @@ function render(g){
     // 手牌和装备任一非空即可选,而不是只看手牌——否则"手牌0但有装备"会被 UI 误挡在选目标这一步。
     const hasHandOrEquip = (p.hand||[]).length>0 || EQUIP_SLOTS.some(s=>p.equips && p.equips[s]);
     const inRange = !isShaSel || canReachSha(g, mySeat, i);                 // 杀才受攻击距离限制
-    const targetable = i!==mySeat && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
+    // 默认不能选自己;闪电这类延时锦囊在 CARD_PLAYS 里声明了 allowSelf,放行自选(和服务端 playCard 同一条件)
+    const selSpec = selCard && CARD_PLAYS[isShaSel?'杀':selCard.name];
+    const allowSelf = !!(selSpec && selSpec.allowSelf);
+    const targetable = (i!==mySeat || allowSelf) && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat){
       if(targetable){
         d.style.cursor='pointer';
@@ -516,7 +519,7 @@ function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml(
 // 帮助按钮:一次性列出全部牌/武将/装备说明
 function showHelp(){
   let html='<div class="sec">基础牌 / 锦囊</div>';
-  ['杀','闪','桃','决斗','无中生有','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发'].forEach(n=>{
+  ['杀','闪','桃','决斗','无中生有','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电'].forEach(n=>{
     html+='<div class="item"><b>'+escapeHtml(n)+'</b>：'+escapeHtml(getCardDesc(n))+'</div>'; });
   html+='<div class="sec">武将</div>';
   GENERAL_IDS.forEach(id=>{ const gg=getGeneral(id);

@@ -32,6 +32,21 @@ function getEquip(name){ return EQUIPS[name] || null; } // 唯一查询入口
 // judgeCard=judge(g)翻出的判定牌,card=延时锦囊牌本身。返回数字座位号=传给该玩家(判定区各自独立,不进弃牌堆);
 // 不返回(undefined)=判定完就弃置。加新延时锦囊:1) 这里加一项 2) buildDeck 里加牌——和 EQUIPS 表同一套约定。
 const DELAY_TRICKS = {};
+// 闪电:只能放在自己判定区(onlySelf)。回合开始判定黑桃2~9(不含A/10/J/Q/K)则受到3点无来源伤害、
+// 闪电作废;否则不受伤害,传给下家(nextAlive 环形顺序,阵亡者不占位)。dealDamage 的 sourceSeat
+// 传 undefined——已确认安全:司马懿【反馈】等依赖 sourceSeat 的钩子本来就防御了非数字来源,静默跳过。
+// dealDamage 命中致命时会挂起濒死流程(返回 true),此时 effect 仍返回 'pending' 让 resolveDelayTricks
+// 停止处理、把控制权交还(闪电这张牌本身照常进弃牌堆,和是否致命无关,由 resolveDelayTricks 统一处理)。
+DELAY_TRICKS['闪电'] = {
+  onlySelf:true,
+  effect:(g, seat, judgeCard, card)=>{
+    if(judgeCard.suit==='♠' && judgeCard.rank>=2 && judgeCard.rank<=9){
+      const dying = dealDamage(g, seat, 3, undefined, '【闪电】发动', 'delay');
+      return dying ? 'pending' : undefined;
+    }
+    return nextAlive(g, seat);
+  }
+};
 
 // ---------- 武将定义表(数据结构 + 技能均已实现) ----------
 // 技能有两种表达:被动能力挂 caps(经 generalHasCap/generalCapValue 查),触发型挂 hooks(经 triggerHook 分发);统一经 getGeneral(id) 取用。
@@ -139,6 +154,7 @@ const CARD_DESC = {
   '无懈可击': '抵消一张功能牌(“锦囊”,如决斗、南蛮入侵等)对一名角色的效果;也能抵消别人的【无懈可击】。',
   '南蛮入侵': '你以外的所有角色各需打出一张【杀】,打不出的人受到1点伤害。',
   '万箭齐发': '你以外的所有角色各需打出一张【闪】,打不出的人受到1点伤害。',
+  '闪电': '延时锦囊,只能放在你自己的判定区。轮到你回合开始时判定:黑桃2~9,你受到3点伤害,然后此牌作废;否则无事发生,将此牌移到下一名角色的判定区。',
 };
 function getCardDesc(name){ return CARD_DESC[name] || ''; } // 基础牌/锦囊说明
 // 任意牌的说明统一入口:装备牌走 EQUIPS.desc,基础牌/锦囊走 CARD_DESC。任何位置(手牌/装备区/帮助面板)都用它。
@@ -155,6 +171,8 @@ function buildDeck(){
   // 锦囊(适中,稳定出现不刷屏):29 张
   add('决斗', 4); add('无中生有', 5); add('顺手牵羊', 4); add('过河拆桥', 5); add('无懈可击', 5);
   add('南蛮入侵', 3); add('万箭齐发', 3);
+  // 延时锦囊:闪电影响面广、变数大(可能连续传好几轮才炸),真实规则整副牌也只 1 张,先按 1 张放
+  add('闪电', 1);
   // 装备牌(系统性配比;装备是最小类=点缀):武器 8(4 把各 2,让特效武器更常登场)+ 防具 3(仅八卦阵一种,多给让判定机制常见)
   add('诸葛连弩', 2); add('丈八蛇矛', 2); add('青釭剑', 2); add('麒麟弓', 2); add('八卦阵', 3);
   // 坐骑:+1马 / -1马 各多几匹(同的卢/赤兔机制,无新逻辑),每匹 1 张,整体不至过多

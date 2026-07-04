@@ -501,16 +501,20 @@ function finishDying(g, actuallyDied){
   p.dying=false;
   if(actuallyDied){
     p.alive=false;
-    // 阵亡:所有手牌 + 装备牌弃置进弃牌堆(标准规则),让牌回流、牌库不被抽干
+    // 阵亡:所有手牌 + 装备牌 + 判定区(延时锦囊)弃置进弃牌堆(标准规则),让牌回流、牌库不被抽干
     const equipCards = EQUIP_SLOTS.map(s=> p.equips && p.equips[s]).filter(Boolean);
+    const delayCards = p.delays || [];
     const handCount = (p.hand||[]).length;
-    if(handCount)         g.discard.push(...p.hand);
-    if(equipCards.length) g.discard.push(...equipCards);
+    if(handCount)          g.discard.push(...p.hand);
+    if(equipCards.length)  g.discard.push(...equipCards);
+    if(delayCards.length)  g.discard.push(...delayCards);
     p.hand = [];
     p.equips = emptyEquips(); // 四槽清空
+    p.delays = [];            // 判定区清空
     const parts=[];
-    if(handCount)         parts.push('弃置'+handCount+'张手牌');
-    if(equipCards.length) parts.push('弃置装备'+equipCards.map(c=>'【'+c.name+'】').join(''));
+    if(handCount)          parts.push('弃置'+handCount+'张手牌');
+    if(equipCards.length)  parts.push('弃置装备'+equipCards.map(c=>'【'+c.name+'】').join(''));
+    if(delayCards.length)  parts.push('弃置判定区'+delayCards.map(c=>'【'+c.name+'】').join(''));
     g.log=pushLog(g.log, p.name+' 无人使用【桃】救援,阵亡！'+(parts.length?'（'+parts.join('，')+'）':''));
     // 阵亡弃装备刻意【不】触发 onLoseEquip 失去装备钩子(如枭姬):人已死,死亡结算不再发动常规技能。
     // ⚠️ 日后新增「主动卸载装备」入口时,记得在那里接入 triggerHook(g, seat, 'onLoseEquip', {count}),别漏了枭姬。
@@ -527,6 +531,16 @@ function finishDying(g, actuallyDied){
     }
   } else if(resume.type==='aoe'){
     aoeAdvance(g, seat);
+  } else if(resume.type==='delay'){
+    // 判定区的牌(如闪电)致命挂起后的接回:真死了就换到下一个存活玩家的回合(该玩家的判定阶段
+    // 从头 startTurn);被桃救回就继续处理这位玩家判定区剩余的牌(可能再次挂起,机制天然支持连续多张)。
+    if(!g.players[resume.seat].alive){
+      startTurn(g, nextAlive(g, resume.seat));
+    } else if(resolveDelayTricks(g, resume.seat)==='pending'){
+      g.pending.resume={type:'delay', seat:resume.seat};
+    } else {
+      g.phase='draw';
+    }
   } else { // 'sha' 及其它:攻击者继续出牌阶段
     g.phase='play';
   }
@@ -889,15 +903,24 @@ function endTurn(){
 }
 // startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
 // 顺序:先声明轮到谁,再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
+// 注意:判定区里的牌(如闪电)可能造成伤害而挂起濒死流程(resolveDelayTricks 返回 'pending')——
+// 这时 phase 已经被 startDying 定成 'dying',这里绝不能再把它覆盖成 'draw',
+// 而是记 g.pending.resume={type:'delay',seat},濒死解决后由 finishDying 接回来继续处理剩余的牌。
 function startTurn(g, seat){
   g.turn=seat; g.shaUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
-  resolveDelayTricks(g, seat);
+  if(resolveDelayTricks(g, seat)==='pending'){
+    g.pending.resume={type:'delay', seat};
+    return;
+  }
   g.phase='draw';
 }
 // resolveDelayTricks: 按放置顺序(数组顺序,先放先判——真实规则里玩家可自选顺序,这里简化成固定顺序)
 // 结算判定区里的延时锦囊。地基阶段 DELAY_TRICKS 是空表,循环体不会跑到任何具体效果,只占好位置。
-// 判定阶段本身不开无懈窗口(简化,见 CLAUDE.md);effect 返回数字座位号 = 传给该玩家,否则进弃牌堆。
+// 判定阶段本身不开无懈窗口(简化,见 CLAUDE.md);effect 返回:数字座位号=传给该玩家,
+// 'pending'=这张牌的判定触发了濒死挂起(牌本身仍正常进弃牌堆,和是否致命无关),
+// 否则(undefined)=正常作废进弃牌堆。返回 'pending' 时立刻停止处理该玩家判定区剩余的牌,
+// 把控制权交还给调用方(startTurn/finishDying),不然会在 phase 已经是 'dying' 时继续瞎跑。
 function resolveDelayTricks(g, seat){
   const p=g.players[seat];
   while(p.delays && p.delays.length>0){
@@ -906,15 +929,17 @@ function resolveDelayTricks(g, seat){
     if(!spec){ p.delays.shift(); g.discard.push(card); continue; } // 未知/尚未实现的延时锦囊,安全丢弃防卡死
     const judgeCard=judge(g);
     p.delays.shift();
-    const passTo=spec.effect(g, seat, judgeCard, card);
-    if(typeof passTo==='number' && g.players[passTo]){
-      g.players[passTo].delays = g.players[passTo].delays || [];
-      g.players[passTo].delays.push(card);
-      g.log=pushLog(g.log, '【'+card.name+'】传给了 '+g.players[passTo].name);
+    const result=spec.effect(g, seat, judgeCard, card);
+    if(typeof result==='number' && g.players[result]){
+      g.players[result].delays = g.players[result].delays || [];
+      g.players[result].delays.push(card);
+      g.log=pushLog(g.log, '【'+card.name+'】传给了 '+g.players[result].name);
     } else {
-      g.discard.push(card);
+      g.discard.push(card); // 包括 undefined(正常作废)和 'pending'(挂起濒死,牌仍需归入弃牌堆)
     }
+    if(result==='pending') return 'pending';
   }
+  return 'done';
 }
 function newGame(){
   tx(g=>{
