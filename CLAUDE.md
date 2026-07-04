@@ -107,7 +107,7 @@
 
 **已完成**：
 - 基础流程：摸牌/出牌/弃牌三阶段、回合流转、2~3 人可变人数。
-- 锦囊：杀、闪、桃、决斗、无中生有、顺手牵羊、过河拆桥、无懈可击（按座位逐个询问、问所有存活玩家不泄露手牌）、南蛮入侵、万箭齐发（群体锦囊，逐目标无懈 + 逐目标响应）。
+- 锦囊：杀、闪、桃、决斗、无中生有、顺手牵羊、过河拆桥、无懈可击（按座位逐个询问、问所有存活玩家不泄露手牌，**支持无懈可击反制无懈可击、不限层数**，见下）、南蛮入侵、万箭齐发（群体锦囊，逐目标无懈 + 逐目标响应）。
 - 武将（5 个）：张飞【咆哮】、郭嘉【天妒】、孙尚香【枭姬】（真实版：失去装备摸两张，挂 `hooks.onLoseEquip`）、司马懿【反馈】+【鬼才】（简化版，见下）、赵云【龙胆】。
 - 架构重构：`dealDamage`/`checkWin` 统一伤害胜负、`CARD_PLAYS`+`playCard` 统一出牌入口。
 - 房间清理（结束并清理房间）、重名/重连识别、房间号字符校验。
@@ -118,6 +118,7 @@
 - 顺手牵羊/过河拆桥可作用于**装备区**：`pick` 选牌子阶段——目标有多种可拿/拆对象时弹选择、纯手牌走老路径；手牌隐藏（只随机拿/弃、日志不写牌名）、装备公开（可具名选、日志写牌名）。顺手获得的装备进使用者手牌。拆掉的卢/连弩后距离/能力实时失效（反制成立）。
 - 阵亡时死者**手牌 + 装备**全部弃置进弃牌堆（在濒死解决的 `finishDying` 死亡分支，覆盖所有致死来源：不闪/决斗认输/AOE 不出）。牌随重洗回流，牌库不再被抽干；日志手牌只记张数、装备写牌名。**阵亡弃装备刻意不触发 `onLoseEquip`**（死亡结算不发动常规技能，如枭姬）。
 - **濒死求桃机制**：血量 `<=0` 不再立刻死亡，进入濒死（`p.dying`+`g.pending={type:'dying',seat,asking,resume}`），按座位顺序逐个询问是否打出【桃】救援（复用 `nextAskee`，从濒死者本人开始可自救）；`respondDying` 结算，救回则 `finishDying(g,false)`，问完一圈无人救则 `finishDying(g,true)` 才真正阵亡。出杀不闪/决斗认输/AOE 不出三处致死来源统一经 `dealDamage`→`startDying` 挂起，`finishDying` 按 `resume.type` 接回各自被打断的收尾流程（详见「伤害与胜负」一节）。UI 仿无懈可击的"没有可用牌就不渲染按钮"风格，座位卡显示"濒死"角标。
+- **无懈可击可被无懈可击反制（不限层数）**：`g.pending`（`type:'wuxie'`）新增 `exclude`（当前这轮不问谁，即刚打出上一次无懈的人）+ `depth`（成功打出无懈可击的总次数）。核心是奇偶校验，不是栈：`depth` 为奇数 = 原锦囊/该 AOE 目标最终作废，偶数（含0）= 正常生效——不需要记录"每一层反制了谁"的历史。`openWuxieRound`（重新计算这轮该问谁，问不到人就直接收尾）与 `finishWuxieRound`（按 `depth` 奇偶收尾：`ctx==='aoe'` 走 `aoeAdvance`/`startAoeRespond`，否则 `pending=null` 或 `resolveTrick`）是新的两个公共函数，`startTrick`/`aoeAdvance`（初始化 `exclude=from,depth=0`）与 `respondWuxie`（出无懈：`depth++,exclude=自己`，重新 `openWuxieRound`；不出：`nextAskee(g,exclude,mySeat)` 推进）都统一走这两个函数。每一层反制都是独立的网络往返（一次 `tx`），不是函数递归调用，没有调用栈风险；层数不设人为上限，天然被"无懈可击牌的供给量有限"这个客观条件封顶。UI banner/hint 按 `depth` 是否 >0 区分措辞（"是否使用【无懈可击】" vs "是否用【无懈可击】反制 XX 的【无懈可击】"）。
 - **司马懿【鬼才】（简化版）**：`caps:{guicai:true}`。判定的唯一来源是 `tryBagua`（八卦阵翻牌）；翻牌后若**被判定者本人**是鬼才拥有者且有手牌，挂起 `g.pending={type:'guicai',seat,judgeCard,resume}`（`startGuicai`），本人可选择打出一张手牌替换判定牌（`respondGuicai`，仿丈八蛇矛"先点入口进选牌模式,再点手牌确认"的客户端交互 `guicaiMode`），或直接用原判定牌结算。`finishGuicai` 按 `resume.type`（`'sha'`/`'aoe'`，即 `tryBagua` 调用方传入）接回被打断的收尾流程，和 `finishDying` 按 `resume.type` 分支接回是同一套模式。**简化点**：只支持"判定者自己是鬼才拥有者"，不支持"鬼才拥有者在判定者攻击范围内但不是本人"；扩展路径见 `tryBagua` 函数注释。`tryBagua` 三态返回（`true`/`false`/`'pending'`），两个调用点（`resolveShaUse`、`startAoeRespond`）收到 `'pending'` 立即 `return`，与 `dealDamage` 濒死挂起同一套路。
 
 **进行中**：

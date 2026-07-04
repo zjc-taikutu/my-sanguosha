@@ -85,6 +85,11 @@ function normalize(g){
   } });
   // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
   if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
+  // 无懈反制:exclude(当前轮不问谁的座位号)/depth(成功次数)都应是数字;缺失多半是旧数据,回退到"层0"
+  if(g.pending && g.pending.type==='wuxie'){
+    if(typeof g.pending.exclude!=='number') g.pending.exclude=g.pending.from;
+    if(typeof g.pending.depth!=='number') g.pending.depth=0;
+  }
   // 濒死询问阶段:seat/asking 都应是数字座位号,resume.type 应是字符串;任一不对就整体判无效,防止卡死
   if(g.pending && g.pending.type==='dying'){
     const d=g.pending;
@@ -595,13 +600,36 @@ function nextAskee(g, from, current){
   }
   return null;
 }
-// startTrick: 锦囊牌已进弃牌堆后调用。从 from 的下家开始问;无人可问则直接结算。
+// startTrick: 锦囊牌已进弃牌堆后调用。初始化无懈询问轮次(exclude/depth 见 openWuxieRound 注释),
+// 交给 openWuxieRound 统一处理"算下一个问谁/问不到人就直接收尾"。
 function startTrick(g, info){
-  const first=nextAskee(g, info.from, info.from);
-  if(first===null){ resolveTrick(g, info); return; } // 只剩使用者一人存活
-  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, asking:first};
+  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, exclude:info.from, depth:0};
   g.phase='wuxie';
-  g.log=pushLog(g.log, '询问 '+g.players[first].name+' 是否使用【无懈可击】…');
+  openWuxieRound(g);
+}
+// ===== 无懈可击可被无懈可击反制(不限层数)=====
+// 核心洞察:原锦囊/该 AOE 目标最终是否生效,只取决于"无懈可击总共被成功打出了几次"的奇偶性
+// (depth 为奇数=作废,偶数含0=正常生效),不需要记录"每一层反制了谁"的完整历史栈——
+// 每一层只是把 g.pending 的 exclude(当前这轮不问谁,即刚打出上一次无懈的人)/depth(成功次数)
+// 原地更新,再重新走一遍座位遍历,不存在真正的递归调用,不会有调用栈风险。
+// openWuxieRound: (重新)计算这一轮该问谁;问不到人(exclude 是唯一存活者,极端边界)则直接收尾。
+function openWuxieRound(g){
+  const asking=nextAskee(g, g.pending.exclude, g.pending.exclude);
+  if(asking===null){ finishWuxieRound(g); return; }
+  g.pending.asking=asking;
+  const verb = g.pending.depth>0 ? '反制' : '使用';
+  g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
+}
+// finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
+// 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
+function finishWuxieRound(g){
+  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to};
+  const blocked = (g.pending.depth % 2)===1;
+  if(g.pending.ctx==='aoe'){
+    if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
+  } else {
+    if(blocked){ g.pending=null; g.phase='play'; } else { resolveTrick(g, info); }
+  }
 }
 // resolveTrick: 锦囊真正生效。决斗 -> 进入 duel 弃杀;顺手/拆桥 -> 作用于"手牌+装备",
 // 有多种可拿对象时开"选牌"子阶段交使用者选,唯一对象则直接结算,全空则无效果。
@@ -669,7 +697,8 @@ function pickResolve(choice){
   });
 }
 // respondWuxie: 仅当前被询问者(pending.asking)可响应。
-// 出且确有无懈 -> 锦囊作废、回 play(不套娃);不出 -> 指针移到下一存活玩家,问完一圈则结算。
+// 出且确有无懈 -> depth++、exclude=自己,开新一轮反制窗口(openWuxieRound,可不限层数继续下去);
+// 不出 -> 指针移到下一存活玩家,问完一圈(绕回 exclude)则收尾(finishWuxieRound,按 depth 奇偶判定)。
 // 点"出"但其实没无懈的本地提示在按钮 onclick 里处理,不进 tx,避免改共享状态/泄露手牌。
 function respondWuxie(useWuxie){
   tx(g=>{
@@ -680,28 +709,23 @@ function respondWuxie(useWuxie){
       const idx=me.hand.findIndex(c=>c.name==='无懈可击');
       if(idx<0) return g; // 没牌:状态不变,仍停在本人这一轮(界面按钮保留)
       g.discard.push(me.hand.splice(idx,1)[0]);
-      g.log=pushLog(g.log, me.name+' 打出【无懈可击】,抵消了对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】');
-      if(g.pending.ctx==='aoe'){
-        // 群体锦囊:该目标本次免疫,推进到下一个目标(不影响其他目标)
-        aoeAdvance(g, g.pending.to);
-      } else {
-        g.pending=null; g.phase='play';
-      }
+      // depth===0(反制原锦囊)措辞不同于 depth>=1(反制上一次无懈可击)
+      const target = g.pending.depth>0 ? g.players[g.pending.exclude].name+' 的【无懈可击】' : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
+      g.log=pushLog(g.log, me.name+' 打出【无懈可击】,抵消了'+target);
+      g.pending.depth++;
+      g.pending.exclude=mySeat;
+      openWuxieRound(g);
       return g;
     }
-    // 不出:指针推进到下一个存活玩家;绕回使用者即问完一圈 -> 结算
+    // 不出:指针推进到下一个存活玩家;绕回 exclude 即这一轮问完一圈 -> 收尾
     g.log=pushLog(g.log, me.name+'：不出');
-    const nxt=nextAskee(g, g.pending.from, mySeat);
+    const nxt=nextAskee(g, g.pending.exclude, mySeat);
     if(nxt===null){
-      if(g.pending.ctx==='aoe'){
-        // 无人无懈 -> 要求当前目标打出 杀/闪
-        startAoeRespond(g, g.pending.to);
-      } else {
-        resolveTrick(g, {trick:g.pending.trick, from:g.pending.from, to:g.pending.to});
-      }
+      finishWuxieRound(g);
     } else {
       g.pending.asking=nxt;
-      g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否使用【无懈可击】…');
+      const verb = g.pending.depth>0 ? '反制' : '使用';
+      g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否'+verb+'【无懈可击】…');
     }
     return g;
   });
@@ -719,10 +743,11 @@ function aoeAdvance(g, prevSeat){
     g.log=pushLog(g.log, '【群体锦囊】结算完毕');
     return;
   }
-  // 对该目标开启无懈询问子阶段(asking 从首个存活非使用者起,问所有人)
-  g.pending={type:'wuxie', ctx:'aoe', trick:g.aoe.trick, from, to:next, asking:nextAskee(g, from, from)};
+  // 对该目标开启无懈询问子阶段(exclude/depth 初始化,交给 openWuxieRound 统一处理)
+  g.pending={type:'wuxie', ctx:'aoe', trick:g.aoe.trick, from, to:next, exclude:from, depth:0};
   g.phase='wuxie';
-  g.log=pushLog(g.log, '结算对 '+g.players[next].name+' 的【'+g.aoe.trick+'】,询问 '+g.players[g.pending.asking].name+' 是否使用【无懈可击】…');
+  g.log=pushLog(g.log, '结算对 '+g.players[next].name+' 的【'+g.aoe.trick+'】…');
+  openWuxieRound(g);
 }
 // startAoeRespond: 无人无懈后,要求当前目标打出 杀/闪。整体重建 pending。
 function startAoeRespond(g, target){

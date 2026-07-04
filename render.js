@@ -172,7 +172,10 @@ function render(g){
   if(g.phase==='wuxie'&&g.pending){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 使用【'+escapeHtml(g.pending.trick)+'】,正在询问 '+escapeHtml(asking)+' 是否【无懈可击】…</div>';
+    const text = g.pending.depth>0
+      ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,正在询问 '+asking+' 是否用【无懈可击】反制…'
+      : from+' 对 '+to+' 使用【'+g.pending.trick+'】,正在询问 '+asking+' 是否使用【无懈可击】…';
+    bn.innerHTML='<div class="banner">'+escapeHtml(text)+'</div>';
   }
   if(g.phase==='guicai'&&g.pending&&g.pending.type==='guicai'){
     const p=g.players[g.pending.seat], jc=g.pending.judgeCard;
@@ -272,14 +275,15 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不出'; b2.onclick=()=>respondWuxie(false);
     c.appendChild(b1); c.appendChild(b2);
-    hint.textContent = hasWuxie
-      ? '是否对 '+g.players[g.pending.from].name+' 的【'+g.pending.trick+'】打出【无懈可击】?'
-      : '你没有【无懈可击】,只能点「不出」。';
+    const askText = g.pending.depth>0
+      ? '是否用【无懈可击】反制 '+(g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】?'
+      : '是否对 '+g.players[g.pending.from].name+' 的【'+g.pending.trick+'】打出【无懈可击】?';
+    hint.textContent = hasWuxie ? askText : '你没有【无懈可击】,只能点「不出」。';
     return;
   }
   if(g.phase==='wuxie' && g.pending){
     const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    hint.textContent='等待 '+asking+' 决定是否使用【无懈可击】…';
+    hint.textContent='等待 '+asking+' 决定是否'+(g.pending.depth>0?'反制':'使用')+'【无懈可击】…';
     return;
   }
   if(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.seat===mySeat){
