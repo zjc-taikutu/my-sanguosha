@@ -74,9 +74,12 @@ function render(g){
     const meP=g.players[mySeat];
     const selCard=(selectedCardIdx!==null)?(meP.hand||[])[selectedCardIdx]:null;
     const isShaSel=!!(selCard && canUseAs(meP,selCard,'杀'));               // 选的牌作为杀(含赵云的闪)
-    const needHand=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
+    const needHandOrEquip=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
+    // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
+    // 手牌和装备任一非空即可选,而不是只看手牌——否则"手牌0但有装备"会被 UI 误挡在选目标这一步。
+    const hasHandOrEquip = (p.hand||[]).length>0 || EQUIP_SLOTS.some(s=>p.equips && p.equips[s]);
     const inRange = !isShaSel || canReachSha(g, mySeat, i);                 // 杀才受攻击距离限制
-    const targetable = i!==mySeat && p.alive && (!needHand || (p.hand||[]).length>0) && inRange;
+    const targetable = i!==mySeat && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat){
       if(targetable){
         d.style.cursor='pointer';
