@@ -109,6 +109,9 @@ const GENERALS = {
   zhenji:        { id:'zhenji',        name:'甄姬',   maxHp:3, skill:'洛神/倾国',
     desc:'洛神:回合开始时,你可以进行判定,若结果为黑色,你获得这张判定牌(计入手牌),并可以再次发动(直到红色或你选择停止)。倾国:你可以将黑色手牌当【闪】使用或打出。',
     caps:{ luoshen:true, qingguo:true } },
+  zhangliao:     { id:'zhangliao',     name:'张辽',   maxHp:4, skill:'突袭',
+    desc:'摸牌阶段,你可以放弃摸牌,改为从至多两名其他角色的手牌中各摸一张牌。',
+    caps:{ tuxi:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

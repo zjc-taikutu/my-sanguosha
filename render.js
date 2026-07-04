@@ -7,6 +7,11 @@ let guicaiMode = false;
 function resetGuicai(){ guicaiMode=false; }
 let zhangbaPicks = [];          // 已选手牌下标,最多 2 个
 function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
+// 张辽【突袭】:摸牌阶段点"发动突袭"进选目标模式(纯客户端,不入库),选 1~2 名座位后点"确认"才发动。
+// 和 zhangbaMode 的关键区别:数量可变(1或2都合法),不能靠"选满自动触发",必须有独立确认按钮。
+let tuxiMode = false;
+let tuxiPicks = [];              // 已选目标座位号,最多 2 个
+function resetTuxi(){ tuxiMode=false; tuxiPicks=[]; }
 let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
@@ -63,6 +68,8 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
+  // 同款兜底:只要不在「自己的摸牌阶段」,就退出突袭选目标模式。
+  if(!(g.started && g.phase==='draw' && g.turn===mySeat)) resetTuxi();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
   (g.players||[]).forEach((p,i)=>{
@@ -150,6 +157,23 @@ function render(g){
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
         d.innerHTML += '<span class="tag" style="position:absolute;top:8px;right:8px;background:#3a2f28">够不着</span>';
+      }
+    }
+    // 张辽【突袭】选目标模式:点存活的其他玩家 = 切换选中/取消,上限 min(2,其他存活玩家数)。
+    if(tuxiMode && g.phase==='draw' && g.turn===mySeat && i!==mySeat && p.alive){
+      const otherAliveCount = g.players.filter((pp,ii)=>ii!==mySeat && pp && pp.alive).length;
+      const maxPick = Math.min(2, otherAliveCount);
+      const picked = tuxiPicks.includes(i);
+      const selectable = picked || tuxiPicks.length<maxPick;
+      if(selectable){
+        d.style.cursor='pointer';
+        if(picked) d.style.outline='3px solid var(--gold)';
+        else d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.onclick=()=>{
+          if(picked) tuxiPicks = tuxiPicks.filter(x=>x!==i);
+          else if(tuxiPicks.length<maxPick) tuxiPicks.push(i);
+          render(g);
+        };
       }
     }
     seatsEl.appendChild(d);
@@ -444,8 +468,28 @@ function renderControls(g){
   }
   // it's my turn
   if(g.phase==='draw'){
-    const b=document.createElement('button'); b.className='primary';
-    b.textContent='摸两张牌'; b.onclick=doDraw; c.appendChild(b);
+    // 张辽【突袭】:其他存活玩家里至少一人有手牌才值得开这个入口,否则跟没有技能一样不渲染。
+    const others = g.players.map((p,i)=>({p,i})).filter(o=>o.i!==mySeat && o.p && o.p.alive);
+    const tuxiAvailable = hasCap(me,'tuxi') && others.some(o=>(o.p.hand||[]).length>0);
+    const maxPick = Math.min(2, others.length);
+    if(tuxiMode){
+      hint.textContent='【突袭】选择 1~'+maxPick+' 名角色,各摸一张手牌(已选 '+tuxiPicks.length+'/'+maxPick+')。';
+      if(tuxiPicks.length>=1){
+        const ok=document.createElement('button'); ok.className='primary';
+        ok.textContent='确认发动'; ok.onclick=()=>{ const picks=tuxiPicks.slice(); resetTuxi(); respondTuxi(picks); };
+        c.appendChild(ok);
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetTuxi(); render(g); }; c.appendChild(cb);
+    } else {
+      const b=document.createElement('button'); b.className='primary';
+      b.textContent='摸两张牌'; b.onclick=doDraw; c.appendChild(b);
+      if(tuxiAvailable){
+        const tb=document.createElement('button'); tb.className='ghost';
+        tb.textContent='发动【突袭】'; tb.onclick=()=>{ tuxiMode=true; tuxiPicks=[]; render(g); };
+        c.appendChild(tb);
+      }
+    }
   } else if(g.phase==='play'){
     // 本回合是否还能出杀(与单张杀 canPlay 同口径:未出过 或 有无限杀)
     const canSha = !g.shaUsed || hasCap(me,'unlimitedSha');

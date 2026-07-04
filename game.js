@@ -312,6 +312,35 @@ function doDraw(){
     return g;
   });
 }
+// respondTuxi: 张辽【突袭】——摸牌阶段放弃摸牌,改为从 1~2 名其他存活玩家的手牌里各随机拿一张。
+// targets 是 1~2 个座位号(不含自己、不重复、都要存活);校验不过直接不生效(状态不变)。
+// 选到没手牌的目标不算错误,只是拿不到牌,记一条日志说明,不阻断其余目标的结算。
+// 和顺手牵羊不同:这是摸牌阶段的替代行为,不是出牌阶段的锦囊,不开无懈可击窗口,同步直接结算。
+function respondTuxi(targets){
+  tx(g=>{
+    if(g.phase!=='draw'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!hasCap(me,'tuxi')) return g;
+    if(!Array.isArray(targets) || targets.length<1 || targets.length>2) return g;
+    const seen=new Set();
+    for(const t of targets){
+      if(typeof t!=='number' || t===mySeat || !g.players[t] || !g.players[t].alive || seen.has(t)) return g;
+      seen.add(t);
+    }
+    targets.forEach(t=>{
+      const tgt=g.players[t];
+      if((tgt.hand||[]).length>0){
+        const j=Math.floor(Math.random()*tgt.hand.length);
+        me.hand.push(tgt.hand.splice(j,1)[0]);
+        g.log=pushLog(g.log, me.name+' 发动【突袭】,从 '+tgt.name+' 拿走一张手牌');
+      } else {
+        g.log=pushLog(g.log, me.name+' 发动【突袭】,但 '+tgt.name+' 没有手牌');
+      }
+    });
+    g.phase='play';
+    return g;
+  });
+}
 // ===== 统一出牌入口:出牌阶段所有牌共用样板,各牌独特部分在 CARD_PLAYS 表里 =====
 // actionId:除"杀"外都等于 card.name;杀固定为 '杀'(赵云的闪也走杀,物理牌名可能是'闪')。
 // 每项:canPlay(身份+独特前置校验)、target(是否指定目标,决定走不走统一目标校验)、effect(独特效果+日志)。
