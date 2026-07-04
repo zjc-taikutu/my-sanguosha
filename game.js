@@ -108,6 +108,8 @@ function normalize(g){
   }
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
+  // 乐不思蜀:跳过出牌阶段的标志位,和 p.dying 同款防御
+  if(typeof g.skipPlay!=='boolean') g.skipPlay=false;
   return g;
 }
 function pushLog(log, msg){
@@ -245,8 +247,16 @@ function doDraw(){
     const me=g.players[mySeat];
     const n = 2 + generalCapValue(me,'extraDrawPhase',0); // 基础2张 + extraDrawPhase 额外摸牌(通用数值 seam,当前暂无武将/装备使用)
     drawN(g, mySeat, n);
-    g.phase='play';
     g.log=pushLog(g.log, me.name+' 摸了'+n+'张牌');
+    // 乐不思蜀:摸牌阶段照常摸牌,只是不给出牌机会——判定成功时 resolveDelayTricks 已经设过 g.skipPlay,
+    // 这里(原本要进 play 阶段的那一刻)消费掉,直接跳去 discard(该弃就弃、没超限就直接可以结束回合)。
+    if(g.skipPlay){
+      g.skipPlay=false;
+      g.log=pushLog(g.log, me.name+' 因【乐不思蜀】跳过出牌阶段');
+      g.phase='discard';
+    } else {
+      g.phase='play';
+    }
     return g;
   });
 }
