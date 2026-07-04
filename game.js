@@ -396,6 +396,17 @@ const CARD_PLAYS = {
       startTrick(g, {trick:'无中生有', from:mySeat, to:mySeat});
     }
   },
+  '桃园结义': {
+    target:false,
+    canPlay:(g,me,card)=> card.name==='桃园结义',
+    effect:(g,me,card)=>{
+      g.log=pushLog(g.log, me.name+' 使用【桃园结义】');
+      // 对全场存活角色生效(含自己),无懈抵消的是这次使用的整体效果(全场都不回血),
+      // 不是逐个单独无懈——所以和无中生有同一个模板:开一次无懈窗口,to 只是占位
+      // (resolveTrick 里真正生效时循环所有存活玩家,不会用 info.to 做单人操作)。
+      startTrick(g, {trick:'桃园结义', from:mySeat, to:mySeat});
+    }
+  },
   '顺手牵羊': {
     target:true,
     canPlay:(g,me,card)=> card.name==='顺手牵羊',
@@ -963,6 +974,13 @@ function resolveTrick(g, info){
     drawN(g, info.from, 2);
     g.pending=null; g.phase='play';
     g.log=pushLog(g.log, g.players[info.from].name+' 【无中生有】生效,摸两张牌');
+    return;
+  }
+  if(info.trick==='桃园结义'){
+    // 对所有存活角色生效(含使用者自己);已满血的人跳过,不溢出、不报错。
+    g.players.forEach(p=>{ if(p && p.alive && p.hp<p.maxHp) p.hp++; });
+    g.pending=null; g.phase='play';
+    g.log=pushLog(g.log, g.players[info.from].name+' 【桃园结义】生效,所有存活角色回复1点体力');
     return;
   }
   if(DELAY_TRICKS[info.trick]){
