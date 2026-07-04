@@ -139,13 +139,6 @@
   }
   .controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:6px;}
 
-  .log{
-    text-align:left;max-height:120px;overflow:auto;font-size:12.5px;color:var(--paper-dim);
-    border-top:1px solid var(--line);margin-top:12px;padding-top:8px;
-  }
-  .log div{padding:1px 0;}
-  .log div:last-child{color:var(--paper);}
-
   /* hand */
   .hand-label{font-size:12px;letter-spacing:.14em;color:var(--paper-dim);margin:14px 0 8px;}
   .hand{display:flex;gap:10px;flex-wrap:wrap;}
@@ -208,6 +201,13 @@
   .icon-btn{padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:50%;}
   #helpBtn{position:fixed;top:12px;right:12px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:20px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  /* 日志按钮:和 helpBtn 同款固定圆形图标,挨着放(往左让位),点开复用 showInfo/infoModal 浮层——
+     日志默认收起,只留这一个入口,和第4步"banner常驻焦点 + 完整历史收进可展开面板"的设计一致。 */
+  #logBtn{position:fixed;top:12px;right:64px;z-index:50;width:44px;height:44px;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
+  .log-modal div{padding:2px 0;}
+  .log-modal div:last-child{color:var(--paper);}
   #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
   #infoModal.hidden{display:none;}
   .info-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:560px;width:100%;
@@ -233,6 +233,7 @@
 <body>
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
 <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
+<button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
 <div class="wrap">
@@ -274,7 +275,6 @@
       <div class="deckinfo" id="deckInfo"></div>
       <div id="banner"></div>
       <div class="controls" id="controls"></div>
-      <div class="log" id="log"></div>
     </div>
 
     <div class="hand-label" id="myGeneral"></div>

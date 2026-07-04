@@ -34,6 +34,9 @@ function resetQiaobian(){ qiaobianMode=false; qiaobianCardIdx=null; qiaobianSrc=
 let jiedaoSeatA = null;
 function resetJiedao(){ jiedaoSeatA=null; }
 let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
+// 日志浮层:默认收起,点 #logBtn 打开,复用 showInfo/#infoModal 机制(见 renderLogModal)。
+// 这个标志只是"面板现在开着吗",供 render() 判断要不要跟着这次状态更新同步刷新面板内容。
+let logModalOpen = false;
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
 function showConfirm(message, onOk, onCancel){
@@ -301,10 +304,9 @@ function render(g){
   renderControls(g);
   renderHand(g);
 
-  // log
-  const logEl=document.getElementById('log');
-  logEl.innerHTML=(g.log||[]).map(l=>'<div>'+escapeHtml(l)+'</div>').join('');
-  logEl.scrollTop=logEl.scrollHeight;
+  // 日志不再常驻:默认收起,只有 #logBtn 点开的浮层打开着时才需要跟着这次 render 同步刷新内容
+  // (Firebase 是实时推送,面板开着的时候底下状态可能还在变,不刷新就会显示过期日志)。
+  if(logModalOpen) renderLogModal(g);
 }
 
 function renderControls(g){
@@ -859,7 +861,19 @@ function showInfo(title, bodyHtml){
   m.querySelector('.info-close').onclick=hideInfo;
   m.querySelector('.info-panel').onclick=(e)=>e.stopPropagation(); // 点面板本身不关闭
 }
-function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.add('hidden'); m.innerHTML=''; }
+function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.add('hidden'); m.innerHTML=''; logModalOpen=false; }
+// showLog/renderLogModal: 日志浮层,复用 showInfo/#infoModal(和武将/装备说明、帮助面板同一套
+// "只读+关闭"组件),不是新造的展开/收起控件。区别于那些一次性静态内容:日志在面板开着时
+// 还会继续变化(Firebase 实时推送),所以 render() 每次都会在 logModalOpen 为真时重新调用
+// renderLogModal 刷新内容,而不是只在打开的一瞬间生成一次。
+function showLog(){ logModalOpen=true; renderLogModal(currentG); }
+function renderLogModal(g){
+  if(!logModalOpen || !g) return;
+  const html=(g.log||[]).map(l=>'<div>'+escapeHtml(l)+'</div>').join('');
+  showInfo('日志', '<div class="log-modal">'+html+'</div>');
+  const body=document.querySelector('#infoModal .log-modal');
+  if(body) body.scrollTop=body.scrollHeight; // 每次刷新都跟到最新一条,和以前常驻日志的行为一致
+}
 // 供座位卡内联触发(武将/装备,均公开信息);inline onclick 已 stopPropagation,不触发选目标
 function showGeneralInfo(id){ const gen=getGeneral(id); if(gen) showInfo(gen.name+' · '+gen.skill, escapeHtml(gen.desc||'(暂无说明)')); }
 function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml((e&&e.desc)||'(暂无说明)')); }
