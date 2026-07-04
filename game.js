@@ -80,9 +80,18 @@ function normalize(g){
     if(typeof p.maxHp!=='number') p.maxHp = MAX_HP;
     // 装备区防御:Firebase 吞 null 值/空对象,读回来容器会缺失或缺键;补容器 + 补齐四槽(缺的回退 null)
     p.equips = Object.assign(emptyEquips(), p.equips || {});
+    // 濒死标记:纯 UI 提示用的布尔标量,和 alive 同款防御
+    if(typeof p.dying!=='boolean') p.dying=false;
   } });
   // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
   if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
+  // 濒死询问阶段:seat/asking 都应是数字座位号,resume.type 应是字符串;任一不对就整体判无效,防止卡死
+  if(g.pending && g.pending.type==='dying'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.resume || typeof d.resume.type!=='string'){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   return g;
@@ -145,7 +154,7 @@ function startGame(){
     g.players.forEach((p,i)=>{
       p.general = randomGeneralId();           // 随机分配武将(允许重复)
       p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true;
+      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false;
       p.equips = emptyEquips();                // 装备区:开局四槽全空
       drawN(g,i,START_HAND);
     });
@@ -329,14 +338,67 @@ function playZhangbaSha(idx1, idx2, targetSeat){
   });
 }
 // ===== 伤害 / 胜负 统一处理(为日后武将技能铺路) =====
-// dealDamage: 只负责扣血 + 死亡判定 + 相关日志,不推进阶段、不判胜负。
-// 返回该玩家是否在本次伤害中阵亡。sourceSeat 暂存伤害来源,供日后技能使用。
+// dealDamage: 只负责扣血 + 死亡判定挂起 + 相关日志,不推进阶段、不判胜负。
+// 返回值语义:是否已挂起进入濒死流程(true = 调用方应立即 return,后续收尾延后到 finishDying 处理;
+// 不代表最终真死——濒死可能被桃救回)。sourceSeat 暂存伤害来源,供日后技能使用。
 function dealDamage(g, seat, amount, sourceSeat, reason, srcType){
   const p=g.players[seat];
   if(!p) return false;
   p.hp -= amount;
   g.log=pushLog(g.log, p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点伤害（体力'+p.hp+'）');
   if(p.hp<=0){
+    startDying(g, seat, srcType);
+    return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解决时统一处理)
+  }
+  // 实际受伤且存活 -> 触发"受到伤害后"钩子(如郭嘉【天妒】)。srcType 标识伤害来源类型('sha'/'duel'/'aoe'),现有钩子忽略,备将来用。
+  if(amount>0) triggerHook(g, seat, 'onDamaged', { amount, sourceSeat, srcType });
+  return false;
+}
+// ===== 濒死求桃:血量<=0 不立刻死亡,按座位顺序逐个询问是否打出【桃】救援 =====
+// startDying: 由 dealDamage 在 hp<=0 时调用。从濒死者本人开始问(可自救),
+// resume 记下"濒死解决后该接回哪条流程的尾巴"(取值就是调用方本来就在传的 srcType)。
+function startDying(g, seat, resumeType){
+  const p=g.players[seat];
+  p.dying=true;
+  g.pending={type:'dying', seat, asking:seat, resume:{type:resumeType}};
+  g.phase='dying';
+  g.log=pushLog(g.log, p.name+' 濒死！询问 '+p.name+' 是否使用【桃】自救…');
+}
+// respondDying: 仅当前被问的人(pending.asking)可响应。
+// 打出桃:回1点体力;若脱离濒死(hp>0)则 finishDying(false)结束;若仍<=0,留在同一个人身上,
+// 允许其继续追加桃(接力仍在此人,若无更多桃则界面只剩"不救"可点)。
+// 不救:用 nextAskee(from=濒死者座位) 推进到下一个存活玩家;绕回濒死者本人 = 问完一圈,无人救 -> finishDying(true)。
+function respondDying(useTao){
+  tx(g=>{
+    if(g.phase!=='dying'||!g.pending||g.pending.type!=='dying') return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || g.pending.asking!==mySeat) return g;
+    const dyingP=g.players[g.pending.seat];
+    if(useTao){
+      const idx=findUsableAs(me.hand, me, '桃'); // 复用 canUseAs/findUsableAs seam,不硬编码牌名
+      if(idx<0) return g; // 没有桃:状态不变(双重保险,按钮本就不该出现)
+      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      dyingP.hp++;
+      g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' 打出【'+card.name+'】,回复1点体力（体力'+dyingP.hp+'）');
+      if(dyingP.hp>0){ finishDying(g, false); }
+      return g;
+    }
+    g.log=pushLog(g.log, me.name+'：不使用【桃】');
+    const nxt=nextAskee(g, g.pending.seat, mySeat);
+    if(nxt===null){ finishDying(g, true); return g; }
+    g.pending.asking=nxt;
+    g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否对 '+dyingP.name+' 使用【桃】…');
+    return g;
+  });
+}
+// finishDying: 濒死解决(获救或真死)。真死时把原 dealDamage 里的"阵亡弃牌"逻辑搬到这里执行;
+// 随后按 pending.resume.type 接回原来被 dealDamage 打断的那条流程的尾巴
+// (respondShan/duelResponse/aoeRespond 各自原有的 checkWin+阶段推进逻辑,原样不变、只是延后到此刻执行)。
+function finishDying(g, actuallyDied){
+  const seat=g.pending.seat, resume=g.pending.resume;
+  const p=g.players[seat];
+  p.dying=false;
+  if(actuallyDied){
     p.alive=false;
     // 阵亡:所有手牌 + 装备牌弃置进弃牌堆(标准规则),让牌回流、牌库不被抽干
     const equipCards = EQUIP_SLOTS.map(s=> p.equips && p.equips[s]).filter(Boolean);
@@ -345,18 +407,30 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType){
     if(equipCards.length) g.discard.push(...equipCards);
     p.hand = [];
     p.equips = emptyEquips(); // 四槽清空
-    // 日志合并一条:装备公开写明牌名,手牌只记张数(隐藏,不列具体牌)
     const parts=[];
     if(handCount)         parts.push('弃置'+handCount+'张手牌');
     if(equipCards.length) parts.push('弃置装备'+equipCards.map(c=>'【'+c.name+'】').join(''));
-    g.log=pushLog(g.log, p.name+' 阵亡！'+(parts.length?'（'+parts.join('，')+'）':''));
+    g.log=pushLog(g.log, p.name+' 无人使用【桃】救援,阵亡！'+(parts.length?'（'+parts.join('，')+'）':''));
     // 阵亡弃装备刻意【不】触发 onLoseEquip 失去装备钩子(如枭姬):人已死,死亡结算不再发动常规技能。
     // ⚠️ 日后新增「主动卸载装备」入口时,记得在那里接入 triggerHook(g, seat, 'onLoseEquip', {count}),别漏了枭姬。
-    return true; // 阵亡:不触发受伤后钩子(行为不变,调用方据此再走 checkWin)
+  } else {
+    g.log=pushLog(g.log, p.name+' 脱离濒死！');
   }
-  // 实际受伤且存活 -> 触发"受到伤害后"钩子(如郭嘉【天妒】)。srcType 标识伤害来源类型('sha'/'duel'/'aoe'),现有钩子忽略,备将来用。
-  if(amount>0) triggerHook(g, seat, 'onDamaged', { amount, sourceSeat, srcType });
-  return false;
+  g.pending=null;
+  if(checkWin(g)) return;
+  if(resume.type==='duel'){
+    if(!g.players[g.turn].alive){
+      const nxt=nextAlive(g, g.turn);
+      g.turn=nxt; g.phase='draw'; g.shaUsed=false;
+      g.log=pushLog(g.log, '轮到 '+g.players[nxt].name);
+    } else {
+      g.phase='play';
+    }
+  } else if(resume.type==='aoe'){
+    aoeAdvance(g, seat);
+  } else { // 'sha' 及其它:攻击者继续出牌阶段
+    g.phase='play';
+  }
 }
 // 麒麟弓:杀造成伤害且目标存活时,弃目标一匹坐骑。0匹→无效果;1匹→直接弃;2匹→开选马子阶段(攻击者选)。
 // 返回 true 表示已开选马子阶段(调用方应提前返回、不做收尾)。仅由「杀造成伤害」处调用(srcType==='sha')。
@@ -423,7 +497,8 @@ function duelResponse(useSha){
     // 注意:此处 sourceSeat 传的是 pending.from(决斗发起者)。决斗发起者本人认输受伤时,
     // sourceSeat 会等于受害者本人,导致司马懿【反馈】等依赖"伤害来源"的技能在该边角不触发;
     // 日后若要精确,应传"对手座位"(发起者受伤时传 pending.to,目标受伤时传 pending.from)。
-    dealDamage(g, mySeat, 1, g.pending.from, '不出【杀】', 'duel');
+    const dying = dealDamage(g, mySeat, 1, g.pending.from, '不出【杀】', 'duel');
+    if(dying) return g; // 濒死流程接管,后续(轮转/阶段)延后到 finishDying 处理
     g.pending=null;
     if(checkWin(g)) return g;
     // 若回合玩家在决斗中阵亡,直接换下家;否则回合玩家继续出牌阶段
@@ -607,7 +682,8 @@ function aoeRespond(useCard){
       return g;
     }
     // 不出:受到1点伤害
-    dealDamage(g, mySeat, 1, g.pending.from, '未打出【'+need+'】', 'aoe');
+    const dying = dealDamage(g, mySeat, 1, g.pending.from, '未打出【'+need+'】', 'aoe');
+    if(dying) return g; // 濒死流程接管,后续(aoeAdvance)延后到 finishDying 处理
     if(checkWin(g)) return g;
     aoeAdvance(g, mySeat); // 未结束才推进到下一目标
     return g;
@@ -624,9 +700,10 @@ function respondShan(useShan){
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
       g.log=pushLog(g.log, me.name+(card.name==='闪'?' 使用【闪】抵消':' 使用【'+card.name+'】当【闪】抵消'));
     } else {
-      const died = dealDamage(g, mySeat, 1, g.pending.from, '不闪', 'sha');
+      const dying = dealDamage(g, mySeat, 1, g.pending.from, '不闪', 'sha');
+      if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
-      if(!died && maybeStartQilin(g, g.pending.from, mySeat)) return g;
+      if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
     }
     g.pending=null;
     if(checkWin(g)) return g;
@@ -674,7 +751,7 @@ function newGame(){
     g.players.forEach(p=>{
       p.general = randomGeneralId();     // 每局重新随机换将
       p.maxHp = generalMaxHp(p.general); // 异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true;
+      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false;
       p.equips = emptyEquips();          // 装备区:每局重置为四槽全空
     });
     g.log=pushLog(g.log,'重置房间,可再次开始');

@@ -93,6 +93,7 @@ function render(g){
       '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
+        (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'')+
       '</div>'+
       '<div class="meta"'+(g.started&&gen?' title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'"':'')+'>武将 '+escapeHtml(genLabel)+
         (g.started&&gen?' · '+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+'</div>'+
@@ -145,7 +146,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -167,6 +168,10 @@ function render(g){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
     bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 使用【'+escapeHtml(g.pending.trick)+'】,正在询问 '+escapeHtml(asking)+' 是否【无懈可击】…</div>';
+  }
+  if(g.phase==='dying'&&g.pending&&g.pending.type==='dying'){
+    const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking];
+    bn.innerHTML='<div class="banner">'+escapeHtml(dyingP?dyingP.name:'?')+' 濒死！正在询问 '+escapeHtml(asking?asking.name:'?')+' 是否使用【桃】…</div>';
   }
   if(g.phase==='aoeResp'&&g.pending&&g.aoe){
     const to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
@@ -266,6 +271,29 @@ function renderControls(g){
   if(g.phase==='wuxie' && g.pending){
     const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
     hint.textContent='等待 '+asking+' 决定是否使用【无懈可击】…';
+    return;
+  }
+  if(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===mySeat){
+    const dyingP=g.players[g.pending.seat];
+    const isSelf = g.pending.seat===mySeat;
+    const hasTao = me.hand.some(card=>canUseAs(me,card,'桃'));
+    if(hasTao){
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent = isSelf ? '打出【桃】自救' : '打出【桃】救 '+dyingP.name;
+      b1.onclick=()=>respondDying(true);
+      c.appendChild(b1);
+    }
+    const b2=document.createElement('button');
+    b2.textContent='不救'; b2.onclick=()=>respondDying(false);
+    c.appendChild(b2);
+    hint.textContent = hasTao
+      ? (isSelf ? '你濒死,是否打出【桃】自救?' : '是否对 '+dyingP.name+' 打出【桃】救援?')
+      : '你没有【桃】,只能选择不救。';
+    return;
+  }
+  if(g.phase==='dying' && g.pending && g.pending.type==='dying'){
+    const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
+    hint.textContent='等待 '+asking+' 决定是否对 '+(dyingP?dyingP.name:'?')+' 使用【桃】…';
     return;
   }
   if(g.phase==='aoeResp' && g.pending && g.pending.to===mySeat){

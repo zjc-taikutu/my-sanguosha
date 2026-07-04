@@ -25,9 +25,10 @@
 - 标量字段（数字、字符串、布尔）不受此影响，但数字 0、布尔 false 要确认不会被误判。
 
 ### 伤害与胜负（统一入口，不要绕过）
-- **所有掉血走 `dealDamage(g, seat, amount, sourceSeat, reason)`**：只负责扣血 + 死亡判定 + 日志，返回是否阵亡。不推进阶段、不判胜负。
+- **所有掉血走 `dealDamage(g, seat, amount, sourceSeat, reason, srcType)`**：只负责扣血 + 死亡判定挂起 + 日志。**返回值语义**：`true` = 已挂起进入濒死流程（调用方应立即 `return`，不做后续收尾——收尾延后到濒死解决时统一处理，见下条「濒死求桃」）；`false` = 本次伤害未致命，正常继续。**不代表"是否真死"**——挂起后可能被桃救回。不推进阶段、不判胜负。
+- **濒死求桃**：`hp<=0` 时不立刻死亡，`dealDamage` 转调 `startDying(g, seat, srcType)` 挂起，按座位顺序（从濒死者本人开始，复用 `nextAskee`）逐个询问是否打出【桃】救援，`respondDying(useTao)` 结算。问完一圈无人救 / 无人有桃 → `finishDying(g, true)` 才真正阵亡（原「阵亡弃牌」逻辑就在这里）；中途回血 >0 → `finishDying(g, false)` 救回。`finishDying` 还负责接回被打断的那条流程的尾巴——用 `pending.resume.type`（值就是调用方传的 `srcType`：`'sha'`/`'duel'`/`'aoe'`）决定 `checkWin` 之后该怎么继续（攻击者继续出牌 / 回合切换 / `aoeAdvance` 到下个目标），这段尾巴和原来 `respondShan`/`duelResponse`/`aoeRespond` 各自的收尾代码完全一致，只是延后执行。三个调用点因此**不需要各自实现濒死逻辑**，只需在 `dealDamage` 返回 `true` 时 `return g` 跳过自己的尾巴。
 - **胜负走 `checkWin(g)`**：存活 ≤1 则置 `over`/`winner`、清 `pending`/`aoe`、记日志，返回 true。
-- 标准用法：`dealDamage(...)` → `if(checkWin(g)) return g;` → 否则继续各自的阶段推进。
+- 标准用法（无濒死时不变）：`dealDamage(...)` → 若返回 `true` 则 `return g`（濒死流程接管）→ 否则 `if(checkWin(g)) return g;` → 否则继续各自的阶段推进。
 
 ### 武将技能系统（核心，扩展时照这套来）
 - 武将集中定义在 **`GENERALS` 表**（id → {name, maxHp, skill, desc, caps?, hooks?}）。
@@ -115,7 +116,8 @@
 - 能力来源统一：`hasCap = generalHasCap || equipHasCap`，布尔能力可由武将 `caps` 或装备 `cap` 提供。首个武器特效 **诸葛连弩【无限杀】**（`cap:'unlimitedSha'`）已生效，与张飞【咆哮】共用同一 seam、可叠加、实时失效。
 - 武器特效 **丈八蛇矛【两张手牌当一个杀】**（`cap:'twoAsSha'`，走 `hasCap`）已完成：杀的结算抽成共享入口 `resolveShaUse`（普通杀与丈八共用，`shaUsed`/`pending`/`respond`/距离/次数口径不分叉）；「选两张牌」是纯客户端交互（`zhangbaMode`/`zhangbaPicks`，与单张 `selectedCardIdx` 路径互斥并存、不入库），选满两张再点目标，专用 `playZhangbaSha` 结算（两张进弃牌堆后走 `resolveShaUse`）。次数/距离(range3)/目标响应与普通杀完全一致。
 - 顺手牵羊/过河拆桥可作用于**装备区**：`pick` 选牌子阶段——目标有多种可拿/拆对象时弹选择、纯手牌走老路径；手牌隐藏（只随机拿/弃、日志不写牌名）、装备公开（可具名选、日志写牌名）。顺手获得的装备进使用者手牌。拆掉的卢/连弩后距离/能力实时失效（反制成立）。
-- 阵亡时死者**手牌 + 装备**全部弃置进弃牌堆（在 `dealDamage` 死亡分支，覆盖所有致死来源：不闪/决斗认输/AOE 不出）。牌随重洗回流，牌库不再被抽干；日志手牌只记张数、装备写牌名。**阵亡弃装备刻意不触发 `onLoseEquip`**（死亡结算不发动常规技能，如枭姬）。
+- 阵亡时死者**手牌 + 装备**全部弃置进弃牌堆（在濒死解决的 `finishDying` 死亡分支，覆盖所有致死来源：不闪/决斗认输/AOE 不出）。牌随重洗回流，牌库不再被抽干；日志手牌只记张数、装备写牌名。**阵亡弃装备刻意不触发 `onLoseEquip`**（死亡结算不发动常规技能，如枭姬）。
+- **濒死求桃机制**：血量 `<=0` 不再立刻死亡，进入濒死（`p.dying`+`g.pending={type:'dying',seat,asking,resume}`），按座位顺序逐个询问是否打出【桃】救援（复用 `nextAskee`，从濒死者本人开始可自救）；`respondDying` 结算，救回则 `finishDying(g,false)`，问完一圈无人救则 `finishDying(g,true)` 才真正阵亡。出杀不闪/决斗认输/AOE 不出三处致死来源统一经 `dealDamage`→`startDying` 挂起，`finishDying` 按 `resume.type` 接回各自被打断的收尾流程（详见「伤害与胜负」一节）。UI 仿无懈可击的"没有可用牌就不渲染按钮"风格，座位卡显示"濒死"角标。
 
 **进行中**：
 - 装备系统：数据结构 + 装备进出 + 距离/射程 + 诸葛连弩无限杀 + 丈八蛇矛两张当杀 + 顺手/拆桥作用于装备已完成；**待做其余武器/防具特效**——八卦阵（受杀时闪的判定）等，以及主动卸载装备。
