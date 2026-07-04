@@ -278,7 +278,11 @@ const CARD_PLAYS = {
   '无中生有': {
     target:false,
     canPlay:(g,me,card)=> card.name==='无中生有',
-    effect:(g,me,card)=>{ drawN(g, mySeat, 2); g.log=pushLog(g.log, me.name+' 使用【无中生有】摸两张牌'); }
+    effect:(g,me,card)=>{
+      g.log=pushLog(g.log, me.name+' 使用【无中生有】');
+      // 目标是自己(只影响使用者本人):先开无懈窗口,无人无懈(或反制后恢复生效)才真正摸牌(见 resolveTrick)
+      startTrick(g, {trick:'无中生有', from:mySeat, to:mySeat});
+    }
   },
   '顺手牵羊': {
     target:true,
@@ -640,6 +644,12 @@ function resolveTrick(g, info){
     g.phase='duel';
     g.log=pushLog(g.log, '【决斗】开始,'+tgt.name+' 先出杀');
     return; // duel 流程自身不再触发无懈
+  }
+  if(info.trick==='无中生有'){
+    drawN(g, info.from, 2);
+    g.pending=null; g.phase='play';
+    g.log=pushLog(g.log, g.players[info.from].name+' 【无中生有】生效,摸两张牌');
+    return;
   }
   // 顺手/拆桥:目标手牌(隐藏,整体算1个"随机手牌"选项) + 每件已装备(公开,各1个具体选项)
   if(!tgt || !tgt.alive){ g.pending=null; g.phase='play'; return; }

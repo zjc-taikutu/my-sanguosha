@@ -170,11 +170,13 @@ function render(g){
     bn.innerHTML='<div class="banner">【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…</div>';
   }
   if(g.phase==='wuxie'&&g.pending){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    const from=g.players[g.pending.from].name;
+    // 目标是使用者自己(如无中生有)时,"对 X 使用"会念成"对自己使用",措辞改成"使用【trick】"更自然
+    const useDesc = g.pending.from===g.pending.to ? from+' 使用【'+g.pending.trick+'】' : from+' 对 '+g.players[g.pending.to].name+' 使用【'+g.pending.trick+'】';
     const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
     const text = g.pending.depth>0
       ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,正在询问 '+asking+' 是否用【无懈可击】反制…'
-      : from+' 对 '+to+' 使用【'+g.pending.trick+'】,正在询问 '+asking+' 是否使用【无懈可击】…';
+      : useDesc+',正在询问 '+asking+' 是否使用【无懈可击】…';
     bn.innerHTML='<div class="banner">'+escapeHtml(text)+'</div>';
   }
   if(g.phase==='guicai'&&g.pending&&g.pending.type==='guicai'){
@@ -275,9 +277,10 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不出'; b2.onclick=()=>respondWuxie(false);
     c.appendChild(b1); c.appendChild(b2);
+    const tgtDesc = g.pending.from===g.pending.to ? g.players[g.pending.from].name+' 的【'+g.pending.trick+'】' : g.players[g.pending.from].name+' 对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
     const askText = g.pending.depth>0
       ? '是否用【无懈可击】反制 '+(g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】?'
-      : '是否对 '+g.players[g.pending.from].name+' 的【'+g.pending.trick+'】打出【无懈可击】?';
+      : '是否对 '+tgtDesc+' 打出【无懈可击】?';
     hint.textContent = hasWuxie ? askText : '你没有【无懈可击】,只能点「不出」。';
     return;
   }
