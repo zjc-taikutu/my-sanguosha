@@ -110,6 +110,10 @@ function normalize(g){
   if(g.pending && g.pending.type==='tieqi' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
     g.pending=null; g.phase='play';
   }
+  // 烈弓阶段:from/to 都应是数字座位号;不对就整体判无效
+  if(g.pending && g.pending.type==='liegong' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
+    g.pending=null; g.phase='play';
+  }
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
@@ -508,16 +512,41 @@ function resolveShaUse(g, me, targetSeat, usedAs){
     g.log=pushLog(g.log, '是否发动【铁骑】进行判定…');
     return;
   }
+  // 黄忠【烈弓】:数值条件同步比较,不需要判定,满足条件时可选发动(不是自动生效)。
+  if(hasCap(me,'liegong')){
+    const targetHandCount=(g.players[targetSeat].hand||[]).length;
+    if(targetHandCount>=me.hp || targetHandCount<=attackRange(g,mySeat)){
+      g.pending={type:'liegong', from:mySeat, to:targetSeat};
+      g.phase='liegong';
+      g.log=pushLog(g.log, '是否发动【烈弓】,令此【杀】不可被【闪】抵消…');
+      return;
+    }
+  }
   continueShaAfterTieqi(g, mySeat, targetSeat, false);
 }
-// continueShaAfterTieqi: 铁骑判定阶段结束后(或从一开始就没有铁骑)接回杀的原有流程。
-// noShan 为真(铁骑判定为红)时,这张杀不可被闪抵消——包括八卦阵这类"视为闪"的效果,
-// 所以直接跳过 tryBagua(根本不给判定机会),进响应阶段但 pending.noShan 标记会挡掉出闪。
+// respondLiegong: 仅攻击者(pending.from)可响应。不需要判定,玩家的选择直接就是 noShan 的值——
+// 复用 continueShaAfterTieqi 同一条尾巴(和铁骑判红共用"不可被闪抵消"这一效果)。
+function respondLiegong(activate){
+  tx(g=>{
+    if(g.phase!=='liegong'||!g.pending||g.pending.type!=='liegong'||g.pending.from!==mySeat) return g;
+    const from=g.pending.from, to=g.pending.to;
+    g.log=pushLog(g.log, activate
+      ? g.players[from].name+' 发动【烈弓】,此【杀】不可被【闪】抵消'
+      : g.players[from].name+'：不发动【烈弓】');
+    continueShaAfterTieqi(g, from, to, activate);
+    return g;
+  });
+}
+// continueShaAfterTieqi: 铁骑判定/烈弓数值条件阶段结束后(或从一开始就没有这两个技能)接回杀的
+// 原有流程。noShan 为真时这张杀不可被闪抵消——包括八卦阵这类"视为闪"的效果,所以直接跳过
+// tryBagua(根本不给判定机会),进响应阶段但 pending.noShan 标记会挡掉出闪。是谁、为什么触发
+// noShan(铁骑判红、还是烈弓数值条件)由调用方(finishTieqiJudge/respondLiegong)自己记日志,
+// 这里只管接回流程,不重复归因到某个具体技能。
 function continueShaAfterTieqi(g, from, to, noShan){
   const me=g.players[from];
   g.pending={from, to, noShan};
   if(noShan){
-    g.log=pushLog(g.log, '【铁骑】判定为红,此【杀】不可被【闪】抵消(含视为闪的效果)');
+    g.log=pushLog(g.log, '此【杀】不可被【闪】抵消(含视为闪的效果)');
     g.phase='respond';
     return;
   }
