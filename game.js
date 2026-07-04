@@ -122,6 +122,10 @@ function normalize(g){
   if(g.pending && g.pending.type==='xiaoguoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.endingSeat!=='number' || typeof g.pending.to!=='number')){
     g.pending=null; g.phase='play';
   }
+  // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
+  if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
+    g.pending=null; g.phase='play';
+  }
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
@@ -370,6 +374,7 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=> canReachSha(g, mySeat, targetSeat), // 只有杀受攻击距离限制
     effect:(g,me,card,targetSeat)=>{
       const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
+      g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
       resolveShaUse(g, me, targetSeat, usedAs, card);
     }
   },
@@ -406,6 +411,17 @@ const CARD_PLAYS = {
       // (resolveTrick 里真正生效时循环所有存活玩家,不会用 info.to 做单人操作)。
       startTrick(g, {trick:'桃园结义', from:mySeat, to:mySeat});
     }
+  },
+  // 借刀杀人:两个不同角色的目标(A 要有武器、B 要在 A 攻击范围内),不是标准单目标流程能表达的,
+  // 客户端拦下 selectedCardIdx 选中后走专属的"选 A→选 B"两步流程,直接调 jieDaoShaRen 提交,
+  // 不经过 playCard/这里的 effect(target:true 只是为了让点牌选中这一步复用现有 UI 高亮)。
+  '借刀杀人': {
+    target:true,
+    canPlay:(g,me,card)=> card.name==='借刀杀人' && g.players.some((A,ai)=>
+      A && A.alive && ai!==mySeat && A.equips && A.equips.weapon &&
+      g.players.some((B,bi)=> B && B.alive && bi!==ai && canReachSha(g,ai,bi))
+    ),
+    effect:()=>{} // 正常流程不会走到这里(见上方注释);留空防御,避免万一被绕过时报错
   },
   '顺手牵羊': {
     target:true,
@@ -531,8 +547,10 @@ function playCard(cardIdx, actionId, targetSeat){
 // continueShaAfterTieqi,不管有没有铁骑、发不发动、判红判黑,最终都走这同一条尾巴。
 // card(可选):转化后实际打出的物理牌(关羽红牌/龙胆闪牌等),供于禁【毅重】判断颜色;
 // 丈八蛇矛两张当杀没有单一花色,调用方不传(undefined),毅重不生效。
+// 注意:g.shaUsed(本回合出杀次数限制)不在这里设置——本函数不假设调用方一定是"当前回合玩家
+// 在自己出牌阶段出杀"(借刀杀人打破了这个假设:A 可能根本不是当前回合玩家)。谁该计入次数
+// 由各调用点自己在调用前决定:CARD_PLAYS['杀'].effect/playZhangbaSha 会设,借刀杀人不设。
 function resolveShaUse(g, me, targetSeat, usedAs, card){
-  g.shaUsed=true; // 杀被无效化(毅重)不代表没有使用它,次数限制依然计入,不能靠一直打无效杀绕过
   const target=g.players[targetSeat];
   // 于禁【毅重】(锁定技):目标无防具 + 这张杀是黑色 → 直接无效,不进响应阶段、不消耗闪、不受伤。
   if(card && !isRed(card) && hasCap(target,'yizhong') && !(target.equips && target.equips.armor)){
@@ -569,6 +587,52 @@ function respondLiegong(activate){
       ? g.players[from].name+' 发动【烈弓】,此【杀】不可被【闪】抵消'
       : g.players[from].name+'：不发动【烈弓】');
     continueShaAfterTieqi(g, from, to, activate);
+    return g;
+  });
+}
+// jieDaoShaRen: 使用者选定 A(有武器)、B(在 A 攻击范围内,不是 A 自己)后提交,弃牌+开无懈窗口。
+// 距离校验(B 是否在 A 范围内)就在这一步做,A 后续出杀时不再重复校验(见 respondJiedao 注释)。
+function jieDaoShaRen(cardIdx, seatA, seatB){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    const card=me.hand[cardIdx];
+    if(!card || card.name!=='借刀杀人') return g;
+    const A=g.players[seatA], B=g.players[seatB];
+    if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
+    if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
+    me.hand.splice(cardIdx,1);
+    g.discard.push(card);
+    g.log=pushLog(g.log, me.name+' 对 '+A.name+' 使用【借刀杀人】,目标 '+B.name);
+    startTrick(g, {trick:'借刀杀人', from:mySeat, to:seatA, seatB});
+    return g;
+  });
+}
+// respondJiedao: 仅 A(pending.seatA)可响应。选杀:走 resolveShaUse(复用铁骑/烈弓/毅重等判定),
+// 但故意不设 g.shaUsed——这张"借来的杀"不占用任何人(包括 A 自己、当前回合玩家)的次数限制,
+// 也不重复校验距离(B 是否在 A 范围内,已经在 jieDaoShaRen 选目标那一步校验过)。
+// 选弃武器:弃置 A 当前装备的武器(不是使用者选的牌),触发 onLoseEquip(孙尚香会摸两张)。
+function respondJiedao(useSha){
+  tx(g=>{
+    if(g.phase!=='jiedaoChoice'||!g.pending||g.pending.type!=='jiedaoChoice'||g.pending.seatA!==mySeat) return g;
+    const seatB=g.pending.seatB;
+    const A=g.players[mySeat];
+    if(useSha){
+      const idx=findUsableAs(A.hand, A, '杀');
+      if(idx<0) return g; // 没有可用的杀:不生效(按钮本就不该渲染)
+      const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
+      g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(card.name==='杀'?'【杀】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
+      g.pending=null;
+      resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', card);
+      return g;
+    }
+    const weapon=A.equips.weapon;
+    if(!weapon) return g; // 理论上不会(resolveTrick 进这个阶段前已校验),双重保险
+    A.equips.weapon=null;
+    g.discard.push(weapon);
+    g.log=pushLog(g.log, A.name+' 选择弃置武器【'+weapon.name+'】(借刀杀人)');
+    triggerHook(g, mySeat, 'onLoseEquip', {count:1});
+    g.pending=null; g.phase='play';
     return g;
   });
 }
@@ -638,6 +702,7 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     const hi=Math.max(idx1,idx2), lo=Math.min(idx1,idx2);
     g.discard.push(me.hand.splice(hi,1)[0]);
     g.discard.push(me.hand.splice(lo,1)[0]);
+    g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
     resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)');
     return g;
   });
@@ -924,7 +989,9 @@ function nextAskee(g, from, current){
 function startTrick(g, info){
   // card(可选):延时锦囊的物理牌对象,随 pending 透传,供 finishWuxieRound(被挡下→弃牌堆)/
   // resolveTrick(未被挡下→放进判定区)使用。普通锦囊不传,undefined 对它们是无操作。
-  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, card:info.card, exclude:info.from, depth:0};
+  // seatB(可选):借刀杀人的第二个目标(被杀/被弃武器的那个人),同样随 pending 透传给 resolveTrick;
+  // 其它锦囊不传,undefined 对它们是无操作。
+  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, card:info.card, seatB:info.seatB, exclude:info.from, depth:0};
   g.phase='wuxie';
   openWuxieRound(g);
 }
@@ -944,7 +1011,7 @@ function openWuxieRound(g){
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
 function finishWuxieRound(g){
-  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card};
+  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card, seatB:g.pending.seatB};
   const blocked = (g.pending.depth % 2)===1;
   if(g.pending.ctx==='aoe'){
     if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
@@ -981,6 +1048,19 @@ function resolveTrick(g, info){
     g.players.forEach(p=>{ if(p && p.alive && p.hp<p.maxHp) p.hp++; });
     g.pending=null; g.phase='play';
     g.log=pushLog(g.log, g.players[info.from].name+' 【桃园结义】生效,所有存活角色回复1点体力');
+    return;
+  }
+  if(info.trick==='借刀杀人'){
+    const A=g.players[info.to], B=g.players[info.seatB];
+    // 无懈询问期间状态可能变化(A 阵亡/武器没了/B 阵亡):安全回 play,不做任何事,防软锁
+    if(!A || !A.alive || !A.equips.weapon || !B || !B.alive){
+      g.pending=null; g.phase='play';
+      g.log=pushLog(g.log, '【借刀杀人】目标已失效,无事发生');
+      return;
+    }
+    g.pending={type:'jiedaoChoice', from:info.from, seatA:info.to, seatB:info.seatB};
+    g.phase='jiedaoChoice';
+    g.log=pushLog(g.log, A.name+' 请选择:对 '+B.name+' 使用【杀】,或弃置武器【'+A.equips.weapon.name+'】…');
     return;
   }
   if(DELAY_TRICKS[info.trick]){

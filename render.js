@@ -28,6 +28,11 @@ let qiaobianMode = false;        // false | 'card' | 'source' | 'target'
 let qiaobianCardIdx = null;      // 已选中要弃置的手牌下标
 let qiaobianSrc = null;          // 已选中的来源 {kind:'equip'|'delay', seat, slot|idx, name}
 function resetQiaobian(){ qiaobianMode=false; qiaobianCardIdx=null; qiaobianSrc=null; }
+// 借刀杀人:两步选目标(先选 A:有武器的角色,再选 B:A 攻击范围内的其他角色),与常规单目标出牌
+// 走的 selectedCardIdx 通用块互斥(见 render 里 isJiedaoSel 的排除条件)。jiedaoSeatA===null 时选 A,
+// 选中后 jiedaoSeatA 存座位号,再点一次选 B 才真正提交。
+let jiedaoSeatA = null;
+function resetJiedao(){ jiedaoSeatA=null; }
 let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时重新渲染
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
@@ -45,7 +50,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQiaobian(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQiaobian(); resetJiedao(); };
   showConfirm(message,
     ()=>{ cleanup(); actionFn(); },
     ()=>{ cleanup(); render(currentG); });
@@ -118,6 +123,8 @@ function render(g){
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
   // 同款兜底:只要不在「自己的出牌阶段」,就退出巧变选牌/选源/选目标模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQiaobian();
+  // 同款兜底:只要不在「自己的出牌阶段」,就退出借刀杀人选 A/B 模式。
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetJiedao();
   const seatsEl=document.getElementById('seats');
   seatsEl.innerHTML='';
   (g.players||[]).forEach((p,i)=>{
@@ -169,6 +176,7 @@ function render(g){
     const meP=g.players[mySeat];
     const selCard=(selectedCardIdx!==null)?(meP.hand||[])[selectedCardIdx]:null;
     const isShaSel=!!(selCard && canUseAs(meP,selCard,'杀'));               // 选的牌作为杀(含赵云的闪)
+    const isJiedaoSel=!!(selCard && selCard.name==='借刀杀人');             // 借刀杀人走专属两步选择,不进通用单目标块
     const needHandOrEquip=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
     // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
     // 手牌和装备任一非空即可选,而不是只看手牌——否则"手牌0但有装备"会被 UI 误挡在选目标这一步。
@@ -178,7 +186,7 @@ function render(g){
     const selSpec = selCard && CARD_PLAYS[isShaSel?'杀':selCard.name];
     const allowSelf = !!(selSpec && selSpec.allowSelf);
     const targetable = (i!==mySeat || allowSelf) && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
-    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat){
+    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
@@ -214,6 +222,28 @@ function render(g){
       d.onclick=()=>{ const idx=duanliangCardIdx;
         confirmAndPlay('弃置一张牌,对 '+g.players[i].name+' 发动【断粮】(视为使用【兵粮寸断】)？', ()=>duanLiang(idx, i)); };
     }
+    // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
+    if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
+      if(jiedaoSeatA===null){
+        // 选 A:排除自己;要有武器;且场上要存在至少一个 A 攻击范围内的其他存活角色(否则选了也选不出 B)
+        const hasSomeB = g.players.some((B,bi)=> B && B.alive && bi!==i && canReachSha(g,i,bi));
+        if(i!==mySeat && p.alive && p.equips && p.equips.weapon && hasSomeB){
+          d.style.cursor='pointer';
+          d.style.outline='2px dashed var(--cinnabar-bright)';
+          d.onclick=()=>{ jiedaoSeatA=i; render(g); };
+        }
+      } else if(i!==jiedaoSeatA && p.alive && canReachSha(g, jiedaoSeatA, i)){
+        d.style.cursor='pointer';
+        d.style.outline='3px solid var(--gold)';
+        d.onclick=()=>{ const idx=selectedCardIdx, seatA=jiedaoSeatA, seatB=i;
+          confirmAndPlay('对 '+g.players[seatA].name+' 使用【借刀杀人】,目标 '+g.players[seatB].name+'？',
+            ()=>jieDaoShaRen(idx, seatA, seatB)); };
+      } else if(i===jiedaoSeatA){
+        d.style.outline='3px solid var(--gold)';
+        d.style.cursor='pointer';
+        d.onclick=()=>{ jiedaoSeatA=null; render(g); };
+      }
+    }
     // 张辽【突袭】选目标模式:点存活的其他玩家 = 切换选中/取消,上限 min(2,其他存活玩家数)。
     if(tuxiMode && g.phase==='draw' && g.turn===mySeat && i!==mySeat && p.alive){
       const otherAliveCount = g.players.filter((pp,ii)=>ii!==mySeat && pp && pp.alive).length;
@@ -235,7 +265,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -405,6 +435,22 @@ function renderControls(g){
   }
   if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice'){
     hint.textContent='等待 '+g.players[g.pending.to].name+' 选择弃装备或受到1点伤害…';
+    return;
+  }
+  if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat){
+    const A=g.players[mySeat], B=g.players[g.pending.seatB], askerName=g.players[g.pending.from].name;
+    const canSha = findUsableAs(A.hand, A, '杀')>=0;
+    if(canSha){
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='对 '+B.name+' 使用【杀】'; b1.onclick=()=>respondJiedao(true); c.appendChild(b1);
+    }
+    const b2=document.createElement('button');
+    b2.textContent='弃置武器【'+A.equips.weapon.name+'】'; b2.onclick=()=>respondJiedao(false); c.appendChild(b2);
+    hint.textContent=askerName+' 对你使用【借刀杀人】,目标 '+B.name+',请选择:对其使用【杀】,或弃置你的武器。';
+    return;
+  }
+  if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice'){
+    hint.textContent='等待 '+g.players[g.pending.seatA].name+' 选择对 '+g.players[g.pending.seatB].name+' 使用【杀】或弃置武器…';
     return;
   }
   if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen' && g.pending.seat===mySeat){
@@ -667,6 +713,13 @@ function renderControls(g){
       hint.textContent='丈八蛇矛:选两张手牌当作【杀】(已选 '+zhangbaPicks.length+'/2)'+(zhangbaPicks.length===2?'，攻击距离 '+attackRange(g,mySeat)+'，点上方一名对手作为目标。':'。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetZhangba(); render(g); }; c.appendChild(cb);
+    } else if(selectedCardIdx!==null && (me.hand||[])[selectedCardIdx] && (me.hand||[])[selectedCardIdx].name==='借刀杀人'){
+      // 借刀杀人两步选择提示 + 取消
+      hint.textContent = jiedaoSeatA===null
+        ? '【借刀杀人】选择一名装备着武器的角色(A)。'
+        : '已选中 '+g.players[jiedaoSeatA].name+' 为 A,点上方 A 攻击范围内的另一名角色作为 B(或点 A 重新选)。';
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ selectedCardIdx=null; resetJiedao(); render(g); }; c.appendChild(cb);
     } else if(selectedCardIdx!==null){
       const selCard=(me.hand||[])[selectedCardIdx]||{};
       const nm=selCard.name;
@@ -696,7 +749,7 @@ function renderControls(g){
       qb.textContent='发动【巧变】'; qb.onclick=()=>{ selectedCardIdx=null; qiaobianMode='card'; qiaobianCardIdx=null; qiaobianSrc=null; render(g); }; c.appendChild(qb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQiaobian();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQiaobian();resetJiedao();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -797,7 +850,7 @@ function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml(
 // 帮助按钮:一次性列出全部牌/武将/装备说明
 function showHelp(){
   let html='<div class="sec">基础牌 / 锦囊</div>';
-  ['杀','闪','桃','决斗','无中生有','桃园结义','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀','兵粮寸断'].forEach(n=>{
+  ['杀','闪','桃','决斗','无中生有','桃园结义','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀','兵粮寸断','借刀杀人'].forEach(n=>{
     html+='<div class="item"><b>'+escapeHtml(n)+'</b>：'+escapeHtml(getCardDesc(n))+'</div>'; });
   html+='<div class="sec">武将</div>';
   GENERAL_IDS.forEach(id=>{ const gg=getGeneral(id);
