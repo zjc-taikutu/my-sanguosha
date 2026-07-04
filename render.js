@@ -386,7 +386,7 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':
 // ===== 说明浮层(独立于 render;bodyHtml 需已是安全 HTML,单条说明请自行 escapeHtml) =====
 function showInfo(title, bodyHtml){
   const m=document.getElementById('infoModal');
-  m.innerHTML='<div class="info-panel"><button class="info-close" aria-label="关闭">✕</button>'
+  m.innerHTML='<div class="info-panel"><button class="info-close icon-btn" aria-label="关闭">✕</button>'
     +'<h3>'+escapeHtml(title)+'</h3><div class="info-body">'+bodyHtml+'</div></div>';
   m.classList.remove('hidden');
   m.onclick=(e)=>{ if(e.target===m) hideInfo(); };            // 点遮罩空白处关闭

@@ -147,7 +147,10 @@
     border:1px solid var(--gold);color:var(--gold);font-size:13px;font-weight:700;line-height:1;cursor:pointer;
     background:#1a1410;user-select:none;flex:0 0 auto;}
   .card .info-badge{position:absolute;top:4px;right:4px;width:26px;height:26px;font-size:15px;pointer-events:auto;z-index:3;}
-  #helpBtn{position:fixed;top:12px;right:12px;z-index:50;width:44px;height:44px;border-radius:50%;
+  /* 圆形图标按钮统一样式(#helpBtn 与 .info-close 共用):固定尺寸的圆 + flex 居中图形,
+     覆盖全局 button 的 padding/line-height,避免字形因内边距不对称而偏移错位。 */
+  .icon-btn{padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:50%;}
+  #helpBtn{position:fixed;top:12px;right:12px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:20px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
   #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
   #infoModal.hidden{display:none;}
@@ -155,7 +158,7 @@
     max-height:82vh;overflow:auto;padding:18px 18px 22px;position:relative;color:var(--paper);}
   .info-panel h3{color:var(--gold);margin:0 0 10px;font-size:20px;padding-right:36px;}
   .info-panel .info-body{font-size:16px;line-height:1.65;}
-  .info-panel .info-close{position:absolute;top:10px;right:12px;width:36px;height:36px;border-radius:50%;
+  .info-panel .info-close{position:absolute;top:10px;right:12px;width:36px;height:36px;
     border:1px solid var(--line);background:transparent;color:var(--paper);font-size:18px;cursor:pointer;}
   .info-panel .sec{margin:16px 0 6px;color:var(--gold);font-weight:700;font-size:16px;border-bottom:1px solid var(--line);padding-bottom:4px;}
   .info-panel .item{margin:9px 0;font-size:15px;line-height:1.55;}
@@ -166,7 +169,7 @@
 </head>
 <body>
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
-<button id="helpBtn" title="规则 / 说明" onclick="showHelp()">?</button>
+<button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <div id="infoModal" class="hidden"></div>
 <div class="wrap">
   <h1><span class="seal">杀</span>极简三国杀</h1>
