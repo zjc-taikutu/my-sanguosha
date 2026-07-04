@@ -72,6 +72,14 @@ function playConfirmMsg(g, actionId, card, targetSeat){
 const NAME_COLORS = ['#3B82C4','#2FBF71','#C4519B','#B8A22F','#8B5FBF','#D9713C','#4FA8A8','#C4C44F'];
 function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COLORS.length)%NAME_COLORS.length]; }
 
+// setBanner: banner 是唯一常驻可见的焦点行(原来 render() 里独立维护一份 banner + renderControls
+// 里独立维护一份 hint,两处各写各的、经常重复或遗漏——现在只有 renderControls 这一处书写者,
+// 每个分支把"谁对谁/发生了什么"和"你该做什么(含没有可用牌等兜底提示)"合并成一句话。
+// style 可选,仅 game-over 播报胜利时需要金色特殊样式。
+function setBanner(html, style){
+  document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
+}
+
 // ===== 座位环形布局 第2步:槽位分配(仿张郃巧变等"纯前端现算"风格,不入库) =====
 // 只按"总座位数"(加入顺序,开局后不再变)算槽位,和"是否存活"无关——阵亡只变暗、不挪位置,
 // 避免消化"有人死了"这条信息的同时还要处理布局跳动。约定:从我起顺时针(回合顺序)第一个
@@ -288,75 +296,8 @@ function render(g){
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
-  // banner
-  const bn=document.getElementById('banner'); bn.innerHTML='';
-  if(g.phase==='respond'&&g.pending){
-    const to=g.players[g.pending.to].name, from=g.players[g.pending.from].name;
-    // 攻击者/目标名字各自染身份色(按座位号,不按名字,避免撞色),一眼看出"谁在打谁"
-    // (仅此 banner;日志是纯文本存储,escapeHtml 后无法带色,不做)
-    const fromSpan='<span style="color:'+seatColor(g.pending.from)+'">'+escapeHtml(from)+'</span>';
-    const toSpan='<span style="color:'+seatColor(g.pending.to)+'">'+escapeHtml(to)+'</span>';
-    const noShanTag = g.pending.noShan ? '(【铁骑】判红,不可被闪抵消)' : '';
-    bn.innerHTML='<div class="banner">'+fromSpan+' 对 '+toSpan+' 出【杀】'+noShanTag+',等待'+toSpan+'响应…</div>';
-  }
-  if(g.phase==='tieqi'&&g.pending&&g.pending.type==='tieqi'){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…</div>';
-  }
-  if(g.phase==='liegong'&&g.pending&&g.pending.type==='liegong'){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【烈弓】…</div>';
-  }
-  if(g.phase==='xiaoguo'&&g.pending&&g.pending.type==='xiaoguo'){
-    const ending=g.players[g.pending.endingSeat].name, asker=g.players[g.pending.asking].name;
-    bn.innerHTML='<div class="banner">'+escapeHtml(ending)+' 结束阶段,正在询问 '+escapeHtml(asker)+' 是否发动【骁果】…</div>';
-  }
-  if(g.phase==='xiaoguoChoice'&&g.pending&&g.pending.type==='xiaoguoChoice'){
-    const from=g.players[g.pending.from].name, ending=g.players[g.pending.endingSeat].name;
-    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 发动【骁果】,'+escapeHtml(ending)+' 选择弃装备或受到1点伤害…</div>';
-  }
-  if(g.phase==='luoshen'&&g.pending&&g.pending.type==='luoshen'){
-    const p=g.players[g.pending.seat];
-    bn.innerHTML='<div class="banner">'+escapeHtml(p.name)+' 是否发动【洛神】进行判定…</div>';
-  }
-  if(g.phase==='duel'&&g.pending){
-    const a=g.players[g.pending.active].name;
-    bn.innerHTML='<div class="banner">【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…</div>';
-  }
-  if(g.phase==='wuxie'&&g.pending){
-    const from=g.players[g.pending.from].name;
-    // 目标是使用者自己(如无中生有)时,"对 X 使用"会念成"对自己使用",措辞改成"使用【trick】"更自然
-    const useDesc = g.pending.from===g.pending.to ? from+' 使用【'+g.pending.trick+'】' : from+' 对 '+g.players[g.pending.to].name+' 使用【'+g.pending.trick+'】';
-    const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    const text = g.pending.depth>0
-      ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,正在询问 '+asking+' 是否用【无懈可击】反制…'
-      : useDesc+',正在询问 '+asking+' 是否使用【无懈可击】…';
-    bn.innerHTML='<div class="banner">'+escapeHtml(text)+'</div>';
-  }
-  if(g.phase==='guicai'&&g.pending&&g.pending.type==='guicai'){
-    const p=g.players[g.pending.seat], asker=g.players[g.pending.asking], jc=g.pending.judgeCard;
-    bn.innerHTML='<div class="banner">'+escapeHtml(p?p.name:'?')+' 判定得到 '+escapeHtml(jc.suit+rankText(jc.rank))+',正在询问 '+escapeHtml(asker?asker.name:'?')+' 是否发动【鬼才】替换判定牌…</div>';
-  }
-  if(g.phase==='dying'&&g.pending&&g.pending.type==='dying'){
-    const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking];
-    bn.innerHTML='<div class="banner">'+escapeHtml(dyingP?dyingP.name:'?')+' 濒死！正在询问 '+escapeHtml(asking?asking.name:'?')+' 是否使用【桃】…</div>';
-  }
-  if(g.phase==='aoeResp'&&g.pending&&g.aoe){
-    const to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
-    bn.innerHTML='<div class="banner">【'+escapeHtml(g.aoe.trick)+'】要求 '+escapeHtml(to)+' 打出【'+escapeHtml(g.pending.need)+'】…</div>';
-  }
-  if(g.phase==='pick'&&g.pending){
-    const from=g.players[g.pending.from]?g.players[g.pending.from].name:'?', to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
-    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 对 '+escapeHtml(to)+' 使用【'+escapeHtml(g.pending.trick)+'】,正在选择拿/拆哪张牌…</div>';
-  }
-  if(g.phase==='qilin'&&g.pending){
-    const from=g.players[g.pending.from]?g.players[g.pending.from].name:'?', to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
-    bn.innerHTML='<div class="banner">'+escapeHtml(from)+' 的【麒麟弓】发动,正在选择弃置 '+escapeHtml(to)+' 的哪匹坐骑…</div>';
-  }
-  if(g.phase==='over'){
-    bn.innerHTML='<div class="banner" style="border-color:var(--gold);color:var(--gold)">🏆 胜者：'+escapeHtml(g.winner||'')+'</div>';
-  }
-
+  // banner 的全部内容现在唯一由 renderControls 负责写入(见该函数顶部 setBanner 说明),
+  // 这里不再并行维护一份——避免同一份信息有两个书写者、两边不同步。
   renderControls(g);
   renderHand(g);
 
@@ -368,7 +309,7 @@ function render(g){
 
 function renderControls(g){
   const c=document.getElementById('controls'); c.innerHTML='';
-  const hint=document.getElementById('hint'); hint.textContent='';
+  setBanner(''); // 唯一重置点:每次重渲染先清空,下面每个分支各写各的一句
   const me=g.players[mySeat];
   const myTurn = g.turn===mySeat;
 
@@ -379,8 +320,8 @@ function renderControls(g){
     btn.disabled = cnt<MIN_PLAYERS;
     btn.onclick=startGame;
     c.appendChild(btn);
-    if(cnt<MIN_PLAYERS) hint.textContent='至少 '+MIN_PLAYERS+' 人即可开始,还差 '+(MIN_PLAYERS-cnt)+' 人…';
-    else if(cnt<SEATS) hint.textContent='已可开始（'+cnt+' 人),也可等满 '+SEATS+' 人。';
+    if(cnt<MIN_PLAYERS) setBanner('至少 '+MIN_PLAYERS+' 人即可开始,还差 '+(MIN_PLAYERS-cnt)+' 人…');
+    else if(cnt<SEATS) setBanner('已可开始（'+cnt+' 人),也可等满 '+SEATS+' 人。');
     return;
   }
   if(g.phase==='over'){
@@ -388,7 +329,7 @@ function renderControls(g){
     btn.textContent='再来一局'; btn.onclick=newGame; c.appendChild(btn);
     const clean=document.createElement('button'); clean.className='ghost';
     clean.textContent='结束并清理房间'; clean.onclick=cleanupRoom; c.appendChild(clean);
-    hint.textContent='大家看完结果后,点「结束并清理房间」可删除本房间数据。';
+    setBanner('🏆 胜者：'+escapeHtml(g.winner||'')+' · 大家看完结果后,点「结束并清理房间」可删除本房间数据。', 'border-color:var(--gold);color:var(--gold)');
     return;
   }
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi' && g.pending.from===mySeat){
@@ -398,11 +339,13 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不发动'; b2.onclick=()=>respondTieqi(false);
     c.appendChild(b2);
-    hint.textContent='是否发动【铁骑】判定,若为红色则此杀不可被闪抵消?';
+    const to=g.players[g.pending.to].name;
+    setBanner('你对 '+escapeHtml(to)+' 出【杀】,是否发动【铁骑】判定?若为红色则此杀不可被闪抵消。');
     return;
   }
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi'){
-    hint.textContent='等待 '+g.players[g.pending.from].name+' 决定是否发动【铁骑】…';
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…');
     return;
   }
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong' && g.pending.from===mySeat){
@@ -412,17 +355,19 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不发动'; b2.onclick=()=>respondLiegong(false);
     c.appendChild(b2);
-    hint.textContent='是否发动【烈弓】,令此杀不可被闪抵消?';
+    const to=g.players[g.pending.to].name;
+    setBanner('你对 '+escapeHtml(to)+' 出【杀】,是否发动【烈弓】?令此杀不可被闪抵消。');
     return;
   }
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong'){
-    hint.textContent='等待 '+g.players[g.pending.from].name+' 决定是否发动【烈弓】…';
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【烈弓】…');
     return;
   }
   if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat){
     const endingName=g.players[g.pending.endingSeat].name;
     if(xiaoguoMode){
-      hint.textContent='【骁果】选择一张基本牌(杀/闪/桃)弃置(或点已选中的牌取消)。';
+      setBanner(escapeHtml(endingName)+' 结束阶段,发动【骁果】:选择一张基本牌(杀/闪/桃)弃置(或点已选中的牌取消)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetXiaoguo(); render(g); }; c.appendChild(cb);
     } else {
@@ -432,12 +377,13 @@ function renderControls(g){
       const b2=document.createElement('button');
       b2.textContent='不发动'; b2.onclick=()=>respondXiaoguo(false);
       c.appendChild(b2);
-      hint.textContent=endingName+' 结束阶段,是否弃一张基本牌发动【骁果】?';
+      setBanner(escapeHtml(endingName)+' 结束阶段,是否弃一张基本牌发动【骁果】?');
     }
     return;
   }
   if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo'){
-    hint.textContent='等待 '+g.players[g.pending.asking].name+' 决定是否发动【骁果】…';
+    const ending=g.players[g.pending.endingSeat].name, asker=g.players[g.pending.asking].name;
+    setBanner(escapeHtml(ending)+' 结束阶段,正在询问 '+escapeHtml(asker)+' 是否发动【骁果】…');
     return;
   }
   if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice' && g.pending.to===mySeat){
@@ -449,11 +395,12 @@ function renderControls(g){
     }});
     const db=document.createElement('button'); db.className='primary';
     db.textContent='受到1点伤害'; db.onclick=()=>respondXiaoguoChoice('damage'); c.appendChild(db);
-    hint.textContent=askerName+' 发动【骁果】,请选择:弃置一件装备(对方摸一张牌),或受到1点伤害。';
+    setBanner(escapeHtml(askerName)+' 发动【骁果】,请选择:弃置一件装备(对方摸一张牌),或受到1点伤害。');
     return;
   }
   if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice'){
-    hint.textContent='等待 '+g.players[g.pending.to].name+' 选择弃装备或受到1点伤害…';
+    const from=g.players[g.pending.from].name, ending=g.players[g.pending.endingSeat].name;
+    setBanner(escapeHtml(from)+' 发动【骁果】,'+escapeHtml(ending)+' 选择弃装备或受到1点伤害…');
     return;
   }
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat){
@@ -465,15 +412,17 @@ function renderControls(g){
     }
     const b2=document.createElement('button');
     b2.textContent='弃置武器【'+A.equips.weapon.name+'】'; b2.onclick=()=>respondJiedao(false); c.appendChild(b2);
-    hint.textContent=askerName+' 对你使用【借刀杀人】,目标 '+B.name+',请选择:对其使用【杀】,或弃置你的武器。';
+    setBanner(escapeHtml(askerName)+' 对你使用【借刀杀人】,目标 '+escapeHtml(B.name)+',请选择:对其使用【杀】,或弃置你的武器。');
     return;
   }
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice'){
-    hint.textContent='等待 '+g.players[g.pending.seatA].name+' 选择对 '+g.players[g.pending.seatB].name+' 使用【杀】或弃置武器…';
+    const seatA=g.players[g.pending.seatA].name, seatB=g.players[g.pending.seatB].name;
+    setBanner('等待 '+escapeHtml(seatA)+' 选择对 '+escapeHtml(seatB)+' 使用【杀】或弃置武器…');
     return;
   }
   if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
     const picker=g.pending.order[g.pending.idx];
+    const poolDesc=g.pending.pool.map(c=>(cardFace(c)||'')+escapeHtml(c.name)).join('、');
     if(picker===mySeat){
       g.pending.pool.forEach((card,pi)=>{
         const b=document.createElement('button');
@@ -481,9 +430,9 @@ function renderControls(g){
         b.onclick=()=>wuguPick(pi);
         c.appendChild(b);
       });
-      hint.textContent='【五谷丰登】轮到你挑选,公共池:'+g.pending.pool.map(c=>(cardFace(c)||'')+c.name).join('、');
+      setBanner('【五谷丰登】轮到你挑选,公共池:'+poolDesc);
     } else {
-      hint.textContent='【五谷丰登】等待 '+g.players[picker].name+' 挑选。公共池:'+g.pending.pool.map(c=>(cardFace(c)||'')+c.name).join('、');
+      setBanner('【五谷丰登】等待 '+escapeHtml(g.players[picker].name)+' 挑选。公共池:'+poolDesc);
     }
     return;
   }
@@ -494,11 +443,12 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不再发动'; b2.onclick=()=>respondLuoshen(false);
     c.appendChild(b2);
-    hint.textContent='是否发动【洛神】进行判定?黑色可获得判定牌并继续发动,红色则结束。';
+    setBanner('是否发动【洛神】进行判定?黑色可获得判定牌并继续发动,红色则结束。');
     return;
   }
   if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen'){
-    hint.textContent='等待 '+g.players[g.pending.seat].name+' 决定是否发动【洛神】…';
+    const p=g.players[g.pending.seat];
+    setBanner(escapeHtml(p.name)+' 是否发动【洛神】进行判定…');
     return;
   }
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
@@ -514,10 +464,25 @@ function renderControls(g){
     c.appendChild(b2);
     // 吕布【无双】:攻击者是吕布时需要连续两张闪,shanCount 记已打出几张
     const shanNeeded = hasCap(g.players[g.pending.from],'wushuang') ? 2 : 1;
-    if(g.pending.noShan) hint.textContent='对方发动了【铁骑】且判定为红,此杀不可被闪抵消,只能受到伤害。';
-    else if(!hasShan) hint.textContent='你没有【闪】,只能受到伤害。';
-    else if(shanNeeded>1 && g.pending.shanCount>0) hint.textContent='对方是吕布【无双】,已打出'+g.pending.shanCount+'/'+shanNeeded+'张【闪】,还需再打出一张才能抵消!';
-    else if(shanNeeded>1) hint.textContent='对方是吕布【无双】,需要连续打出2张【闪】才能抵消。';
+    const from=g.players[g.pending.from].name;
+    const lead = escapeHtml(from)+' 对你出【杀】,';
+    let tail;
+    if(g.pending.noShan) tail='对方发动了【铁骑】且判定为红,此杀不可被闪抵消,只能受到伤害。';
+    else if(!hasShan) tail='你没有【闪】,只能受到伤害。';
+    else if(shanNeeded>1 && g.pending.shanCount>0) tail='对方是吕布【无双】,已打出'+g.pending.shanCount+'/'+shanNeeded+'张【闪】,还需再打出一张才能抵消!';
+    else if(shanNeeded>1) tail='对方是吕布【无双】,需要连续打出2张【闪】才能抵消。';
+    else tail='是否打出【闪】?';
+    setBanner(lead+tail);
+    return;
+  }
+  if(g.phase==='respond' && g.pending){
+    const to=g.players[g.pending.to].name, from=g.players[g.pending.from].name;
+    // 攻击者/目标名字各自染身份色(按座位号,不按名字,避免撞色),一眼看出"谁在打谁"
+    // (仅此 banner;日志是纯文本存储,escapeHtml 后无法带色,不做)
+    const fromSpan='<span style="color:'+seatColor(g.pending.from)+'">'+escapeHtml(from)+'</span>';
+    const toSpan='<span style="color:'+seatColor(g.pending.to)+'">'+escapeHtml(to)+'</span>';
+    const noShanTag = g.pending.noShan ? '(【铁骑】判红,不可被闪抵消)' : '';
+    setBanner(fromSpan+' 对 '+toSpan+' 出【杀】'+noShanTag+',等待'+toSpan+'响应…');
     return;
   }
   if(g.phase==='duel' && g.pending && g.pending.active===mySeat){
@@ -532,9 +497,17 @@ function renderControls(g){
     c.appendChild(b2);
     // 吕布【无双】:决斗任一方是吕布时每轮需要连续两张杀,shaCount 记这一轮已出几张
     const shaNeeded = (hasCap(g.players[g.pending.from],'wushuang') || hasCap(g.players[g.pending.to],'wushuang')) ? 2 : 1;
-    if(!hasSha) hint.textContent='你没有【杀】,只能受到伤害。';
-    else if(shaNeeded>1 && g.pending.shaCount>0) hint.textContent='决斗涉及吕布【无双】,这一轮已打出'+g.pending.shaCount+'/'+shaNeeded+'张【杀】,还需再打出一张!';
-    else if(shaNeeded>1) hint.textContent='决斗涉及吕布【无双】,这一轮需要连续打出2张【杀】。';
+    let tail;
+    if(!hasSha) tail='你没有【杀】,只能受到伤害。';
+    else if(shaNeeded>1 && g.pending.shaCount>0) tail='决斗涉及吕布【无双】,这一轮已打出'+g.pending.shaCount+'/'+shaNeeded+'张【杀】,还需再打出一张!';
+    else if(shaNeeded>1) tail='决斗涉及吕布【无双】,这一轮需要连续打出2张【杀】。';
+    else tail='是否打出【杀】?';
+    setBanner('【决斗】进行中,轮到你打出【杀】,'+tail);
+    return;
+  }
+  if(g.phase==='duel' && g.pending){
+    const a=g.players[g.pending.active].name;
+    setBanner('【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…');
     return;
   }
   if(g.phase==='wuxie' && g.pending && g.pending.asking===mySeat){
@@ -555,12 +528,18 @@ function renderControls(g){
     const askText = g.pending.depth>0
       ? '是否用【无懈可击】反制 '+(g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】?'
       : '是否对 '+tgtDesc+' 打出【无懈可击】?';
-    hint.textContent = hasWuxie ? askText : '你没有【无懈可击】,只能点「不出」。';
+    setBanner(hasWuxie ? escapeHtml(askText) : '你没有【无懈可击】,只能点「不出」。');
     return;
   }
   if(g.phase==='wuxie' && g.pending){
+    const from=g.players[g.pending.from].name;
+    // 目标是使用者自己(如无中生有)时,"对 X 使用"会念成"对自己使用",措辞改成"使用【trick】"更自然
+    const useDesc = g.pending.from===g.pending.to ? from+' 使用【'+g.pending.trick+'】' : from+' 对 '+g.players[g.pending.to].name+' 使用【'+g.pending.trick+'】';
     const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    hint.textContent='等待 '+asking+' 决定是否'+(g.pending.depth>0?'反制':'使用')+'【无懈可击】…';
+    const text = g.pending.depth>0
+      ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,正在询问 '+asking+' 是否用【无懈可击】反制…'
+      : useDesc+',正在询问 '+asking+' 是否使用【无懈可击】…';
+    setBanner(escapeHtml(text));
     return;
   }
   if(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat){
@@ -568,7 +547,7 @@ function renderControls(g){
     const isSelf = g.pending.seat===mySeat;
     const judgedName = g.players[g.pending.seat].name;
     if(guicaiMode){
-      hint.textContent='【鬼才】选择一张手牌替换'+(isSelf?'':'('+judgedName+' 的)')+'判定牌(当前判定：'+jc.suit+rankText(jc.rank)+')。';
+      setBanner('发动【鬼才】:选择一张手牌替换'+(isSelf?'':'('+escapeHtml(judgedName)+' 的)')+'判定牌(当前判定：'+jc.suit+rankText(jc.rank)+')。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetGuicai(); render(g); }; c.appendChild(cb);
     } else {
@@ -578,15 +557,15 @@ function renderControls(g){
       const b2=document.createElement('button');
       b2.textContent='不发动'; b2.onclick=()=>respondGuicai(false);
       c.appendChild(b2);
-      hint.textContent = isSelf
+      setBanner(isSelf
         ? '你的判定得到 '+jc.suit+rankText(jc.rank)+',是否发动【鬼才】用一张手牌替换?'
-        : judgedName+' 判定得到 '+jc.suit+rankText(jc.rank)+',是否打出一张手牌替换 '+judgedName+' 的判定牌?';
+        : escapeHtml(judgedName)+' 判定得到 '+jc.suit+rankText(jc.rank)+',是否打出一张手牌替换 '+escapeHtml(judgedName)+' 的判定牌?');
     }
     return;
   }
   if(g.phase==='guicai' && g.pending && g.pending.type==='guicai'){
-    const asker=g.players[g.pending.asking];
-    hint.textContent='等待 '+(asker?asker.name:'?')+' 决定是否发动【鬼才】替换判定牌…';
+    const p=g.players[g.pending.seat], asker=g.players[g.pending.asking], jc=g.pending.judgeCard;
+    setBanner(escapeHtml(p?p.name:'?')+' 判定得到 '+escapeHtml(jc.suit+rankText(jc.rank))+',正在询问 '+escapeHtml(asker?asker.name:'?')+' 是否发动【鬼才】替换判定牌…');
     return;
   }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===mySeat){
@@ -602,14 +581,14 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不救'; b2.onclick=()=>respondDying(false);
     c.appendChild(b2);
-    hint.textContent = hasTao
-      ? (isSelf ? '你濒死,是否打出【桃】自救?' : '是否对 '+dyingP.name+' 打出【桃】救援?')
-      : '你没有【桃】,只能选择不救。';
+    setBanner(hasTao
+      ? (isSelf ? dyingP.name+' 濒死,你是否打出【桃】自救?' : dyingP.name+' 濒死,是否对其打出【桃】救援?')
+      : escapeHtml(dyingP.name)+' 濒死,你没有【桃】,只能选择不救。');
     return;
   }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying'){
     const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    hint.textContent='等待 '+asking+' 决定是否对 '+(dyingP?dyingP.name:'?')+' 使用【桃】…';
+    setBanner(escapeHtml(dyingP?dyingP.name:'?')+' 濒死！正在询问 '+escapeHtml(asking)+' 是否使用【桃】…');
     return;
   }
   if(g.phase==='aoeResp' && g.pending && g.pending.to===mySeat){
@@ -623,12 +602,13 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不出（受伤）'; b2.onclick=()=>aoeRespond(false);
     c.appendChild(b2);
-    if(!hasCard) hint.textContent='你没有【'+need+'】,只能受到伤害。';
+    const trick = g.aoe ? g.aoe.trick : need;
+    setBanner('【'+escapeHtml(trick)+'】要求你打出【'+escapeHtml(need)+'】。'+(hasCard?'':'你没有【'+escapeHtml(need)+'】,只能受到伤害。'));
     return;
   }
   if(g.phase==='aoeResp' && g.pending){
     const to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
-    hint.textContent='等待 '+to+' 打出【'+g.pending.need+'】…';
+    setBanner('【'+escapeHtml(g.aoe?g.aoe.trick:'')+'】要求 '+escapeHtml(to)+' 打出【'+escapeHtml(g.pending.need)+'】…');
     return;
   }
   if(g.phase==='pick' && g.pending && g.pending.from===mySeat){
@@ -644,12 +624,12 @@ function renderControls(g){
       const b=document.createElement('button');
       b.textContent=verb+'装备【'+tgt.equips[s].name+'】'; b.onclick=()=>pickResolve(s); c.appendChild(b);
     }});
-    hint.textContent='选择对 '+(tgt?tgt.name:'目标')+' '+verb+'哪张牌（手牌随机、装备可指定）。';
+    setBanner('对 '+escapeHtml(tgt?tgt.name:'目标')+' 使用【'+escapeHtml(g.pending.trick)+'】,选择'+verb+'哪张牌（手牌随机、装备可指定）。');
     return;
   }
   if(g.phase==='pick' && g.pending){
-    const from=g.players[g.pending.from]?g.players[g.pending.from].name:'?';
-    hint.textContent='等待 '+from+' 选择拿/拆哪张牌…';
+    const from=g.players[g.pending.from]?g.players[g.pending.from].name:'?', to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 使用【'+escapeHtml(g.pending.trick)+'】,正在选择拿/拆哪张牌…');
     return;
   }
   if(g.phase==='qilin' && g.pending && g.pending.from===mySeat){
@@ -660,16 +640,16 @@ function renderControls(g){
       const b=document.createElement('button');
       b.textContent='弃置'+slotLabel[s]+'【'+tgt.equips[s].name+'】'; b.onclick=()=>qilinResolve(s); c.appendChild(b);
     }});
-    hint.textContent='【麒麟弓】选择弃置 '+(tgt?tgt.name:'目标')+' 的哪匹坐骑。';
+    setBanner('你的【麒麟弓】发动,选择弃置 '+escapeHtml(tgt?tgt.name:'目标')+' 的哪匹坐骑。');
     return;
   }
   if(g.phase==='qilin' && g.pending){
-    const from=g.players[g.pending.from]?g.players[g.pending.from].name:'?';
-    hint.textContent='等待 '+from+' 用【麒麟弓】选择弃置坐骑…';
+    const from=g.players[g.pending.from]?g.players[g.pending.from].name:'?', to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
+    setBanner(escapeHtml(from)+' 的【麒麟弓】发动,正在选择弃置 '+escapeHtml(to)+' 的哪匹坐骑…');
     return;
   }
   if(!myTurn){
-    hint.textContent='等待 '+g.players[g.turn].name+' 行动…';
+    setBanner('等待 '+escapeHtml(g.players[g.turn].name)+' 行动…');
     return;
   }
   // it's my turn
@@ -679,7 +659,7 @@ function renderControls(g){
     const tuxiAvailable = hasCap(me,'tuxi') && others.some(o=>(o.p.hand||[]).length>0);
     const maxPick = Math.min(2, others.length);
     if(tuxiMode){
-      hint.textContent='【突袭】选择 1~'+maxPick+' 名角色,各摸一张手牌(已选 '+tuxiPicks.length+'/'+maxPick+')。';
+      setBanner('【突袭】选择 1~'+maxPick+' 名角色,各摸一张手牌(已选 '+tuxiPicks.length+'/'+maxPick+')。');
       if(tuxiPicks.length>=1){
         const ok=document.createElement('button'); ok.className='primary';
         ok.textContent='确认发动'; ok.onclick=()=>{ const picks=tuxiPicks.slice(); resetTuxi(); respondTuxi(picks); };
@@ -695,6 +675,7 @@ function renderControls(g){
         tb.textContent='发动【突袭】'; tb.onclick=()=>{ tuxiMode=true; tuxiPicks=[]; render(g); };
         c.appendChild(tb);
       }
+      setBanner('轮到你,摸牌阶段。');
     }
   } else if(g.phase==='play'){
     // 本回合是否还能出杀(与单张杀 canPlay 同口径:未出过 或 有无限杀)
@@ -703,12 +684,12 @@ function renderControls(g){
     if(duanliangMode && g.duanliangUsed) resetDuanliang(); // 选牌途中变得不可用(理论上不会,双重保险)
     if(qiaobianMode && g.qiaobianUsed) resetQiaobian(); // 同款双重保险
     if(qiaobianMode==='card'){
-      hint.textContent='【巧变】选择一张要弃置的手牌(任意牌都行)。';
+      setBanner('【巧变】选择一张要弃置的手牌(任意牌都行)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
     } else if(qiaobianMode==='source'){
       const sources=qiaobianSources(g);
-      hint.textContent='【巧变】选择要移动的装备/判定牌(也可以不移动,仅跳过这个阶段)。';
+      setBanner('【巧变】选择要移动的装备/判定牌(也可以不移动,仅跳过这个阶段)。');
       sources.forEach(s=>{
         const b=document.createElement('button');
         b.textContent=s.label; b.onclick=()=>{ qiaobianSrc=s; qiaobianMode='target'; render(g); };
@@ -721,7 +702,7 @@ function renderControls(g){
       cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
     } else if(qiaobianMode==='target'){
       const targets=qiaobianTargets(g, qiaobianSrc);
-      hint.textContent='【巧变】把'+qiaobianSrc.label+'移动到哪位角色?'+(targets.length===0?'(没有合法的目的地)':'');
+      setBanner('【巧变】把'+escapeHtml(qiaobianSrc.label)+'移动到哪位角色?'+(targets.length===0?'(没有合法的目的地)':''));
       targets.forEach(t=>{
         const b=document.createElement('button');
         b.textContent='移动到 '+t.label; b.onclick=()=>{
@@ -737,21 +718,21 @@ function renderControls(g){
       cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
     } else if(duanliangMode){
       // 断粮选牌+选目标模式:先选一张手牌(任意牌都行),再点上方一名其他玩家提交。提供取消。
-      hint.textContent = duanliangCardIdx===null
+      setBanner(duanliangCardIdx===null
         ? '【断粮】选择一张要弃置的手牌(任意牌都行)。'
-        : '已选中要弃置的牌,点上方一名其他玩家,视为对其使用【兵粮寸断】(或点牌取消选中)。';
+        : '已选中要弃置的牌,点上方一名其他玩家,视为对其使用【兵粮寸断】(或点牌取消选中)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetDuanliang(); render(g); }; c.appendChild(cb);
     } else if(zhangbaMode){
       // 丈八选牌模式:选两张手牌当杀,再点目标。提供取消。
-      hint.textContent='丈八蛇矛:选两张手牌当作【杀】(已选 '+zhangbaPicks.length+'/2)'+(zhangbaPicks.length===2?'，攻击距离 '+attackRange(g,mySeat)+'，点上方一名对手作为目标。':'。');
+      setBanner('丈八蛇矛:选两张手牌当作【杀】(已选 '+zhangbaPicks.length+'/2)'+(zhangbaPicks.length===2?'，攻击距离 '+attackRange(g,mySeat)+'，点上方一名对手作为目标。':'。'));
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetZhangba(); render(g); }; c.appendChild(cb);
     } else if(selectedCardIdx!==null && (me.hand||[])[selectedCardIdx] && (me.hand||[])[selectedCardIdx].name==='借刀杀人'){
       // 借刀杀人两步选择提示 + 取消
-      hint.textContent = jiedaoSeatA===null
+      setBanner(jiedaoSeatA===null
         ? '【借刀杀人】选择一名装备着武器的角色(A)。'
-        : '已选中 '+g.players[jiedaoSeatA].name+' 为 A,点上方 A 攻击范围内的另一名角色作为 B(或点 A 重新选)。';
+        : '已选中 '+escapeHtml(g.players[jiedaoSeatA].name)+' 为 A,点上方 A 攻击范围内的另一名角色作为 B(或点 A 重新选)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ selectedCardIdx=null; resetJiedao(); render(g); }; c.appendChild(cb);
     } else if(selectedCardIdx!==null){
@@ -761,10 +742,10 @@ function renderControls(g){
       const label = (nm==='闪') ? '【闪】当【杀】' : '【'+nm+'】';
       // 杀受攻击距离限制,提示当前射程,让玩家理解为何有人"够不着"
       const rangeNote = canUseAs(me,selCard,'杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
-      hint.textContent='已选中'+label+rangeNote+',点上方一名对手作为目标(或点牌取消)。';
+      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标(或点牌取消)。');
     } else {
       const shaInfo = hasCap(me,'unlimitedSha') ? '可出任意张杀' : (g.shaUsed?'已用过杀':'可出1张杀');
-      hint.textContent='点手牌出牌:【杀】/【决斗】/【顺手牵羊】/【过河拆桥】选目标 ·【桃】回血 ·【无中生有】摸两张 ·【南蛮入侵】/【万箭齐发】群体 · 装备牌点击直接装备。本回合'+shaInfo+'。';
+      setBanner('点手牌出牌:【杀】/【决斗】/【顺手牵羊】/【过河拆桥】选目标 ·【桃】回血 ·【无中生有】摸两张 ·【南蛮入侵】/【万箭齐发】群体 · 装备牌点击直接装备。本回合'+shaInfo+'。');
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
@@ -787,9 +768,10 @@ function renderControls(g){
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
-    if(over>0) hint.textContent = keji
+    if(over>0) setBanner(keji
       ? '克己:本回合未出杀,可不弃牌直接结束回合(也可点手牌自愿弃置)。'
-      : '手牌超出体力,需弃掉 '+over+' 张(点手牌弃置)。';
+      : '手牌超出体力,需弃掉 '+over+' 张(点手牌弃置)。');
+    else setBanner('轮到你,弃牌阶段。手牌未超出体力上限,可直接结束回合。');
     const b=document.createElement('button'); b.className='primary';
     b.textContent='结束回合'; b.disabled=over>0 && !keji; b.onclick=endTurn; c.appendChild(b);
   }
