@@ -206,6 +206,16 @@ function render(g){
             : '<span class="empty">—</span>')+'</span>';
         }).join('')+'</div>'
       : '';
+    // 判定区(延时锦囊):公开信息,和装备区呼应但视觉上区分——每张牌一个紫色描边小 chip
+    // (紫色呼应手牌里 .card.trick 的锦囊配色,一眼联想到"这是锦囊类"),不是装备区那种固定
+    // 槽位+暗色占位的风格,因为判定区没有"应该有什么"这个固定槽位概念,空的时候整行不显示。
+    const delayRow = (g.started && (p.delays||[]).length>0)
+      ? '<div class="delays"><span class="dlabel">判定区</span>'+p.delays.map(c=>{
+          const dDesc = getCardDesc(c.name);
+          return '<span class="dchip"'+(dDesc?' title="'+escapeHtml(dDesc)+'"':'')+'>'+(cardFace(c)||'')+' '+escapeHtml(c.name)+
+            ' <span class="info-badge" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">?</span></span>';
+        }).join('')+'</div>'
+      : '';
     d.innerHTML =
       // 姓名文字染身份色(纯识别用,不碰边框/outline——那些留给回合/选目标等状态高亮,优先级更高)
       '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
@@ -217,8 +227,7 @@ function render(g){
         (g.started&&gen?' · '+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+'</div>'+
       '<div class="hp">'+hearts+'</div>'+
       equipRow+
-      // 判定区(延时锦囊)最简显示:公开信息,直接写牌名;地基阶段先只做到"看得见",样式留给以后的 UI 大改版
-      (g.started && (p.delays||[]).length>0 ? '<div class="meta">判定区: '+p.delays.map(c=>escapeHtml(c.name)).join('、')+'</div>' : '')+
+      delayRow+
       // 自己的座位卡显示当前攻击距离(= attackRange,无武器默认1),让玩家一眼知道能打多远
       (i===mySeat && g.started ? '<div class="meta">攻击距离 '+attackRange(g,mySeat)+'</div>' : '')+
       '<div class="meta">手牌 '+(p.hand||[]).length+' 张</div>'+
@@ -911,6 +920,7 @@ function renderLogModal(g){
 // 供座位卡内联触发(武将/装备,均公开信息);inline onclick 已 stopPropagation,不触发选目标
 function showGeneralInfo(id){ const gen=getGeneral(id); if(gen) showInfo(gen.name+' · '+gen.skill, escapeHtml(gen.desc||'(暂无说明)')); }
 function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml((e&&e.desc)||'(暂无说明)')); }
+function showDelayInfo(name){ showInfo(name, escapeHtml(getCardDesc(name)||'(暂无说明)')); }
 // 帮助按钮:一次性列出全部牌/武将/装备说明
 function showHelp(){
   let html='<div class="sec">基础牌 / 锦囊</div>';
