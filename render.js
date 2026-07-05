@@ -550,10 +550,10 @@ function renderControls(g){
     return;
   }
   // TEMP DEBUG(排查五谷丰登无懈按钮不显示的bug,定位到根因后移除):
+  // mySeat = 这次 render() 是在哪个客户端跑的(谁在看这个页面);g.turn = 当前回合玩家,
+  // 一起打印能判断"是回合玩家自己这边渲染的,还是被问的人那边渲染的"。
   if(g.phase==='wuxie' && g.pending){
-    console.log('[DEBUG render wuxie]', 'pending.type=', g.pending.type, 'pending.trick=', g.pending.trick,
-      'pending.asking=', g.pending.asking, typeof g.pending.asking, 'mySeat=', mySeat, typeof mySeat,
-      'asking===mySeat?', g.pending.asking===mySeat);
+    console.log('[DEBUG render wuxie] mySeat(本机)=', mySeat, 'g.turn=', g.turn, 'full pending=', JSON.stringify(g.pending));
   }
   if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===mySeat){
     // 此分支只在"被询问者本人"的客户端渲染(旁观者走下面 asking!==mySeat 分支,只看到等待提示、
