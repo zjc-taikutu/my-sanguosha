@@ -263,6 +263,27 @@
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   .log-modal div:last-child{color:var(--paper);}
+  /* ===== 日志 toast:"刚刚发生了什么"的瞬时提示,和 .banner("当前该谁做什么")信息类型不同,
+     不共用元素/不共用配色——banner 是朱红(行动焦点),这里用金色(氛围提示,呼应 .phase-pill)。
+     position:fixed 独立于文档流,不占位、不推挤座位卡片/按钮;top 故意留在 #helpBtn/#logBtn
+     (top:12px,高44px)那一排下方,任何宽度下都不会跟这两个图标重叠。纯 CSS 动画做"淡入-停留-
+     淡出",不需要 JS 计时器把它关掉——render.js 只负责在有新日志时重新触发 .show 类。
+     pointer-events:none 全程生效,不会挡住点击(哪怕还没淡出完)。 */
+  #logToast{
+    position:fixed;top:64px;left:50%;transform:translateX(-50%);
+    max-width:min(90vw,420px);
+    background:#1a1410;border:1px solid var(--gold);color:var(--gold);
+    padding:7px 16px;border-radius:999px;font-size:13px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    z-index:60;pointer-events:none;opacity:0;box-shadow:0 2px 6px rgba(0,0,0,.4);
+  }
+  #logToast.show{animation:logToastFade 2.6s ease forwards;}
+  @keyframes logToastFade{
+    0%{opacity:0;transform:translate(-50%,-6px);}
+    10%{opacity:1;transform:translate(-50%,0);}
+    80%{opacity:1;}
+    100%{opacity:0;}
+  }
   #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
   #infoModal.hidden{display:none;}
   .info-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:560px;width:100%;
@@ -289,6 +310,7 @@
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
 <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
+<div id="logToast"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
 <div class="wrap">
@@ -347,9 +369,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=11"></script>
-<script src="data.js?v=11"></script>
-<script src="game.js?v=11"></script>
-<script src="render.js?v=11"></script>
+<script src="config.js?v=12"></script>
+<script src="data.js?v=12"></script>
+<script src="game.js?v=12"></script>
+<script src="render.js?v=12"></script>
 </body>
 </html>

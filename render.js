@@ -37,6 +37,20 @@ let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时
 // 日志浮层:默认收起,点 #logBtn 打开,复用 showInfo/#infoModal 机制(见 renderLogModal)。
 // 这个标志只是"面板现在开着吗",供 render() 判断要不要跟着这次状态更新同步刷新面板内容。
 let logModalOpen = false;
+// 日志 toast:"刚刚发生了什么"的瞬时提示,和 banner("当前该谁做什么")信息类型不同,不复用。
+// null 是哨兵值,只在"页面/模块刚加载后的第一次 render()"这一刻生效一次——把它设成当时的
+// g.log 长度、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史最后一条
+// 日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的长度"比较,包括
+// Firebase 断线重连后的自动重新推送——不会重置回 null,所以重连瞬间不会被误判成"有新日志"。
+let lastToastedLogLen = null;
+function showLogToast(text){
+  const el = document.getElementById('logToast');
+  el.textContent = text;
+  // 重新触发 CSS 动画:先摘掉 .show(可能还在播放上一条的动画),强制回流,再加回去。
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+}
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
 function showConfirm(message, onOk, onCancel){
@@ -344,6 +358,16 @@ function render(g){
   // 日志不再常驻:默认收起,只有 #logBtn 点开的浮层打开着时才需要跟着这次 render 同步刷新内容
   // (Firebase 是实时推送,面板开着的时候底下状态可能还在变,不刷新就会显示过期日志)。
   if(logModalOpen) renderLogModal(g);
+
+  // 日志 toast:有新日志才弹,只弹最新一条(不排队)——连续好几条(比如无懈连锁反应)只看
+  // 最后结果,完整过程本来就在 #logBtn 的日志面板里,toast 只负责"提醒瞥一眼",不保证条条都看到。
+  const logLen = (g.log||[]).length;
+  if(lastToastedLogLen===null){
+    lastToastedLogLen = logLen; // 第一次 render(加入房间/刷新页面那一刻),只记长度,不弹历史
+  } else if(logLen > lastToastedLogLen){
+    showLogToast(g.log[logLen-1]);
+    lastToastedLogLen = logLen;
+  }
 }
 
 function renderControls(g){
