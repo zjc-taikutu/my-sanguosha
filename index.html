@@ -181,13 +181,15 @@
     background:#1a1410;user-select:none;flex:0 0 auto;}
   /* 手牌卡片上的角标:外层 .info-badge-hit 是绝对定位的实际点击热区(比视觉圆圈大,手指好点中),
      内层 .info-badge 只管视觉圆圈大小——两者分离,断点缩小的是视觉尺寸,不牵连点击热区。
-     定位在左下角:左上=花色点数(.corner)、右下=.corner.br 镜像牌名,卡片只有 46~64px 宽,
-     两个角挨得很近——放右上角的话,热区盒子本身的宽度就会顶到卡片将近一半,把居中于热区内的
-     视觉圆圈推到接近卡片中线,和左上角花色点数文字重叠(缩小圆圈本身解决不了,因为圆圈位置
-     是热区盒子的中心,不是卡片的真正角落);唯独左下角完全空着,彻底避开这个问题。 */
-  .card .info-badge-hit{position:absolute;bottom:0;left:0;width:34px;height:34px;display:flex;
+     定位在右上角:左上=花色点数(.corner),右上本身是空的,唯一要注意的是——卡片只有
+     46~64px 宽,热区盒子如果还按"越大越好点"做到 32~34px,盒子本身就会顶到卡片将近一半,
+     把居中于热区内的视觉圆圈推离真正的右上角、往卡片中线靠,和左上角花色点数重新撞上
+     (这正是上一版放右上角失败的原因,不是"位置本身不行",是"热区盒子相对卡片太大,把圆圈
+     挤离了角落")。这次视觉圆圈已经缩得很小,热区盒子跟着按各断点等比例收紧、贴着真正的
+     右上角,不再让圆圈被推向中间——已用真实渲染测量确认(见 CLAUDE.md)三档宽度下都不重叠。*/
+  .card .info-badge-hit{position:absolute;top:0;right:0;width:26px;height:26px;display:flex;
     align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
-  .card .info-badge-hit .info-badge{width:20px;height:20px;font-size:12px;}
+  .card .info-badge-hit .info-badge{width:18px;height:18px;font-size:11px;}
 
   /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
   @media (max-width:640px){
@@ -215,9 +217,9 @@
     /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
        视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
-    /* 手牌卡片角标:视觉圆圈进一步缩小,确保不盖住花色/点数(.corner);热区 .info-badge-hit
-       仍保持较大尺寸(见下),缩小视觉不等于缩小可点范围。 */
-    .card .info-badge-hit{width:32px;height:32px;}
+    /* 手牌卡片角标:视觉圆圈和热区盒子一起收紧(热区也要缩,不然盒子相对卡片太大又会把
+       圆圈推离右上角、挤向花色点数,见上面基础规则的说明)。 */
+    .card .info-badge-hit{width:22px;height:22px;}
     .card .info-badge-hit .info-badge{width:14px;height:14px;font-size:9px;}
   }
   /* ===== 极窄手机断点(叠加在上面 640px 断点之上,数值更紧、且改了 opp2 的结构) ===== */
@@ -232,7 +234,8 @@
     }
     .card{width:46px;height:68px;}
     .card .big{font-size:19px;}
-    /* 卡片更窄了,角标视觉再收一档,热区维持不变(极窄屏手指精度要求反而更高,不能再缩小热区) */
+    /* 卡片更窄了,角标视觉+热区再收一档(极窄屏卡片更窄,热区若不跟着缩会重新顶到花色点数) */
+    .card .info-badge-hit{width:18px;height:18px;}
     .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
   }
 
@@ -335,9 +338,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=6"></script>
-<script src="data.js?v=6"></script>
-<script src="game.js?v=6"></script>
-<script src="render.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="data.js?v=7"></script>
+<script src="game.js?v=7"></script>
+<script src="render.js?v=7"></script>
 </body>
 </html>
