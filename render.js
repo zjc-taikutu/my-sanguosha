@@ -55,7 +55,11 @@ function showConfirm(message, onOk, onCancel){
 function confirmAndPlay(message, actionFn){
   const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQiaobian(); resetJiedao(); };
   showConfirm(message,
-    ()=>{ cleanup(); actionFn(); },
+    // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
+    // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
+    // 立即重绘让"选目标"相关的 onclick 不再被挂上(selectedCardIdx 已是 null),防止这段
+    // 等待期内误触第二下(常见于手机网络延迟)。
+    ()=>{ cleanup(); render(currentG); actionFn(); },
     ()=>{ cleanup(); render(currentG); });
 }
 // playConfirmMsg: 按牌类型生成确认文案。装备用"装备"(spec.noDiscard 是装备牌的统一标志,不硬编码牌名),
@@ -218,12 +222,16 @@ function render(g){
     const targetable = (i!==mySeat || allowSelf) && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
+        // idx 在这里(渲染时/挂载 onclick 那一刻)冻结,而不是等点击时才读 selectedCardIdx——
+        // 否则确认框弹出后、tx 网络往返完成前,旧节点还挂着这个 onclick,手机上一次误触的
+        // 二次点击会读到已被 confirmAndPlay 的 cleanup 清空的 selectedCardIdx(=null),
+        // 显示"使用【undefined】"且 playCard(null,...) 静默失败(此前的真实 bug)。
+        const idx=selectedCardIdx;
+        const c0=((g.players[mySeat].hand||[])[idx])||{};
+        const actionId = canUseAs(g.players[mySeat],c0,'杀') ? '杀' : c0.name; // 闪(赵云)→'杀'
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
-        d.onclick=()=>{ const idx=selectedCardIdx;
-          const c0=((g.players[mySeat].hand||[])[idx])||{};
-          const actionId = canUseAs(g.players[mySeat],c0,'杀') ? '杀' : c0.name; // 闪(赵云)→'杀'
-          confirmAndPlay(playConfirmMsg(g, actionId, c0, i), ()=>playCard(idx, actionId, i)); };
+        d.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, c0, i), ()=>playCard(idx, actionId, i)); };
       } else if(isShaSel && i!==mySeat && p.alive && !inRange){
         // 够不着:选了杀但超出攻击距离 —— 暗色点线 + 角标 + 悬浮说明,不可点
         d.style.outline='2px dotted #6b5b4d';
@@ -235,10 +243,11 @@ function render(g){
     if(zhangbaMode && zhangbaPicks.length===2 && g.phase==='play' && g.turn===mySeat){
       const reach = canReachSha(g, mySeat, i);
       if(i!==mySeat && p.alive && reach){
+        // 同上:a/b 在挂载时冻结,不在点击时才读 zhangbaPicks(它会被 confirmAndPlay 的 cleanup 清空)
+        const a=zhangbaPicks[0], b=zhangbaPicks[1];
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
-        d.onclick=()=>{ const a=zhangbaPicks[0], b=zhangbaPicks[1];
-          confirmAndPlay('对 '+g.players[i].name+' 使用两张牌当【杀】？', ()=>playZhangbaSha(a, b, i)); };
+        d.onclick=()=>{ confirmAndPlay('对 '+g.players[i].name+' 使用两张牌当【杀】？', ()=>playZhangbaSha(a, b, i)); };
       } else if(i!==mySeat && p.alive && !reach){
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
@@ -247,10 +256,11 @@ function render(g){
     }
     // 徐晃【断粮】选目标:已选中一张要弃的牌后,点一名其他存活玩家提交(无距离限制)。
     if(duanliangMode && duanliangCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
+      // 同上:idx 挂载时冻结,不在点击时才读 duanliangCardIdx
+      const idx=duanliangCardIdx;
       d.style.cursor='pointer';
       d.style.outline='2px dashed var(--cinnabar-bright)';
-      d.onclick=()=>{ const idx=duanliangCardIdx;
-        confirmAndPlay('弃置一张牌,对 '+g.players[i].name+' 发动【断粮】(视为使用【兵粮寸断】)？', ()=>duanLiang(idx, i)); };
+      d.onclick=()=>{ confirmAndPlay('弃置一张牌,对 '+g.players[i].name+' 发动【断粮】(视为使用【兵粮寸断】)？', ()=>duanLiang(idx, i)); };
     }
     // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
     if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
@@ -263,10 +273,11 @@ function render(g){
           d.onclick=()=>{ jiedaoSeatA=i; render(g); };
         }
       } else if(i!==jiedaoSeatA && p.alive && canReachSha(g, jiedaoSeatA, i)){
+        // 同上:idx/seatA 挂载时冻结,不在点击时才读 selectedCardIdx/jiedaoSeatA
+        const idx=selectedCardIdx, seatA=jiedaoSeatA, seatB=i;
         d.style.cursor='pointer';
         d.style.outline='3px solid var(--gold)';
-        d.onclick=()=>{ const idx=selectedCardIdx, seatA=jiedaoSeatA, seatB=i;
-          confirmAndPlay('对 '+g.players[seatA].name+' 使用【借刀杀人】,目标 '+g.players[seatB].name+'？',
+        d.onclick=()=>{ confirmAndPlay('对 '+g.players[seatA].name+' 使用【借刀杀人】,目标 '+g.players[seatB].name+'？',
             ()=>jieDaoShaRen(idx, seatA, seatB)); };
       } else if(i===jiedaoSeatA){
         d.style.outline='3px solid var(--gold)';
