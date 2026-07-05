@@ -285,7 +285,16 @@ function finishGuicai(g, finalCard){
   g.pending=null;
   if(resume.kind==='delayJudge'){
     const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], finalCard, resume.card);
-    if(result==='pending') return; // 又挂起了(嵌套濒死或嵌套鬼才),g.pending/g.phase 已经被内部设好
+    if(result==='pending'){
+      // 又挂起了(嵌套濒死或嵌套鬼才)。和 continueDelayResolution 的收尾同一套逻辑,不能省略:
+      // 若新挂起是濒死,它的 resume 只有 {type:'delay'}(dealDamage/startDying 不知道 seat是谁,
+      // 这个信息只有这里——鬼才改判后重新触发的 finishDelayCard——才知道),这里必须补上 seat,
+      // 否则 finishDying 读 resume.seat 是 undefined,g.players[undefined] 直接抛异常(真实 bug:
+      // 鬼才替换了延时锦囊的判定牌、替换后结果致命时才会走到这条分支,此前测试没覆盖到这个组合)。
+      // 若新挂起是鬼才(嵌套鬼才改判),它的 resume 已经自带完整信息,绝不能覆盖。
+      if(g.pending.type==='dying') g.pending.resume={type:'delay', seat:resume.seat};
+      return;
+    }
     continueDelayResolution(g, resume.seat);
     return;
   }
