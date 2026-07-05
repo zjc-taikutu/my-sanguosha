@@ -870,9 +870,14 @@ function renderHand(g){
     if(onClick) el.onclick=onClick;
     el.title = getAnyDesc(card.name); // 电脑鼠标悬停即显示说明(装备牌走 EQUIPS.desc、基础牌/锦囊走 CARD_DESC)
     // "?" 角标:查看该牌说明。stopPropagation 不触发出牌;pointer-events:auto 让 disabled 牌也能查看
-    const badge=document.createElement('div'); badge.className='info-badge'; badge.textContent='?';
-    badge.onclick=(e)=>{ e.stopPropagation(); showInfo(card.name, escapeHtml(getAnyDesc(card.name)||'(暂无说明)')); };
-    el.appendChild(badge);
+    // 外层 .info-badge-hit 是实际点击热区(比视觉圆圈大,手机上更好点中),内层 .info-badge 只负责
+    // 视觉上的小圆圈(手机断点下会缩小,避免盖住花色/点数角标文字)——热区和视觉大小分离,不是
+    // 缩小视觉尺寸就顺带缩小了可点范围。
+    const hit=document.createElement('div'); hit.className='info-badge-hit';
+    hit.onclick=(e)=>{ e.stopPropagation(); showInfo(card.name, escapeHtml(getAnyDesc(card.name)||'(暂无说明)')); };
+    const badge=document.createElement('span'); badge.className='info-badge'; badge.textContent='?';
+    hit.appendChild(badge);
+    el.appendChild(hit);
     h.appendChild(el);
   });
   if((me.hand||[]).length===0) h.innerHTML='<span style="color:var(--paper-dim);font-size:13px">（暂无手牌）</span>';

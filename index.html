@@ -194,9 +194,13 @@
     .card .big{font-size:22px;}
     .card .corner{font-size:11px;}
     .card.trick .big,.card.steal .big{font-size:11px;}
-    /* 可点范围:手机上点太小的圆点容易点不中,统一给到约 30px 的可视+可点尺寸 */
-    .info-badge{width:26px;height:26px;font-size:14px;}
-    .card .info-badge{width:28px;height:28px;font-size:15px;}
+    /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
+       视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。 */
+    .info-badge{width:20px;height:20px;font-size:12px;}
+    /* 手牌卡片角标:视觉圆圈进一步缩小,确保不盖住花色/点数(.corner);热区 .info-badge-hit
+       仍保持较大尺寸(见下),缩小视觉不等于缩小可点范围。 */
+    .card .info-badge-hit{width:32px;height:32px;}
+    .card .info-badge-hit .info-badge{width:14px;height:14px;font-size:9px;}
   }
   /* ===== 极窄手机断点(叠加在上面 640px 断点之上,数值更紧、且改了 opp2 的结构) ===== */
   @media (max-width:480px){
@@ -210,6 +214,8 @@
     }
     .card{width:46px;height:68px;}
     .card .big{font-size:19px;}
+    /* 卡片更窄了,角标视觉再收一档,热区维持不变(极窄屏手指精度要求反而更高,不能再缩小热区) */
+    .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
   }
 
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
@@ -219,7 +225,11 @@
   .info-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
     border:1px solid var(--gold);color:var(--gold);font-size:13px;font-weight:700;line-height:1;cursor:pointer;
     background:#1a1410;user-select:none;flex:0 0 auto;}
-  .card .info-badge{position:absolute;top:4px;right:4px;width:26px;height:26px;font-size:15px;pointer-events:auto;z-index:3;}
+  /* 手牌卡片上的角标:外层 .info-badge-hit 是绝对定位的实际点击热区(比视觉圆圈大,手指好点中),
+     内层 .info-badge 只管视觉圆圈大小——两者分离,手机断点缩小的是视觉尺寸,不牵连点击热区。 */
+  .card .info-badge-hit{position:absolute;top:0;right:0;width:34px;height:34px;display:flex;
+    align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
+  .card .info-badge-hit .info-badge{width:20px;height:20px;font-size:12px;}
   /* 圆形图标按钮统一样式(#helpBtn 与 .info-close 共用):固定尺寸的圆 + flex 居中图形,
      覆盖全局 button 的 padding/line-height,避免字形因内边距不对称而偏移错位。 */
   .icon-btn{padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:50%;}
