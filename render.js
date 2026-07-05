@@ -549,7 +549,13 @@ function renderControls(g){
     setBanner('【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…');
     return;
   }
-  if(g.phase==='wuxie' && g.pending && g.pending.asking===mySeat){
+  // TEMP DEBUG(排查五谷丰登无懈按钮不显示的bug,定位到根因后移除):
+  if(g.phase==='wuxie' && g.pending){
+    console.log('[DEBUG render wuxie]', 'pending.type=', g.pending.type, 'pending.trick=', g.pending.trick,
+      'pending.asking=', g.pending.asking, typeof g.pending.asking, 'mySeat=', mySeat, typeof mySeat,
+      'asking===mySeat?', g.pending.asking===mySeat);
+  }
+  if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===mySeat){
     // 此分支只在"被询问者本人"的客户端渲染(旁观者走下面 asking!==mySeat 分支,只看到等待提示、
     // 完全不渲染这两个按钮),所以按钮是否 disable 只影响本人自己的界面,不会向其他人泄露谁有无懈。
     const hasWuxie = me.hand.some(card=>card.name==='无懈可击');
@@ -570,7 +576,7 @@ function renderControls(g){
     setBanner(hasWuxie ? escapeHtml(askText) : '你没有【无懈可击】,只能点「不出」。');
     return;
   }
-  if(g.phase==='wuxie' && g.pending){
+  if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie'){
     const from=g.players[g.pending.from].name;
     // 目标是使用者自己(如无中生有)时,"对 X 使用"会念成"对自己使用",措辞改成"使用【trick】"更自然
     const useDesc = g.pending.from===g.pending.to ? from+' 使用【'+g.pending.trick+'】' : from+' 对 '+g.players[g.pending.to].name+' 使用【'+g.pending.trick+'】';

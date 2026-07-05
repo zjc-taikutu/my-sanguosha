@@ -1072,6 +1072,8 @@ function openWuxieRound(g){
   const asking=nextAskee(g, g.pending.exclude, g.pending.exclude);
   if(asking===null){ finishWuxieRound(g); return; }
   g.pending.asking=asking;
+  // TEMP DEBUG(排查五谷丰登无懈按钮不显示的bug,定位到根因后移除):
+  console.log('[DEBUG openWuxieRound] trick=', g.pending.trick, 'asking=', asking, typeof asking, 'exclude=', g.pending.exclude, 'depth=', g.pending.depth);
   const verb = g.pending.depth>0 ? '反制' : '使用';
   g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
 }
