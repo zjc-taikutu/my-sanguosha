@@ -315,7 +315,27 @@ function finishGuicai(g, finalCard){
 }
 
 // ---------- actions (all via transaction on the whole game) ----------
-function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); return fn(g) || g; }); }
+// stripUndefined: 深度剔除对象/数组里所有值为 undefined 的属性——Firebase 的 transaction 规则是
+// "返回值里任何字段显式为 undefined 就整个拒绝写入"(不是软失败,是直接不提交,抛
+// "Data returned contains undefined in property ..." 错误)。这类 bug 极隐蔽:很多 pending 构造
+// 习惯"多传一个透传字段,其它场景不传就是 undefined"(如 startTrick 的 card/seatB/pool——见那里的
+// 具体修复),本地跑/自测环境不会报错,只有真连 Firebase 才会在提交那一刻被拒绝。这里在 tx() 出口
+// 做一层统一兜底,即使以后又有类似疏漏也不会真正写坏/被拒绝——但这只是兜底,不是纵容随手传
+// `x: 可能是 undefined 的变量` 的理由,新增"透传字段"时仍然优先用条件展开、只在有值时才放进对象。
+function stripUndefined(obj){
+  if(Array.isArray(obj)){
+    obj.forEach(v=>{ if(v && typeof v==='object') stripUndefined(v); });
+    return obj;
+  }
+  if(obj && typeof obj==='object'){
+    Object.keys(obj).forEach(k=>{
+      if(obj[k]===undefined) delete obj[k];
+      else if(obj[k] && typeof obj[k]==='object') stripUndefined(obj[k]);
+    });
+  }
+  return obj;
+}
+function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); return stripUndefined(fn(g) || g); }); }
 
 function startGame(){
   tx(g=>{
@@ -1018,11 +1038,18 @@ function nextAskee(g, from, current){
 // 交给 openWuxieRound 统一处理"算下一个问谁/问不到人就直接收尾"。
 function startTrick(g, info){
   // card(可选):延时锦囊的物理牌对象,随 pending 透传,供 finishWuxieRound(被挡下→弃牌堆)/
-  // resolveTrick(未被挡下→放进判定区)使用。普通锦囊不传,undefined 对它们是无操作。
-  // seatB(可选):借刀杀人的第二个目标(被杀/被弃武器的那个人),同样随 pending 透传给 resolveTrick;
-  // 其它锦囊不传,undefined 对它们是无操作。
-  // pool(可选):五谷丰登亮出的公共池(牌数组),同样随 pending 透传;其它锦囊不传,undefined 无操作。
-  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, card:info.card, seatB:info.seatB, pool:info.pool, exclude:info.from, depth:0};
+  // resolveTrick(未被挡下→放进判定区)使用。seatB(可选):借刀杀人的第二个目标。
+  // pool(可选):五谷丰登亮出的公共池。三者都只有各自那张牌会传,其它锦囊不传——
+  // **不能直接把 info.card/info.seatB/info.pool 无条件塞进 pending**:大多数锦囊这几个字段
+  // 都是 undefined,而 Firebase 的 transaction 规则是"返回值里任何字段显式为 undefined 就整个
+  // 拒绝写入"(真实 bug:曾经这样写,导致过河拆桥/无中生有/决斗/顺手牵羊/桃园结义/延时锦囊
+  // 放置/五谷丰登——所有经过 startTrick 的锦囊——第一次使用就被 Firebase 拒绝,界面上表现为
+  // "点确定没反应",且这类 bug 只有真连 Firebase 才会触发,本地 stub 测试完全测不出来)。
+  // 只在真的有值时才把这个 key 放进对象(而不是塞一个 undefined 值)。
+  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, exclude:info.from, depth:0};
+  if(info.card!==undefined) g.pending.card=info.card;
+  if(info.seatB!==undefined) g.pending.seatB=info.seatB;
+  if(info.pool!==undefined) g.pending.pool=info.pool;
   g.phase='wuxie';
   openWuxieRound(g);
 }

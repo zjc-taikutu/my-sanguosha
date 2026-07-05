@@ -62,6 +62,23 @@ function confirmAndPlay(message, actionFn){
     ()=>{ cleanup(); render(currentG); actionFn(); },
     ()=>{ cleanup(); render(currentG); });
 }
+// resolveActionId: 点一张手牌该按"它自己的牌名"结算,还是按"当杀"结算(赵云龙胆/关羽武圣)——
+// 优先它自己的 CARD_PLAYS 入口:只要这张牌本身就是一张能主动出的牌(CARD_PLAYS[card.name] 存在
+// 且此刻 canPlay),就按它自己的效果走,"点哪张牌就是哪张牌的效果",符合直觉。只有这张牌本身
+// 没有独立可出的入口时(目前只有【闪】——它从来不是主动可出的 CARD_PLAYS 项,只能被动响应)才走
+// canUseAs 的转化路径。这样关羽武圣/甄姬倾国拿到一张红/黑色的无中生有/南蛮入侵/过河拆桥等"本身
+// 就有效果"的牌时,默认还是按它自己的效果走,不会被误判成杀(此前的真实 bug:这类牌被强制当成
+// 杀,点击只会"选中"而不触发确认框,或错误套用杀的攻击距离限制);而武圣/倾国对【闪】的转化、
+// 赵云龙胆的双向转化完全不受影响,因为【闪】走不到"自己的 CARD_PLAYS 入口"这条路,天然落回转化。
+// 注意:这只管"主动点一张牌该按什么结算"这一层客户端判断——决斗出杀/濒死出桃/打闪/万箭出闪
+// 这类被动响应场景依然直接用 canUseAs/findUsableAs 找"任意能顶替用的牌",不经过这个函数,
+// 武圣/倾国/龙胆在那些场景的转化能力完全不受影响(那正是这些技能的核心用途)。
+function resolveActionId(g, me, card){
+  const ownSpec = CARD_PLAYS[card.name];
+  if(ownSpec && ownSpec.canPlay(g, me, card)) return card.name;
+  if(canUseAs(me, card, '杀')) return '杀';
+  return card.name;
+}
 // playConfirmMsg: 按牌类型生成确认文案。装备用"装备"(spec.noDiscard 是装备牌的统一标志,不硬编码牌名),
 // 其余用"使用";带目标的加上目标姓名;杀由非'杀'名的牌顶替时(赵云的闪)标注"当【杀】"。
 function playConfirmMsg(g, actionId, card, targetSeat){
@@ -209,7 +226,7 @@ function render(g){
     // targeting: clickable opponents when choosing a target card
     const meP=g.players[mySeat];
     const selCard=(selectedCardIdx!==null)?(meP.hand||[])[selectedCardIdx]:null;
-    const isShaSel=!!(selCard && canUseAs(meP,selCard,'杀'));               // 选的牌作为杀(含赵云的闪)
+    const isShaSel=!!(selCard && resolveActionId(g,meP,selCard)==='杀');    // 选的牌最终按"杀"结算(含赵云的闪、没有独立效果的红/黑牌)
     const isJiedaoSel=!!(selCard && selCard.name==='借刀杀人');             // 借刀杀人走专属两步选择,不进通用单目标块
     const needHandOrEquip=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
     // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
@@ -228,7 +245,7 @@ function render(g){
         // 显示"使用【undefined】"且 playCard(null,...) 静默失败(此前的真实 bug)。
         const idx=selectedCardIdx;
         const c0=((g.players[mySeat].hand||[])[idx])||{};
-        const actionId = canUseAs(g.players[mySeat],c0,'杀') ? '杀' : c0.name; // 闪(赵云)→'杀'
+        const actionId = resolveActionId(g, g.players[mySeat], c0); // 优先这张牌自己的效果,没有独立入口才转化为杀(见 resolveActionId 注释)
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, c0, i), ()=>playCard(idx, actionId, i)); };
@@ -751,10 +768,11 @@ function renderControls(g){
     } else if(selectedCardIdx!==null){
       const selCard=(me.hand||[])[selectedCardIdx]||{};
       const nm=selCard.name;
-      // 龙胆:选中一张闪当杀打目标时,显示"【闪】当【杀】"避免困惑
-      const label = (nm==='闪') ? '【闪】当【杀】' : '【'+nm+'】';
-      // 杀受攻击距离限制,提示当前射程,让玩家理解为何有人"够不着"
-      const rangeNote = canUseAs(me,selCard,'杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
+      const actionId=resolveActionId(g,me,selCard);
+      // 只有真的会按"杀"结算才显示"当【杀】"/攻击距离提示(见 resolveActionId:红/黑牌若自己有
+      // 独立效果,默认不会被判成杀,不该显示这段容易让人误以为要当杀打的文案)
+      const label = (actionId==='杀' && nm!=='杀') ? '【'+nm+'】当【杀】' : '【'+nm+'】';
+      const rangeNote = (actionId==='杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
       setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标(或点牌取消)。');
     } else {
       const shaInfo = hasCap(me,'unlimitedSha') ? '可出任意张杀' : (g.shaUsed?'已用过杀':'可出1张杀');
@@ -835,8 +853,8 @@ function renderHand(g){
         render(g);
       };
     } else if(g.phase==='play'&&myTurn){
-      // actionId:赵云的闪也走'杀',其余按牌名;查 CARD_PLAYS 决定可用性与点击行为
-      const actionId = canUseAs(me,card,'杀') ? '杀' : card.name;
+      // actionId:优先这张牌自己的效果,没有独立入口(如闪)才转化为杀;查 CARD_PLAYS 决定可用性与点击行为
+      const actionId = resolveActionId(g, me, card);
       const spec = CARD_PLAYS[actionId];
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
