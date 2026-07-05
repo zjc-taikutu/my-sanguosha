@@ -171,6 +171,24 @@
   .backs{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
   .backs .cardback{width:20px;height:28px;}
 
+  /* ===== 说明浮层 + "?" 触发角标(手机/电脑通用;查看说明与出牌手势分离,靠 stopPropagation) =====
+     这几条基础规则必须放在下面两个 @media 断点之前——同选择器同优先级时 CSS 靠源码顺序决胜负,
+     之前误把它们放在断点后面,导致断点里对 .info-badge/.card .info-badge-hit 的所有覆盖全部
+     被这里的"无条件"规则重新盖掉,不管断点里写什么尺寸,实际生效的永远是这里的桌面尺寸——
+     这是"改了尺寸手机上却看不出变化"的真正原因之一,必须挪到断点之前才能让断点覆盖生效。 */
+  .info-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+    border:1px solid var(--gold);color:var(--gold);font-size:13px;font-weight:700;line-height:1;cursor:pointer;
+    background:#1a1410;user-select:none;flex:0 0 auto;}
+  /* 手牌卡片上的角标:外层 .info-badge-hit 是绝对定位的实际点击热区(比视觉圆圈大,手指好点中),
+     内层 .info-badge 只管视觉圆圈大小——两者分离,断点缩小的是视觉尺寸,不牵连点击热区。
+     定位在左下角:左上=花色点数(.corner)、右下=.corner.br 镜像牌名,卡片只有 46~64px 宽,
+     两个角挨得很近——放右上角的话,热区盒子本身的宽度就会顶到卡片将近一半,把居中于热区内的
+     视觉圆圈推到接近卡片中线,和左上角花色点数文字重叠(缩小圆圈本身解决不了,因为圆圈位置
+     是热区盒子的中心,不是卡片的真正角落);唯独左下角完全空着,彻底避开这个问题。 */
+  .card .info-badge-hit{position:absolute;bottom:0;left:0;width:34px;height:34px;display:flex;
+    align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
+  .card .info-badge-hit .info-badge{width:20px;height:20px;font-size:12px;}
+
   /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
   @media (max-width:640px){
     .seats{gap:8px;}
@@ -221,15 +239,6 @@
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
   .footnote{color:var(--paper-dim);font-size:11px;text-align:center;margin-top:26px;line-height:1.7;}
 
-  /* ===== 说明浮层 + "?" 触发角标(手机/电脑通用;查看说明与出牌手势分离,靠 stopPropagation) ===== */
-  .info-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
-    border:1px solid var(--gold);color:var(--gold);font-size:13px;font-weight:700;line-height:1;cursor:pointer;
-    background:#1a1410;user-select:none;flex:0 0 auto;}
-  /* 手牌卡片上的角标:外层 .info-badge-hit 是绝对定位的实际点击热区(比视觉圆圈大,手指好点中),
-     内层 .info-badge 只管视觉圆圈大小——两者分离,手机断点缩小的是视觉尺寸,不牵连点击热区。 */
-  .card .info-badge-hit{position:absolute;top:0;right:0;width:34px;height:34px;display:flex;
-    align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
-  .card .info-badge-hit .info-badge{width:20px;height:20px;font-size:12px;}
   /* 圆形图标按钮统一样式(#helpBtn 与 .info-close 共用):固定尺寸的圆 + flex 居中图形,
      覆盖全局 button 的 padding/line-height,避免字形因内边距不对称而偏移错位。 */
   .icon-btn{padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:50%;}
