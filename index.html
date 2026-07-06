@@ -198,6 +198,31 @@
     align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
   .card .info-badge-hit .info-badge{width:18px;height:18px;font-size:11px;}
 
+  /* ===== 日志 toast:"刚刚发生了什么"的瞬时提示,和 .banner("当前该谁做什么")信息类型不同,
+     不共用元素/不共用配色——banner 是朱红(行动焦点),这里用金色(氛围提示,呼应 .phase-pill)。
+     position:fixed 独立于文档流,不占位、不推挤座位卡片/按钮;top 故意留在 #helpBtn/#logBtn
+     (top:12px,高44px)那一排下方,任何宽度下都不会跟这两个图标重叠。纯 CSS 动画做"淡入-停留-
+     淡出",不需要 JS 计时器把它关掉——render.js 只负责在有新日志时重新触发 .show 类。
+     pointer-events:none 全程生效,不会挡住点击(哪怕还没淡出完)。
+     基础规则必须放在下面两个 @media 断点之前(和上面 info-badge 那次踩过的坑同一条教训),
+     否则断点里对 font-size/padding 的覆盖会被这条无条件规则重新盖掉,断点形同虚设。 */
+  #logToast{
+    position:fixed;top:64px;left:50%;transform:translateX(-50%);
+    max-width:min(90vw,420px);
+    background:#1a1410;border:1px solid var(--gold);color:var(--gold);
+    padding:9px 18px;border-radius:999px;font-size:16px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    z-index:60;pointer-events:none;opacity:0;box-shadow:0 2px 6px rgba(0,0,0,.4);
+  }
+  #logToast span{font-weight:700;} /* 染色的玩家名字额外加粗,配合颜色更好辨认,和座位卡片姓名的粗体呼应 */
+  #logToast.show{animation:logToastFade 2.6s ease forwards;}
+  @keyframes logToastFade{
+    0%{opacity:0;transform:translate(-50%,-6px);}
+    10%{opacity:1;transform:translate(-50%,0);}
+    80%{opacity:1;}
+    100%{opacity:0;}
+  }
+
   /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
   @media (max-width:640px){
     .seats{gap:8px;}
@@ -230,6 +255,7 @@
        圆圈推离右上角、挤向花色点数,见上面基础规则的说明)。 */
     .card .info-badge-hit{width:22px;height:22px;}
     .card .info-badge-hit .info-badge{width:14px;height:14px;font-size:9px;}
+    #logToast{font-size:15px;padding:8px 16px;}
   }
   /* ===== 极窄手机断点(叠加在上面 640px 断点之上,数值更紧、且改了 opp2 的结构) ===== */
   @media (max-width:480px){
@@ -246,6 +272,7 @@
     /* 卡片更窄了,角标视觉+热区再收一档(极窄屏卡片更窄,热区若不跟着缩会重新顶到花色点数) */
     .card .info-badge-hit{width:18px;height:18px;}
     .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
+    #logToast{font-size:14px;padding:7px 14px;}
   }
 
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
@@ -263,27 +290,6 @@
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   .log-modal div:last-child{color:var(--paper);}
-  /* ===== 日志 toast:"刚刚发生了什么"的瞬时提示,和 .banner("当前该谁做什么")信息类型不同,
-     不共用元素/不共用配色——banner 是朱红(行动焦点),这里用金色(氛围提示,呼应 .phase-pill)。
-     position:fixed 独立于文档流,不占位、不推挤座位卡片/按钮;top 故意留在 #helpBtn/#logBtn
-     (top:12px,高44px)那一排下方,任何宽度下都不会跟这两个图标重叠。纯 CSS 动画做"淡入-停留-
-     淡出",不需要 JS 计时器把它关掉——render.js 只负责在有新日志时重新触发 .show 类。
-     pointer-events:none 全程生效,不会挡住点击(哪怕还没淡出完)。 */
-  #logToast{
-    position:fixed;top:64px;left:50%;transform:translateX(-50%);
-    max-width:min(90vw,420px);
-    background:#1a1410;border:1px solid var(--gold);color:var(--gold);
-    padding:7px 16px;border-radius:999px;font-size:13px;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    z-index:60;pointer-events:none;opacity:0;box-shadow:0 2px 6px rgba(0,0,0,.4);
-  }
-  #logToast.show{animation:logToastFade 2.6s ease forwards;}
-  @keyframes logToastFade{
-    0%{opacity:0;transform:translate(-50%,-6px);}
-    10%{opacity:1;transform:translate(-50%,0);}
-    80%{opacity:1;}
-    100%{opacity:0;}
-  }
   #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
   #infoModal.hidden{display:none;}
   .info-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:560px;width:100%;
@@ -369,9 +375,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=13"></script>
-<script src="data.js?v=13"></script>
-<script src="game.js?v=13"></script>
-<script src="render.js?v=13"></script>
+<script src="config.js?v=14"></script>
+<script src="data.js?v=14"></script>
+<script src="game.js?v=14"></script>
+<script src="render.js?v=14"></script>
 </body>
 </html>

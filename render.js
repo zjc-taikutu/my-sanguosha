@@ -43,9 +43,28 @@ let logModalOpen = false;
 // 日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的长度"比较,包括
 // Firebase 断线重连后的自动重新推送——不会重置回 null,所以重连瞬间不会被误判成"有新日志"。
 let lastToastedLogLen = null;
-function showLogToast(text){
+// colorizeLogLine: 只在 toast 这一处渲染路径把日志行里出现的玩家名字染上座位色(呼应座位卡片
+// 的 seatColor),不碰 g.log 本身的存储(依然是纯字符串,日志面板 renderLogModal 不受影响)。
+// 先转义整行,再用转义后的名字做字面 split/join 替换(不用正则,不用处理名字里的正则特殊字符);
+// 按名字长度从长到短替换,防止"某玩家名字是另一玩家名字子串"时被短名字提前抢先替换掉。
+// 名字长度<2的不参与染色:三国杀满屏都是单字游戏术语(杀/闪/桃/牌/堆/弃...),1个字的玩家名
+// 几乎必然和这些词撞在一起,误染色概率很高;2字以上撞上无关词组纯属巧合,概率低很多,
+// 这里只接受"低概率的巧合误染色"这一种代价,不为它再引入正则/语境匹配的复杂度。
+function colorizeLogLine(g, text){
+  let escaped = escapeHtml(text);
+  const entries = (g.players||[]).map((p,i)=>({i,p}))
+    .filter(o=>o.p && o.p.name && o.p.name.length>=2)
+    .sort((a,b)=>b.p.name.length-a.p.name.length);
+  entries.forEach(({i,p})=>{
+    const escName = escapeHtml(p.name);
+    if(!escName) return;
+    escaped = escaped.split(escName).join('<span style="color:'+seatColor(i)+'">'+escName+'</span>');
+  });
+  return escaped;
+}
+function showLogToast(g, text){
   const el = document.getElementById('logToast');
-  el.textContent = text;
+  el.innerHTML = colorizeLogLine(g, text);
   // 重新触发 CSS 动画:先摘掉 .show(可能还在播放上一条的动画),强制回流,再加回去。
   el.classList.remove('show');
   void el.offsetWidth;
@@ -365,7 +384,7 @@ function render(g){
   if(lastToastedLogLen===null){
     lastToastedLogLen = logLen; // 第一次 render(加入房间/刷新页面那一刻),只记长度,不弹历史
   } else if(logLen > lastToastedLogLen){
-    showLogToast(g.log[logLen-1]);
+    showLogToast(g, g.log[logLen-1]);
     lastToastedLogLen = logLen;
   }
 }
