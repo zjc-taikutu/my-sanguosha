@@ -292,8 +292,11 @@ function render(g){
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
         (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'')+
       '</div>';
+    // 武将名+技能名拼一行(如"关羽 · 武圣"),贴合旧版"武将 X · 技能"的习惯——去掉"武将"
+    // 前缀文字,头像本身已经很直观表明"这是武将",不需要文字点破。title 只放技能说明,
+    // 不重复塞武将名(武将名已经在正文里,title 没必要啰嗦重复)。
     const skillLine = (g.started&&gen)
-      ? '<div class="skill-line" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'">'+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span></div>'
+      ? '<div class="skill-line" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'">'+escapeHtml(gen.name)+' · '+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span></div>'
       : '';
     // 头像居左+信息居右(第7步,取代第6步的头像铺底):头像框是固定小方块(见 index.html
     // .avatar-box,宽高比锁死等于素材 3:4,不裁切),姓名/血量/技能/判定区/装备回到普通
