@@ -99,6 +99,15 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 方天画戟排队(g.fangtianQueue):非活跃时应为 null(和 g.pending/g.aoe 同款标量哨兵)。
+  // 活跃时 from/idx 应是数字、targets 应是非空数组——任一不对就整体判无效清空,防止卡死。
+  if(g.fangtianQueue===undefined) g.fangtianQueue=null;
+  if(g.fangtianQueue){
+    const q=g.fangtianQueue;
+    if(typeof q.from!=='number' || typeof q.idx!=='number' || !Array.isArray(q.targets) || q.targets.length===0){
+      g.fangtianQueue=null;
+    }
+  }
   // 鬼才改判阶段:seat/asking 都应是数字座位号,judgeCard 应有 suit/rank,resume.kind 应是字符串;任一不对就整体判无效
   if(g.pending && g.pending.type==='guicai'){
     const d=g.pending;
@@ -309,7 +318,7 @@ function finishGuicai(g, finalCard){
   // kind==='bagua'
   const red = finishBaguaColor(g, finalCard);
   if(resume.type==='sha'){
-    if(red){ g.phase='play'; }
+    if(red){ finishSingleShaTarget(g); } // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要继续)
     else { g.pending={from:resume.from, to:resume.to}; g.phase='respond'; }
   } else if(resume.type==='aoe'){
     if(red){
@@ -621,7 +630,7 @@ function resolveShaUse(g, me, targetSeat, usedAs, shaColor){
   if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
     g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效');
-    g.phase='play';
+    finishSingleShaTarget(g);
     return;
   }
   g.log=pushLog(g.log, me.name+' 对 '+target.name+' '+usedAs);
@@ -723,7 +732,7 @@ function continueShaAfterTieqi(g, from, to, noShan){
   // 八卦阵:被杀需出闪前先判定,红=视为出闪 → 杀被抵消,攻击者继续出牌(与正常出闪同结果)
   const r=tryBagua(g, to, {type:'sha', from, to});
   if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
-  if(r){ g.pending=null; g.phase='play'; return; }
+  if(r){ g.pending=null; finishSingleShaTarget(g); return; }
   g.phase='respond'; // 黑/无八卦阵:照常进响应,等目标出闪或受伤
 }
 // respondTieqi: 仅攻击者(pending.from)可响应。不发动:直接接原尾巴(noShan=false)。
@@ -772,6 +781,41 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
     // 不是"没有颜色"——c1/c2 是 splice 之前存的引用,不受后面 splice 影响。
     resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2));
+    return g;
+  });
+}
+// playShaFangtian: 方天画戟——锁定技,若使用的杀是最后一张手牌,可额外选至多两个目标(总计最多3个)。
+// 与 playCard/CARD_PLAYS['杀'] 平级的独立入口(不改动通用单目标出杀流程,普通玩家/普通情况完全不受影响)。
+// 不强制选满(targets.length 1~3 都合法),结算顺序不由玩家提交顺序决定——按 nextAlive 回合方向从
+// 攻击者起重排(官方原文"结算顺序固定、不可自选")。武器槽互斥:装备方天画戟时不可能同时装备
+// 青龙偃月刀/寒冰剑/麒麟弓等其它武器,因此排队目标的后续响应/判定不会触碰那几把武器各自的专属分支。
+// 额外目标是否也受方天画戟自身射程限制:查不到能逐字引用的官方原文,这里按"这仍是同一张杀、射程
+// 限制作用于这张杀本身"的方向实现——是推断,不是确证的官方规则,已与用户确认按这个方向做。
+function playShaFangtian(cardIdx, targets){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat], card=me.hand[cardIdx];
+    if(!card || !canUseAs(me,card,'杀')) return g;
+    if(g.shaUsed && !hasCap(me,'unlimitedSha')) return g; // 出杀次数限制,和普通杀一致
+    if(!hasCap(me,'fangtian') || me.hand.length!==1) return g; // 锁定技触发条件:必须是最后一张手牌
+    if(!Array.isArray(targets) || targets.length<1 || targets.length>3) return g;
+    const seen=new Set();
+    for(const t of targets){
+      if(seen.has(t)) return g; // 目标不能重复
+      seen.add(t);
+      const tp=g.players[t];
+      if(!tp || !tp.alive || t===mySeat || !canReachSha(g, mySeat, t)) return g;
+    }
+    // 按现有回合方向(nextAlive)从攻击者起重排,不用玩家提交的原始顺序
+    const order=[]; let s=mySeat;
+    for(let i=0;i<g.players.length;i++){ s=nextAlive(g,s); if(targets.includes(s)) order.push(s); }
+    me.hand.splice(cardIdx,1);
+    g.discard.push(card);
+    g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+    const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
+    g.log=pushLog(g.log, me.name+' 发动【方天画戟】,'+usedAs+',指定 '+order.length+' 个目标：'+order.map(t=>g.players[t].name).join('、'));
+    g.fangtianQueue = { from:mySeat, targets:order, idx:0, usedAs, shaColor:singleCardShaColor(card) };
+    resolveShaUse(g, me, order[0], usedAs, singleCardShaColor(card));
     return g;
   });
 }
@@ -1015,9 +1059,28 @@ function finishDying(g, actuallyDied){
     // 骁果"受到1点伤害"选项致命挂起后的接回:不管目标是否真死,都继续找下一个有资格的
     // 候选乐进(或最终真正切换回合)——resume 在 respondXiaoguoChoice 里已经带上完整信息。
     advanceXiaoguo(g, resume.endingSeat, resume.lastAsker);
-  } else { // 'sha' 及其它:攻击者继续出牌阶段
-    g.phase='play';
+  } else { // 'sha' 及其它:攻击者继续出牌阶段——若这是方天画戟排队目标中的一个,继续问下一个而不是直接回play
+    // (checkWin 在本函数前面已经调过一次,这里不用 finishSingleShaTarget 以免重复调用)
+    if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
   }
+}
+// ===== 方天画戟:队列驱动的多目标杀,共用出口 =====
+// finishSingleShaTarget: 一个目标的杀响应/判定彻底结束时统一走这里(毅重/仁王盾无效、八卦阵/鬼才改判
+// 红色抵消、respondShan 出闪或命中受伤后的共用尾巴,均改走这个出口)——先 checkWin,再看 g.fangtianQueue
+// 是否还有排队中的下一个目标,有则继续,没有(或本来就不是方天画戟触发的)才真正回到出牌阶段。
+function finishSingleShaTarget(g){
+  if(checkWin(g)) return;
+  if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
+}
+// advanceFangtianQueue: 推进到方天画戟队列里的下一个目标,重新走一遍完整的 resolveShaUse(毅重/仁王盾/
+// 铁骑/烈弓/青釭剑/八卦阵/响应阶段全部照常各自独立判定)。跳过中途已阵亡的排队目标(防御性,理论上
+// 现有效果里没有会让排队目标之间互相致死的连锁,但仍做兜底)。问完/没有更多目标则清空队列回到出牌阶段。
+function advanceFangtianQueue(g){
+  const q=g.fangtianQueue;
+  q.idx++;
+  while(q.idx<q.targets.length && (!g.players[q.targets[q.idx]] || !g.players[q.targets[q.idx]].alive)) q.idx++;
+  if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.phase='play'; return; }
+  resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor);
 }
 // 麒麟弓:杀造成伤害且目标存活时,弃目标一匹坐骑。0匹→无效果;1匹→直接弃;2匹→开选马子阶段(攻击者选)。
 // 返回 true 表示已开选马子阶段(调用方应提前返回、不做收尾)。仅由「杀造成伤害」处调用(srcType==='sha')。
@@ -1526,8 +1589,7 @@ function respondShan(useShan){
       if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
     }
     g.pending=null;
-    if(checkWin(g)) return g;
-    g.phase='play'; // attacker continues play phase
+    finishSingleShaTarget(g); // 单个目标响应完毕:方天画戟排队中还有下一个则继续,否则回到出牌阶段
     return g;
   });
 }

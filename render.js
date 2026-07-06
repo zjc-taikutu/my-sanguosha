@@ -32,6 +32,12 @@ function resetZhangba(){ zhangbaMode=false; zhangbaPicks=[]; }
 let tuxiMode = false;
 let tuxiPicks = [];              // 已选目标座位号,最多 2 个
 function resetTuxi(){ tuxiMode=false; tuxiPicks=[]; }
+// 方天画戟:锁定技,手牌只剩最后一张且能当杀时才出现"追加目标"入口(仿张辽突袭同款
+// "数量可变、不能靠选满自动触发、需要独立确认按钮"的交互)。因为触发条件已经限定"只有这一张
+// 手牌",不需要像丈八/断粮那样先选牌——cardIdx 恒为 0,点入口直接进选目标模式。
+let fangtianMode = false;
+let fangtianPicks = [];          // 已选额外目标座位号,最多 3 个(含最少1个,不强制选满)
+function resetFangtian(){ fangtianMode=false; fangtianPicks=[]; }
 // 徐晃【断粮】:出牌阶段点"发动断粮"进选牌+选目标模式(纯客户端,不入库)。
 // 先点一张手牌(任意牌都行,不检查牌名)选中,再点一名其他玩家座位提交;和普通出牌选目标
 // 的交互很像,但不走 CARD_PLAYS/playCard(断粮不认牌名,是独立的技能动作)。
@@ -125,7 +131,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQiaobian(); resetJiedao(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQiaobian(); resetJiedao(); resetFangtian(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
@@ -174,6 +180,12 @@ function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COL
 // style 可选,仅 game-over 播报胜利时需要金色特殊样式。
 function setBanner(html, style){
   document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
+}
+// fangtianSuffix: 方天画戟排队中的目标提示后缀(如"(方天画戟 目标2/3)"),没有排队则返回空串。
+// 附加在响应阶段(respond/tieqi/liegong)的 banner 末尾,帮旁观者看懂"这是第几个目标"。
+function fangtianSuffix(g){
+  const q=g.fangtianQueue;
+  return q ? '（方天画戟 目标'+(q.idx+1)+'/'+q.targets.length+'）' : '';
 }
 
 // ===== 座位环形布局 第2步:槽位分配(仿张郃巧变等"纯前端现算"风格,不入库) =====
@@ -383,6 +395,27 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
     }
+    // 方天画戟选目标模式:点存活的、在攻击距离内的其他玩家 = 切换选中/取消,上限 min(3,范围内合法目标数)。
+    // 不强制选满(选够1个即可点"确认发动");距离限制是推断而非确证的官方规则(见 EQUIPS['方天画戟'].desc)。
+    if(fangtianMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
+      const reach = canReachSha(g, mySeat, i);
+      const picked = fangtianPicks.includes(i);
+      const selectable = reach && (picked || fangtianPicks.length<3);
+      if(selectable){
+        d.style.cursor='pointer';
+        if(picked) d.style.outline='3px solid var(--gold)';
+        else d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.onclick=()=>{
+          if(picked) fangtianPicks = fangtianPicks.filter(x=>x!==i);
+          else if(fangtianPicks.length<3) fangtianPicks.push(i);
+          render(g);
+        };
+      } else if(!reach){
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
+      }
+    }
     // 徐晃【断粮】选目标:已选中一张要弃的牌后,点一名其他存活玩家提交(无距离限制)。
     if(duanliangMode && duanliangCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
       // 同上:idx 挂载时冻结,不在点击时才读 duanliangCardIdx
@@ -495,12 +528,12 @@ function renderControls(g){
     b2.textContent='不发动'; b2.onclick=()=>respondTieqi(false);
     c.appendChild(b2);
     const to=g.players[g.pending.to].name;
-    setBanner('你对 '+escapeHtml(to)+' 出【杀】,是否发动【铁骑】判定?若为红色则此杀不可被闪抵消。');
+    setBanner('你对 '+escapeHtml(to)+' 出【杀】,是否发动【铁骑】判定?若为红色则此杀不可被闪抵消。'+fangtianSuffix(g));
     return;
   }
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…');
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…'+fangtianSuffix(g));
     return;
   }
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong' && g.pending.from===mySeat){
@@ -511,12 +544,12 @@ function renderControls(g){
     b2.textContent='不发动'; b2.onclick=()=>respondLiegong(false);
     c.appendChild(b2);
     const to=g.players[g.pending.to].name;
-    setBanner('你对 '+escapeHtml(to)+' 出【杀】,是否发动【烈弓】?令此杀不可被闪抵消。');
+    setBanner('你对 '+escapeHtml(to)+' 出【杀】,是否发动【烈弓】?令此杀不可被闪抵消。'+fangtianSuffix(g));
     return;
   }
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【烈弓】…');
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【烈弓】…'+fangtianSuffix(g));
     return;
   }
   // 青龙偃月刀:杀被闪抵消,装备者(攻击者)是否发动再使用一张杀(固定同一目标,不需要选目标)。
@@ -757,7 +790,7 @@ function renderControls(g){
     else if(shanNeeded>1 && g.pending.shanCount>0) tail='对方是吕布【无双】,已打出'+g.pending.shanCount+'/'+shanNeeded+'张【闪】,还需再打出一张才能抵消!';
     else if(shanNeeded>1) tail='对方是吕布【无双】,需要连续打出2张【闪】才能抵消。';
     else tail='是否打出【闪】?';
-    setBanner(lead+tail);
+    setBanner(lead+tail+fangtianSuffix(g));
     return;
   }
   if(g.phase==='respond' && g.pending){
@@ -767,7 +800,7 @@ function renderControls(g){
     const fromSpan='<span style="color:'+seatColor(g.pending.from)+'">'+escapeHtml(from)+'</span>';
     const toSpan='<span style="color:'+seatColor(g.pending.to)+'">'+escapeHtml(to)+'</span>';
     const noShanTag = g.pending.noShan ? '(【铁骑】判红,不可被闪抵消)' : '';
-    setBanner(fromSpan+' 对 '+toSpan+' 出【杀】'+noShanTag+',等待'+toSpan+'响应…');
+    setBanner(fromSpan+' 对 '+toSpan+' 出【杀】'+noShanTag+',等待'+toSpan+'响应…'+fangtianSuffix(g));
     return;
   }
   if(g.phase==='duel' && g.pending && g.pending.active===mySeat){
@@ -975,7 +1008,19 @@ function renderControls(g){
     const canSha = !g.shaUsed || hasCap(me,'unlimitedSha');
     if(zhangbaMode && !canSha) resetZhangba(); // 选牌途中次数变得不可用 → 安全退出,不卡在选牌模式
     if(duanliangMode && g.duanliangUsed) resetDuanliang(); // 选牌途中变得不可用(理论上不会,双重保险)
-    if(duanliangMode){
+    // 方天画戟触发条件(手牌恰好剩1张+能当杀+还能出杀)在选目标途中变得不满足 → 安全退出,不卡在选牌模式
+    if(fangtianMode && (!canSha || me.hand.length!==1 || !hasCap(me,'fangtian') || !canUseAs(me,(me.hand||[])[0],'杀'))) resetFangtian();
+    if(fangtianMode){
+      // 方天画戟选目标模式:点上方存活+范围内的其他玩家(见 seat 循环里的分支),不强制选满,选够1个即可确认。
+      setBanner('【方天画戟】选择至多3个目标(已选 '+fangtianPicks.length+'/3，攻击距离 '+attackRange(g,mySeat)+')。');
+      if(fangtianPicks.length>=1){
+        const ok=document.createElement('button'); ok.className='primary';
+        ok.textContent='确认出杀'; ok.onclick=()=>{ const picks=fangtianPicks.slice(); resetFangtian(); playShaFangtian(0, picks); };
+        c.appendChild(ok);
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetFangtian(); render(g); }; c.appendChild(cb);
+    } else if(duanliangMode){
       // 断粮选牌+选目标模式:先选一张手牌(任意牌都行),再点上方一名其他玩家提交。提供取消。
       setBanner(duanliangCardIdx===null
         ? '【断粮】选择一张要弃置的手牌(任意牌都行)。'
@@ -1009,17 +1054,24 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    if(!zhangbaMode && !duanliangMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
+    if(!zhangbaMode && !duanliangMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);
     }
     // 断粮入口:出牌阶段限一次,手牌非空才值得开这个入口(没牌可弃就跟没有技能一样不渲染)。
-    if(!zhangbaMode && !duanliangMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && (me.hand||[]).length>0){
+    if(!zhangbaMode && !duanliangMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && (me.hand||[]).length>0){
       const db=document.createElement('button'); db.className='ghost';
       db.textContent='发动【断粮】'; db.onclick=()=>{ selectedCardIdx=null; duanliangMode=true; duanliangCardIdx=null; render(g); }; c.appendChild(db);
     }
+    // 方天画戟入口:锁定技,仅当手牌恰好只剩这最后一张、且这张牌能当杀、且本回合还能出杀时才出现——
+    // 不满足条件(手里还有别的牌)时和没有这把武器一样,普通单目标出杀流程完全不受影响。
+    if(!zhangbaMode && !duanliangMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'fangtian') && canSha
+       && (me.hand||[]).length===1 && canUseAs(me,(me.hand||[])[0],'杀')){
+      const fb=document.createElement('button'); fb.className='ghost';
+      fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
+    }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQiaobian();resetJiedao();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQiaobian();resetJiedao();resetFangtian();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -1075,6 +1127,9 @@ function renderHand(g){
       // 断粮选牌模式:任意一张牌都可以选(不检查牌名),点= 切换选中(单选,再点别的牌会换选中)
       usable=true;
       onClick=()=>{ duanliangCardIdx = (duanliangCardIdx===idx?null:idx); render(g); };
+    } else if(g.phase==='play'&&myTurn&&fangtianMode){
+      // 方天画戟选目标模式:手牌只有这一张(触发条件已限定),不需要再点手牌本身,
+      // 目标全部在座位区(见下方 seat 循环里的 fangtianMode 分支)选择,这里留空不可点。
     } else if(g.phase==='play'&&myTurn&&zhangbaMode){
       // 丈八选牌模式:点牌 = toggle 到 zhangbaPicks(任意牌均可,最多2张;已满则仅允许取消已选)
       usable = picked || zhangbaPicks.length<2;
