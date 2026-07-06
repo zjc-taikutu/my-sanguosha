@@ -1422,6 +1422,17 @@ function respondShan(useShan){
       const played=(g.pending.shanCount||0)+1;
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
+      // 青龙偃月刀:杀被闪抵消,装备者(攻击者)可选择再对同一目标使用一张杀——不计入 g.shaUsed
+      // 次数限制、无距离限制(官方原文括号里明确写了),只在攻击者手里确实有能当杀的牌时才问
+      // (没有可用牌就不弹出这个询问,直接走下面原有的收尾,不会卡在一个按不动的死胡同界面)。
+      // 如果这次追加的杀又被闪抵消,会再次落到这里、再问一次——不需要额外写"连续触发"的循环
+      // 逻辑,这是同一段代码天然支持的效果,触发上限由攻击者手里还有没有牌能当杀这个客观条件封顶。
+      if(hasCap(attacker,'qinglong') && (attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀'))){
+        g.pending={type:'qinglong', from:g.pending.from, to:mySeat};
+        g.phase='qinglong';
+        g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
+        return g;
+      }
     } else {
       const dying = dealDamage(g, mySeat, 1, g.pending.from, '不闪', 'sha');
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
@@ -1431,6 +1442,32 @@ function respondShan(useShan){
     g.pending=null;
     if(checkWin(g)) return g;
     g.phase='play'; // attacker continues play phase
+    return g;
+  });
+}
+// respondQinglong: 仅攻击者(pending.from,也就是青龙偃月刀的装备者)可响应。不发动:直接走
+// 和 respondShan 共用尾巴一致的收尾(清 pending、判胜负、回到出牌阶段)。发动:选一张能当杀
+// 的手牌(目标固定是原目标 pending.to,不需要重新选目标),整张走 resolveShaUse 完整流程——
+// 不占用 g.shaUsed(不计入出杀次数限制)、不做距离校验(官方原文明确无距离限制)。
+function respondQinglong(activate, cardIdx){
+  tx(g=>{
+    if(g.phase!=='qinglong'||!g.pending||g.pending.type!=='qinglong'||g.pending.from!==mySeat) return g;
+    const me=g.players[mySeat]; // 攻击者本人(装备者)
+    const targetSeat=g.pending.to;
+    if(!activate){
+      g.log=pushLog(g.log, me.name+'：不发动【青龙偃月刀】');
+      g.pending=null;
+      if(checkWin(g)) return g;
+      g.phase='play';
+      return g;
+    }
+    const card=me.hand[cardIdx];
+    if(!card || !canUseAs(me,card,'杀')) return g; // 没这张牌/不能当杀:状态不变(双重保险)
+    me.hand.splice(cardIdx,1); g.discard.push(card);
+    const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
+    g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
+    g.pending=null;
+    resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card));
     return g;
   });
 }

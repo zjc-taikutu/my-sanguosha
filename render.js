@@ -41,6 +41,10 @@ function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 // 乐进【骁果】:点"发动"进选牌模式(纯客户端,不入库),只有基本牌可点,点了直接提交(仿鬼才)。
 let xiaoguoMode = false;
 function resetXiaoguo(){ xiaoguoMode=false; }
+// 青龙偃月刀:杀被闪抵消后,装备者(攻击者)点"发动"进选牌模式(纯客户端,不入库),能当杀的
+// 牌都可点,点了直接提交(和骁果同一个"点发动进选牌模式,选牌即提交"的单步交互模式)。
+let qinglongMode = false;
+function resetQinglong(){ qinglongMode=false; }
 // 张郃【巧变】完整版:回合开始服务端问"是否发动"(g.phase==='qiaobianTurnStart'),点"发动"后
 // 客户端进入纯本地状态机(不入库,不需要其他玩家响应)——① 'choosePhase':选一张手牌+选一个
 // 阶段(判定/摸牌/出牌/弃牌),一次性提交 qiaobianDeclare(cardIdx, phaseChoice);
@@ -233,6 +237,8 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetDuanliang();
   // 同款兜底:一旦不在"轮到自己响应骁果"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
+  // 同款兜底:一旦不在"轮到自己(攻击者)响应青龙偃月刀"的状态,退出选牌模式,不留残留。
+  if(!(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong' && g.pending.from===mySeat)) resetQinglong();
   // 同款兜底:只要不在"轮到自己的巧变回合开始询问"或"轮到自己的巧变移动询问"这两个状态,
   // 就退出巧变选牌/选阶段/选源/选目标模式——巧变完整版横跨两个不同的服务端阶段。
   if(!(g.phase==='qiaobianTurnStart' && g.pending && g.pending.type==='qiaobianTurnStart' && g.pending.seat===mySeat) &&
@@ -429,7 +435,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -511,6 +517,29 @@ function renderControls(g){
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【烈弓】…');
+    return;
+  }
+  // 青龙偃月刀:杀被闪抵消,装备者(攻击者)是否发动再使用一张杀(固定同一目标,不需要选目标)。
+  if(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong' && g.pending.from===mySeat){
+    const to=g.players[g.pending.to].name;
+    if(qinglongMode){
+      setBanner('【青龙偃月刀】选择一张能当【杀】的手牌,对 '+escapeHtml(to)+' 再次使用。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetQinglong(); render(g); }; c.appendChild(cb);
+    } else {
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='发动【青龙偃月刀】'; b1.onclick=()=>{ qinglongMode=true; render(g); };
+      c.appendChild(b1);
+      const b2=document.createElement('button');
+      b2.textContent='不发动'; b2.onclick=()=>respondQinglong(false);
+      c.appendChild(b2);
+      setBanner('你对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,是否发动【青龙偃月刀】再使用一张【杀】?');
+    }
+    return;
+  }
+  if(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong'){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【青龙偃月刀】…');
     return;
   }
   if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat){
@@ -995,6 +1024,11 @@ function renderHand(g){
       // 骁果选牌模式:只有基本牌(杀/闪/桃)可选,其余牌照常灰显不可点
       usable = BASIC_CARDS.includes(card.name);
       if(usable) onClick=()=>{ resetXiaoguo(); respondXiaoguo(true, idx); };
+    } else if(g.phase==='qinglong'&&qinglongMode&&g.pending&&g.pending.type==='qinglong'&&g.pending.from===mySeat){
+      // 青龙偃月刀选牌模式:只有能当杀的牌可选(canUseAs 统一入口,含龙胆闪当杀等转化),
+      // 点了直接提交,不需要额外确认(目标固定,不需要选目标)。
+      usable = canUseAs(me, card, '杀');
+      if(usable) onClick=()=>{ resetQinglong(); respondQinglong(true, idx); };
     } else if(g.phase==='qiaobianTurnStart'&&qiaobianMode==='choosePhase'&&g.pending&&g.pending.type==='qiaobianTurnStart'&&g.pending.seat===mySeat){
       // 巧变选牌模式:任意一张牌都可以选(不检查牌名)。toggle 单选(和断粮同款),
       // 还要另外选一个阶段(四个按钮在 renderControls 里),两者都选好才出现"确认"。
