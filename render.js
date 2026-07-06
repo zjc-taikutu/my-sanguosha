@@ -435,7 +435,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -540,6 +540,43 @@ function renderControls(g){
   if(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【青龙偃月刀】…');
+    return;
+  }
+  // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
+  if(g.phase==='hanbingAsk' && g.pending && g.pending.type==='hanbingAsk' && g.pending.from===mySeat){
+    const to=g.players[g.pending.to].name;
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【寒冰剑】'; b1.onclick=()=>respondHanbingAsk(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondHanbingAsk(false);
+    c.appendChild(b2);
+    setBanner('你的【杀】命中 '+escapeHtml(to)+',是否发动【寒冰剑】?防止伤害,改为弃置对方两张牌。');
+    return;
+  }
+  if(g.phase==='hanbingAsk' && g.pending && g.pending.type==='hanbingAsk'){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner(escapeHtml(from)+' 的【杀】命中 '+escapeHtml(to)+','+escapeHtml(from)+' 是否发动【寒冰剑】…');
+    return;
+  }
+  // 寒冰剑弃牌子阶段:和 pick 阶段同一套"随机手牌+具名装备"选项列表,只是这次响应函数是
+  // hanbingPick,弃完一张可能还会自动/再问下一轮(由 startHanbingRound 决定,不在这里判断)。
+  if(g.phase==='hanbing' && g.pending && g.pending.from===mySeat){
+    const tgt=g.players[g.pending.to];
+    if(tgt && (tgt.hand||[]).length>0){
+      const b=document.createElement('button'); b.className='primary';
+      b.textContent='弃随机一张手牌'; b.onclick=()=>hanbingPick('hand'); c.appendChild(b);
+    }
+    if(tgt) EQUIP_SLOTS.forEach(s=>{ if(tgt.equips[s]){
+      const b=document.createElement('button');
+      b.textContent='弃装备【'+tgt.equips[s].name+'】'; b.onclick=()=>hanbingPick(s); c.appendChild(b);
+    }});
+    setBanner('【寒冰剑】选择弃置 '+escapeHtml(tgt?tgt.name:'目标')+' 的第'+((g.pending.round||0)+1)+'张牌（手牌随机、装备可指定）。');
+    return;
+  }
+  if(g.phase==='hanbing' && g.pending){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner(escapeHtml(from)+' 发动了【寒冰剑】,正在选择弃置 '+escapeHtml(to)+' 的第'+((g.pending.round||0)+1)+'张牌…');
     return;
   }
   if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat){

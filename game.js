@@ -1289,6 +1289,82 @@ function pickResolve(choice){
     return g;
   });
 }
+// ===== 寒冰剑:杀命中造成伤害之前,攻击者可选择防止伤害、改为弃置目标两张牌 =====
+// hanbingDiscardCount: 目标手牌+装备区加起来还有几张牌可弃(0~n)。respondShan 里用来判断
+// "目标完全没有牌可弃"这种不能发动的边界,不能弹出一个没什么可弃的空询问。
+function hanbingDiscardCount(p){ return (p.hand||[]).length + EQUIP_SLOTS.filter(s=>p.equips&&p.equips[s]).length; }
+// respondHanbingAsk: 仅 pending.from(装备寒冰剑的攻击者)可响应。不发动:补上正常伤害流程
+// (和 respondShan 的"不闪"分支完全一致的一套收尾,只是挪到这个新函数里,因为已经隔了一次
+// 网络往返,不能再指望原来那个 tx 调用里的共用尾巴)。发动:不造成任何伤害,直接进入弃牌
+// 循环(startHanbingRound,round 从 0 开始)。
+function respondHanbingAsk(activate){
+  tx(g=>{
+    if(g.phase!=='hanbingAsk'||!g.pending||g.pending.type!=='hanbingAsk'||g.pending.from!==mySeat) return g;
+    const from=mySeat, to=g.pending.to;
+    if(!activate){
+      g.log=pushLog(g.log, g.players[from].name+'：不发动【寒冰剑】');
+      g.pending=null;
+      const dying = dealDamage(g, to, 1, from, '不闪', 'sha');
+      if(dying) return g;
+      if(maybeStartQilin(g, from, to)) return g;
+      if(checkWin(g)) return g;
+      g.phase='play';
+      return g;
+    }
+    g.log=pushLog(g.log, g.players[from].name+' 发动【寒冰剑】,防止伤害,改为弃置 '+g.players[to].name+' 的牌');
+    g.pending=null;
+    startHanbingRound(g, from, to, 0);
+    return g;
+  });
+}
+// startHanbingRound: (重新)计算目标这一刻还有什么可弃——0个直接收尾(不管是第一轮就没有,
+// 还是弃完第一张后目标没牌了);1个免弹窗自动弃这一个(和 pick 阶段"唯一选择直接结算"
+// 同一个惯例),弃完继续问下一轮;2个以上才真正开 pending 问攻击者选。round 到 2 就收尾——
+// "对方2张以上必须弃满两轮,不足两张弃光为止",不存在"弃1张就不弃了"这个中途停下的选项。
+function startHanbingRound(g, from, to, round){
+  const tgt=g.players[to];
+  if(!tgt || !tgt.alive || round>=2){ finishHanbing(g); return; }
+  const handCount=(tgt.hand||[]).length;
+  const equipSlots=EQUIP_SLOTS.filter(s=>tgt.equips[s]);
+  const optCount=(handCount>0?1:0)+equipSlots.length;
+  if(optCount===0){ finishHanbing(g); return; }
+  if(optCount===1){
+    const info={trick:'寒冰剑', from, to};
+    if(handCount>0) applyTrickOnHand(g, info); else applyTrickOnEquip(g, info, equipSlots[0]);
+    startHanbingRound(g, from, to, round+1);
+    return;
+  }
+  g.pending={type:'hanbing', from, to, round};
+  g.phase='hanbing';
+  g.log=pushLog(g.log, '等待 '+g.players[from].name+' 选择弃置 '+tgt.name+' 的第'+(round+1)+'张牌…');
+}
+function finishHanbing(g){
+  g.pending=null;
+  if(checkWin(g)) return;
+  g.phase='play';
+}
+// hanbingPick: 弃牌子阶段结算。choice='hand' 或槽名,复用 applyTrickOnHand/applyTrickOnEquip
+// (info.trick='寒冰剑' 不等于'顺手牵羊',天然落到"弃入弃牌堆"分支,这两个函数不用改一行)。
+// 仅使用者(pending.from)可操作;失效项(手牌已空/槽已空)安全收尾防软锁。弃完这一张后继续
+// 调用 startHanbingRound 进入下一轮(可能自动弃/可能再问/可能直接收尾)。
+function hanbingPick(choice){
+  tx(g=>{
+    if(g.phase!=='hanbing'||!g.pending||g.pending.type!=='hanbing'||g.pending.from!==mySeat) return g;
+    const {from,to,round}=g.pending;
+    const tgt=g.players[to];
+    if(!tgt || !tgt.alive){ finishHanbing(g); return g; }
+    const info={trick:'寒冰剑', from, to};
+    if(choice==='hand'){
+      if((tgt.hand||[]).length===0){ finishHanbing(g); return g; } // 失效兜底
+      applyTrickOnHand(g, info);
+    } else {
+      if(!EQUIP_SLOTS.includes(choice) || !tgt.equips[choice]){ finishHanbing(g); return g; } // 失效兜底
+      applyTrickOnEquip(g, info, choice);
+    }
+    startHanbingRound(g, from, to, round+1);
+    return g;
+  });
+}
 // wuguPick: 五谷丰登挑选。仅当前轮到的人(order[idx])可操作;poolIdx 校验后从公共池移除、
 // 收入挑选者手牌;idx 推进到下一个人,挑完一整圈(idx===order.length)则收尾——若池里还有剩牌
 // (阵亡导致 order 比 pool 短的边界),兜底弃入弃牌堆,不做复杂的重新分配,只保证不卡死。
@@ -1434,6 +1510,16 @@ function respondShan(useShan){
         return g;
       }
     } else {
+      // 寒冰剑:杀命中造成伤害之前,装备者(攻击者)可选择防止此伤害、改为弃置目标两张牌——
+      // 目标(mySeat,这一刻要受伤的人)完全没有牌可弃时不能发动,直接走原有的正常受伤流程,
+      // 不弹出一个"发动了但没什么可弃"的空询问。
+      const attackerHan=g.players[g.pending.from];
+      if(hasCap(attackerHan,'hanbing') && hanbingDiscardCount(me)>0){
+        g.pending={type:'hanbingAsk', from:g.pending.from, to:mySeat};
+        g.phase='hanbingAsk';
+        g.log=pushLog(g.log, attackerHan.name+' 是否发动【寒冰剑】,防止伤害,改为弃置 '+me.name+' 两张牌…');
+        return g;
+      }
       const dying = dealDamage(g, mySeat, 1, g.pending.from, '不闪', 'sha');
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
