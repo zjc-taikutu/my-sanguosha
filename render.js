@@ -830,12 +830,6 @@ function renderControls(g){
     setBanner('【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…');
     return;
   }
-  // TEMP DEBUG(排查五谷丰登无懈按钮不显示的bug,定位到根因后移除):
-  // mySeat = 这次 render() 是在哪个客户端跑的(谁在看这个页面);g.turn = 当前回合玩家,
-  // 一起打印能判断"是回合玩家自己这边渲染的,还是被问的人那边渲染的"。
-  if(g.phase==='wuxie' && g.pending){
-    console.log('[DEBUG render wuxie] mySeat(本机)=', mySeat, 'g.turn=', g.turn, 'full pending=', JSON.stringify(g.pending));
-  }
   if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===mySeat){
     // 此分支只在"被询问者本人"的客户端渲染(旁观者走下面 asking!==mySeat 分支,只看到等待提示、
     // 完全不渲染这两个按钮),所以按钮是否 disable 只影响本人自己的界面,不会向其他人泄露谁有无懈。

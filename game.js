@@ -1211,10 +1211,6 @@ function openWuxieRound(g){
   const asking=nextAskee(g, g.pending.exclude, g.pending.exclude);
   if(asking===null){ finishWuxieRound(g); return; }
   g.pending.asking=asking;
-  // TEMP DEBUG(排查五谷丰登无懈按钮不显示的bug,定位到根因后移除):
-  // mySeat = 这次 tx 是在哪个客户端的事务里跑的(谁的浏览器触发了这次 openWuxieRound);
-  // g.turn = 当前回合玩家座位号,和 mySeat 一起能判断"是不是回合玩家自己这边触发的"。
-  console.log('[DEBUG openWuxieRound] mySeat(触发者)=', mySeat, 'g.turn=', g.turn, 'full pending=', JSON.stringify(g.pending));
   const verb = g.pending.depth>0 ? '反制' : '使用';
   g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
 }
