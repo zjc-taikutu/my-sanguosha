@@ -260,11 +260,10 @@ function render(g){
       ? '<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
       : '';
     const avatarPlaceholder = '<div class="avatar-placeholder"'+(gen?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
-    // 装备区(公开信息,和武将一样人人可见)。逐行列表(第6步头像铺底改版:从2列chip网格改成
-    // 一条条列表,配合每行"图标/标签+牌名+射程"的排布)。**对手卡片只渲染有装备的槽位,
-    // 空槽整行不显示**(和判定区"空的时候不留占位"同一原则)——头像铺底之后卡片整体变高,
-    // 对手卡片没必要像 .seat.me 那样恒定显示4行(含空槽虚线占位),只有 .seat.me 保留完整
-    // 4槽显示(含空槽),因为你会想知道自己缺什么装备。
+    // 装备区(公开信息,和武将一样人人可见)。逐行列表(图标/标签+牌名+射程)。**对手卡片
+    // 只渲染有装备的槽位,空槽整行不显示**(和判定区"空的时候不留占位"同一原则),只有
+    // .seat.me 保留完整4槽显示(含空槽),因为你会想知道自己缺什么装备——这条决策独立于
+    // 头像位置,第6步定下、第7步(头像居左)延续不变。
     const eq = p.equips || emptyEquips();
     const slotLabels = { weapon:'武器', armor:'防具', plus1:'防御马', minus1:'进攻马' };
     const equipSlotsToShow = i===mySeat ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
@@ -278,9 +277,9 @@ function render(g){
             : '<span class="empty">—</span>')+'</div>';
         }).join('')+'</div>'
       : '';
-    // 判定区(延时锦囊):浮在头像左侧偏上(在 overlay-left 里紧跟姓名/技能名堆叠),紫色描边
-    // 小 chip 呼应手牌 .card.trick 的锦囊配色。头像区空间有限,不再重复"判定区"文字标签。
-    const delayOverlay = (g.started && (p.delays||[]).length>0)
+    // 判定区(延时锦囊):现在是 .info-col 里普通文档流的一行(技能名下方、装备列表上方),
+    // 不再需要绝对定位浮在头像上——紫色描边小 chip 呼应手牌 .card.trick 的锦囊配色。
+    const delayRow = (g.started && (p.delays||[]).length>0)
       ? '<div class="delays">'+p.delays.map(c=>{
           const dDesc = getCardDesc(c.name);
           return '<span class="dchip"'+(dDesc?' title="'+escapeHtml(dDesc)+'"':'')+'>'+(cardFace(c)||'')+' '+escapeHtml(c.name)+
@@ -296,16 +295,20 @@ function render(g){
     const skillLine = (g.started&&gen)
       ? '<div class="skill-line" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'">'+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span></div>'
       : '';
+    // 头像居左+信息居右(第7步,取代第6步的头像铺底):头像框是固定小方块(见 index.html
+    // .avatar-box,宽高比锁死等于素材 3:4,不裁切),姓名/血量/技能/判定区/装备回到普通
+    // 文档流,不再叠在图片上,不需要蒙层/绝对定位。
     d.innerHTML =
-      '<div class="avatar-wrap">'+
-        avatarImg+
-        avatarPlaceholder+
-        '<div class="avatar-scrim"></div>'+
-        '<div class="overlay-left">'+nmLine+skillLine+delayOverlay+'</div>'+
-        '<div class="hp">'+hearts+'</div>'+
+      '<div class="card-top">'+
+        '<div class="avatar-box">'+avatarImg+avatarPlaceholder+'</div>'+
+        '<div class="info-col">'+
+          '<div class="top-row">'+nmLine+'<div class="hp">'+hearts+'</div></div>'+
+          skillLine+
+          delayRow+
+          equipList+
+        '</div>'+
       '</div>'+
       '<div class="seat-body">'+
-        equipList+
         // 自己的座位卡显示当前攻击距离(= attackRange,无武器默认1),让玩家一眼知道能打多远
         (i===mySeat && g.started ? '<div class="meta">攻击距离 '+attackRange(g,mySeat)+'</div>' : '')+
         '<div class="meta">手牌 '+(p.hand||[]).length+' 张</div>'+
