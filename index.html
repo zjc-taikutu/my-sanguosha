@@ -122,7 +122,9 @@
   .hp .empty{color:#4a3f37;}
   .meta{font-size:12px;color:var(--paper-dim);margin-top:4px;}
   .equips{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-top:6px;font-size:11px;color:var(--paper-dim);}
-  .equips .eslot{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  /* 之前 nowrap+ellipsis 会把长装备名(如"麒麟弓 射3"这类武器+射程后缀)截断成看不出是什么;
+     改为允许换行——2列 grid 每格独立撑高,不会导致左右两列错位,只是那一行整体变高。 */
+  .equips .eslot{}
   .equips .eslot b{color:var(--gold);font-weight:700;}
   .equips .empty{color:#4a3f37;}
   /* 判定区(延时锦囊):和装备区呼应但视觉区分——紫色描边小 chip,呼应手牌 .card.trick 的锦囊配色
@@ -381,9 +383,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=15"></script>
-<script src="data.js?v=15"></script>
-<script src="game.js?v=15"></script>
-<script src="render.js?v=15"></script>
+<script src="config.js?v=16"></script>
+<script src="data.js?v=16"></script>
+<script src="game.js?v=16"></script>
+<script src="render.js?v=16"></script>
 </body>
 </html>
