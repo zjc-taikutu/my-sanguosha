@@ -144,10 +144,10 @@ function normalize(g){
   if(typeof g.skipPlay!=='boolean') g.skipPlay=false;
   // 兵粮寸断:跳过摸牌阶段的标志位,和 g.skipPlay 同款防御
   if(typeof g.skipDraw!=='boolean') g.skipDraw=false;
+  // 张郃【巧变】完整版:跳过弃牌阶段的标志位,和 g.skipDraw/g.skipPlay 同款防御
+  if(typeof g.skipDiscard!=='boolean') g.skipDiscard=false;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
   if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
-  // 张郃【巧变】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
-  if(typeof g.qiaobianUsed!=='boolean') g.qiaobianUsed=false;
   return g;
 }
 function pushLog(log, msg){
@@ -372,15 +372,9 @@ function doDraw(){
     const n = 2 + generalCapValue(me,'extraDrawPhase',0); // 基础2张 + extraDrawPhase 额外摸牌(通用数值 seam,当前暂无武将/装备使用)
     drawN(g, mySeat, n);
     g.log=pushLog(g.log, me.name+' 摸了'+n+'张牌');
-    // 乐不思蜀:摸牌阶段照常摸牌,只是不给出牌机会——判定成功时 resolveDelayTricks 已经设过 g.skipPlay,
-    // 这里(原本要进 play 阶段的那一刻)消费掉,直接跳去 discard(该弃就弃、没超限就直接可以结束回合)。
-    if(g.skipPlay){
-      g.skipPlay=false;
-      g.log=pushLog(g.log, me.name+' 因【乐不思蜀】跳过出牌阶段');
-      g.phase='discard';
-    } else {
-      g.phase='play';
-    }
+    // 乐不思蜀/张郃【巧变】:摸牌阶段照常摸牌,只是不给出牌(或弃牌)机会——advancePastPlay
+    // 统一判断出牌/弃牌阶段是否被跳过,不在这里各自重复逻辑。
+    advancePastPlay(g);
     return g;
   });
 }
@@ -787,24 +781,89 @@ function duanLiang(cardIdx, targetSeat){
     return g;
   });
 }
-// qiaoBian: 张郃【巧变】(简化版)——出牌阶段限一次,弃一张手牌、跳过这个阶段,可选把场上
-// 一张装备/延时锦囊移到另一名角色身上。全程只有张郃自己做选择,不需要任何其他玩家响应,
-// 不引入新的服务端阶段,客户端选好 move 后一次性提交,服务端独立重新校验(不信任客户端)。
-// move 为 null(不移动,仅跳过阶段)或 {kind:'equip'|'delay', srcSeat, slot(kind==='equip'时)
-// 或 idx(kind==='delay'时,src.delays 下标), dstSeat}。
-function qiaoBian(cardIdx, move){
+// ===== 张郃【巧变】完整版:回合开始时一次性决策"是否发动"+"跳过判定/摸牌/出牌/弃牌
+// 阶段之一"(一回合限一次),仅选"出牌阶段"才附带"移动一张装备/判定牌"这个后续效果
+// (官方原文:"你可以弃置一张手牌并跳过一个阶段(准备阶段和结束阶段除外),若为:摸牌阶段,
+// 你可以获得至多两名角色各一张手牌;出牌阶段,你可以移动场上一张牌。"——这个项目目前
+// 只实现"跳过阶段"+"出牌阶段可移动装备/判定牌"这部分,"摸牌阶段可获得两名角色各一张
+// 手牌"这个官方原文里的额外效果暂不实现,是简化,不是遗漏,见 CLAUDE.md 记录)。
+//
+// continueQiaobianCheck: startTurn 里紧接着"声明轮到谁"之后调用,必须在 resolveDelayTricks
+// (真正的判定阶段)之前问,因为"跳过判定阶段"这个选项要求判定阶段还没发生。没有这个能力
+// 或没有手牌(付不起弃牌的代价)则直接放行到原有链路,不放行的人完全不受这次改动影响。
+function continueQiaobianCheck(g, seat){
+  const p=g.players[seat];
+  if(hasCap(p,'qiaobian') && (p.hand||[]).length>0){
+    g.pending={type:'qiaobianTurnStart', seat};
+    g.phase='qiaobianTurnStart';
+    g.log=pushLog(g.log, p.name+' 是否发动【巧变】…');
+    return;
+  }
+  continueDelayResolution(g, seat);
+}
+// qiaobianDecline: 仅 pending.seat 本人可响应,"不发动"才需要真正提交(会改变共享状态,
+// 放行到原有链路)。"发动"不需要单独一次网络往返——点"发动"只是让客户端进入"选牌+选阶段"
+// 的本地界面(和徐晃断粮同款,选择过程纯客户端状态),真正生效的提交是 qiaobianDeclare。
+function qiaobianDecline(){
   tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    if(g.phase!=='qiaobianTurnStart'||!g.pending||g.pending.type!=='qiaobianTurnStart'||g.pending.seat!==mySeat) return g;
+    g.log=pushLog(g.log, g.players[mySeat].name+'：不发动【巧变】');
+    g.pending=null;
+    continueDelayResolution(g, mySeat);
+    return g;
+  });
+}
+// qiaobianDeclare: 真正弃牌+跳过阶段生效的提交。phaseChoice 是 'judge'/'draw'/'play'/'discard' 之一。
+// - 'judge':判定阶段还没发生,直接跳过 resolveDelayTricks 这一次调用,判定区的牌原样保留,
+//   留到下回合真正轮到判定阶段时再处理(不清空不作废)。
+// - 'draw'/'discard':和乐不思蜀(skipPlay)/兵粮寸断(skipDraw)同款标志位机制,设标志位后
+//   继续走原有链路,由 advancePastPlay/advancePastDiscard 在对应阶段的入口处消费。
+// - 'play':还不能直接设 skipPlay——真实规则"移动一张装备/判定牌"是这个选项独有的后续效果,
+//   要先问完"移动到哪"才算这次巧变完整结束,开新 pending qiaobianMove,skipPlay 留到那一步
+//   (respondQiaobianMove)才设,避免"效果还没问完、标志已经生效"这种时序错乱。
+function qiaobianDeclare(cardIdx, phaseChoice){
+  tx(g=>{
+    if(g.phase!=='qiaobianTurnStart'||!g.pending||g.pending.type!=='qiaobianTurnStart'||g.pending.seat!==mySeat) return g;
+    if(!['judge','draw','play','discard'].includes(phaseChoice)) return g;
     const me=g.players[mySeat];
-    if(!hasCap(me,'qiaobian') || g.qiaobianUsed) return g;
     const card=me.hand[cardIdx];
     if(!card) return g;
-    g.qiaobianUsed=true;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
-    g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【巧变】,跳过出牌阶段');
+    const phaseLabel={judge:'判定阶段',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段'}[phaseChoice];
+    g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【巧变】,跳过'+phaseLabel);
+    g.pending=null;
+    if(phaseChoice==='judge'){
+      continueTurnStart(g, mySeat); // 直接跳过 resolveDelayTricks,判定区的牌不动
+      return g;
+    }
+    if(phaseChoice==='draw'){
+      g.skipDraw=true;
+      continueDelayResolution(g, mySeat);
+      return g;
+    }
+    if(phaseChoice==='discard'){
+      g.skipDiscard=true;
+      continueDelayResolution(g, mySeat);
+      return g;
+    }
+    // phaseChoice==='play':先问是否移动一张装备/判定牌,skipPlay 留到 respondQiaobianMove 里设
+    g.pending={type:'qiaobianMove', seat:mySeat};
+    g.phase='qiaobianMove';
+    g.log=pushLog(g.log, '【巧变】是否移动一张装备/判定牌…');
+    return g;
+  });
+}
+// respondQiaobianMove: 仅 pending.seat 本人可响应。move 为 null(不移动)或 {kind,srcSeat,
+// slot/idx,dstSeat}(复用 doQiaobianMove 校验+执行)。移动是否合法/是否发生,都不影响
+// "跳过出牌阶段"这个已经生效的效果——最后统一设 skipPlay 并继续原有链路。
+function respondQiaobianMove(move){
+  tx(g=>{
+    if(g.phase!=='qiaobianMove'||!g.pending||g.pending.type!=='qiaobianMove'||g.pending.seat!==mySeat) return g;
     if(move) doQiaobianMove(g, move);
-    g.phase='discard';
+    g.pending=null;
+    g.skipPlay=true;
+    continueDelayResolution(g, mySeat);
     return g;
   });
 }
@@ -1363,7 +1422,10 @@ function respondShan(useShan){
 function endPlay(){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
-    g.phase='discard';
+    // 正常结束出牌阶段:仍要检查张郃【巧变】是否也跳过了弃牌阶段(理论上和"正常走完出牌阶段"
+    // 不冲突——巧变一回合限一次,选了"出牌阶段"就不会再选"弃牌阶段",但不能假设这里一定
+    // 不会发生,统一走 advancePastDiscard 判断,不重复写一遍 if/else)。
+    advancePastDiscard(g);
     return g;
   });
 }
@@ -1466,32 +1528,48 @@ function respondXiaoguoChoice(choice){
   });
 }
 // startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
-// 顺序:先声明轮到谁,再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
+// 顺序:先声明轮到谁,再问张郃是否发动【巧变】(可能连判定阶段本身都跳过,必须在结算判定区
+// 之前问),再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
 function startTurn(g, seat){
-  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.qiaobianUsed=false;
+  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
-  continueDelayResolution(g, seat);
+  continueQiaobianCheck(g, seat);
 }
 // enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。
-// 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段进 play(不摸牌)。
-// 边界:若同一玩家判定区里兵粮寸断(跳摸牌)和乐不思蜀(跳出牌)同时命中——
-// skipDraw 一旦跳过 'draw' 阶段,doDraw 就永远不会被调用,乐不思蜀的 skipPlay
-// 会失去消费的机会(变成悬空标志,污染到下一回合)。所以这里一并检查 skipPlay:
-// 两者都命中时直接跳到 discard,两个标志同时清零,不留残留。
+// 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段,交给 advancePastPlay 继续判断
+// 出牌/弃牌阶段是否也被跳过——不在这里各自重复"检查下一个标志"的逻辑。
 function enterDrawPhase(g){
   if(g.skipDraw){
     g.skipDraw=false;
     g.log=pushLog(g.log, g.players[g.turn].name+' 因【兵粮寸断】跳过摸牌阶段');
-    if(g.skipPlay){
-      g.skipPlay=false;
-      g.log=pushLog(g.log, g.players[g.turn].name+' 因【乐不思蜀】跳过出牌阶段');
-      g.phase='discard';
-    } else {
-      g.phase='play';
-    }
+    advancePastPlay(g);
   } else {
     g.phase='draw';
+  }
+}
+// advancePastPlay/advancePastDiscard: 出牌阶段、弃牌阶段各自"这个阶段是否被跳过"的统一判断,
+// 从 enterDrawPhase(跳过摸牌阶段直接来到这里)、doDraw(正常摸完牌来到这里)、endPlay(正常结束
+// 出牌来到这里)三处共用——之前 skipPlay 的消费点分散写在 enterDrawPhase/doDraw 两处、各自内嵌
+// 一段"顺便检查下一个标志"的 if/else,这次新增 skipDiscard 后如果继续照抄,"检查 skipDiscard"就要
+// 在三处分别重复一遍,容易漏改。抽成这两个级联函数后,"摸牌→出牌→弃牌"三个阶段谁被跳过、
+// 跳过几个,只在这里维护一份逻辑,三个调用点都共享。
+function advancePastPlay(g){
+  if(g.skipPlay){
+    g.skipPlay=false;
+    g.log=pushLog(g.log, g.players[g.turn].name+' 因【乐不思蜀】跳过出牌阶段');
+    advancePastDiscard(g);
+  } else {
+    g.phase='play';
+  }
+}
+function advancePastDiscard(g){
+  if(g.skipDiscard){
+    g.skipDiscard=false;
+    g.log=pushLog(g.log, g.players[g.turn].name+' 因【巧变】跳过弃牌阶段');
+    startTurn(g, nextAlive(g, g.turn));
+  } else {
+    g.phase='discard';
   }
 }
 // resolveDelayTricks: 按放置顺序(数组顺序,先放先判——真实规则里玩家可自选顺序,这里简化成固定顺序)
