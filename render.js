@@ -558,8 +558,10 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='认输（受伤）'; b2.onclick=()=>duelResponse(false);
     c.appendChild(b2);
-    // 吕布【无双】:决斗任一方是吕布时每轮需要连续两张杀,shaCount 记这一轮已出几张
-    const shaNeeded = (hasCap(g.players[g.pending.from],'wushuang') || hasCap(g.players[g.pending.to],'wushuang')) ? 2 : 1;
+    // 吕布【无双】:跟吕布决斗的对方每轮需连续两张杀,吕布自己始终只需一张——不是"涉及吕布就双方都2张"。
+    // 这里渲染的是"该 mySeat 出杀"的按钮/提示,所以判定要看 mySeat 自己是不是吕布,不是看决斗双方。
+    const oppSeat = (mySeat===g.pending.from)?g.pending.to:g.pending.from;
+    const shaNeeded = (!hasCap(me,'wushuang') && hasCap(g.players[oppSeat],'wushuang')) ? 2 : 1;
     let tail;
     if(!hasSha) tail='你没有【杀】,只能受到伤害。';
     else if(shaNeeded>1 && g.pending.shaCount>0) tail='决斗涉及吕布【无双】,这一轮已打出'+g.pending.shaCount+'/'+shaNeeded+'张【杀】,还需再打出一张!';

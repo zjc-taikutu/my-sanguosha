@@ -994,15 +994,17 @@ function checkWin(g){
   return false;
 }
 // 决斗中由当前 active 玩家响应：打出【杀】则把出杀义务交给对方；认输则受伤、决斗结束。
-// duelResponse: 决斗响应。吕布【无双】(锁定技):决斗任一方(发起者或目标)是吕布时,needed=2——
-// 同一个人这一轮要连续打出两张杀才轮到对方,g.pending.shaCount 记这一轮已出几张;
-// 换人时归零重新计数。选择认输就按原逻辑直接受伤,已出的杀不退回。
+// duelResponse: 决斗响应。吕布【无双】(锁定技)是"跟吕布决斗的对方每轮需连续打出两张杀,
+// 吕布自己始终只需一张"——不是"决斗涉及吕布,双方都要两张"。所以 needed 不能只看
+// "决斗双方有没有人是吕布",必须看"当前正要出杀的这个人(mySeat)是不是吕布本人":
+// 是吕布本人 -> 恒为1;不是吕布本人、且这场决斗的对方是吕布 -> 2;都不是吕布 -> 1。
+// g.pending.shaCount 记这一轮已出几张,换人时归零重新计数。选择认输就按原逻辑直接受伤,已出的杀不退回。
 function duelResponse(useSha){
   tx(g=>{
     if(g.phase!=='duel'||!g.pending||g.pending.active!==mySeat) return g;
     const me=g.players[mySeat];
-    const wushuang = hasCap(g.players[g.pending.from],'wushuang') || hasCap(g.players[g.pending.to],'wushuang');
-    const needed = wushuang ? 2 : 1;
+    const opp=(mySeat===g.pending.from)?g.pending.to:g.pending.from;
+    const needed = (!hasCap(me,'wushuang') && hasCap(g.players[opp],'wushuang')) ? 2 : 1;
     if(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
