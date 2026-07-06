@@ -234,7 +234,7 @@ function render(g){
           const rangeSuffix = (s==='weapon' && c && getEquip(c.name) && getEquip(c.name).range) ? ' 射'+getEquip(c.name).range : '';
           // 已装备的牌加 "?" 角标查看特效说明(装备公开);inline onclick stopPropagation 不触发座位选目标
           const eDesc = (c && getEquip(c.name) && getEquip(c.name).desc) || ''; // 悬停提示用
-          return '<span class="eslot"'+(c?' title="'+escapeHtml(eDesc)+'"':'')+'>'+slotLabels[s]+' '+(c
+          return '<span class="eslot '+(c?'filled':'empty-slot')+'"'+(c?' title="'+escapeHtml(eDesc)+'"':'')+'>'+slotLabels[s]+' '+(c
             ? '<b>'+cardFace(c)+' '+escapeHtml(c.name)+rangeSuffix+'</b> <span class="info-badge" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')">?</span>'
             : '<span class="empty">—</span>')+'</span>';
         }).join('')+'</div>'

@@ -128,8 +128,16 @@
   .meta{font-size:12px;color:var(--paper-dim);margin-top:4px;}
   .equips{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-top:6px;font-size:11px;color:var(--paper-dim);}
   /* 之前 nowrap+ellipsis 会把长装备名(如"麒麟弓 射3"这类武器+射程后缀)截断成看不出是什么;
-     改为允许换行——2列 grid 每格独立撑高,不会导致左右两列错位,只是那一行整体变高。 */
-  .equips .eslot{}
+     改为允许换行——2列 grid 每格独立撑高,不会导致左右两列错位,只是那一行整体变高。
+     金色 chip 样式(和判定区 .dchip 呼应但用金色区分,呼应装备本身的金色高亮):已装备的槽
+     浅金底+金色描边实心块(.filled),空槽虚线描边、无底色(.empty-slot),靠 render.js 按
+     "这个槽有没有装备"分别加 class,不是靠 :empty 这类结构伪类猜——槽位内容(标签+"—")
+     本身就不是空的,CSS 层面判断不出"有没有装备"。 */
+  /* justify-self:start——不设的话 .eslot 作为 grid 单元格的直接子项默认 stretch,
+     会被拉伸铺满整个格子宽度,变成一条通栏色块而不是贴合内容的小块。 */
+  .equips .eslot{display:inline-block;border-radius:6px;padding:2px 7px;justify-self:start;}
+  .equips .eslot.filled{border:1px solid rgba(176,141,79,.45);background:rgba(176,141,79,.09);}
+  .equips .eslot.empty-slot{border:1px dashed rgba(233,225,210,.14);background:none;}
   .equips .eslot b{color:var(--gold);font-weight:700;}
   .equips .empty{color:#4a3f37;}
   /* 判定区(延时锦囊):和装备区呼应但视觉区分——紫色描边小 chip,呼应手牌 .card.trick 的锦囊配色
@@ -251,6 +259,7 @@
     .seat.me .meta{font-size:11.5px;}
     .equips{font-size:10px;gap:2px 8px;}
     .seat.me .equips{font-size:11px;gap:3px 10px;}
+    .equips .eslot{padding:1px 5px;}
     .delays{font-size:10px;gap:4px;}
     .dchip{padding:1px 5px;}
     /* 手牌:桌面 64x92 在窄屏上占太多行;缩小卡面本身,flex-wrap(已有,见 .hand)继续兜底
@@ -282,6 +291,7 @@
     }
     .card{width:46px;height:68px;}
     .card .big{font-size:19px;}
+    .equips .eslot{padding:1px 4px;}
     /* 卡片更窄了,角标视觉+热区再收一档(极窄屏卡片更窄,热区若不跟着缩会重新顶到花色点数) */
     .card .info-badge-hit{width:18px;height:18px;}
     .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
@@ -388,9 +398,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=18"></script>
-<script src="data.js?v=18"></script>
-<script src="game.js?v=18"></script>
-<script src="render.js?v=18"></script>
+<script src="config.js?v=19"></script>
+<script src="data.js?v=19"></script>
+<script src="game.js?v=19"></script>
+<script src="render.js?v=19"></script>
 </body>
 </html>
