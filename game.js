@@ -418,7 +418,7 @@ const CARD_PLAYS = {
     effect:(g,me,card,targetSeat)=>{
       const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
       g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
-      resolveShaUse(g, me, targetSeat, usedAs, card);
+      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card));
     }
   },
   '桃': {
@@ -603,11 +603,24 @@ function playCard(cardIdx, actionId, targetSeat){
 // 注意:g.shaUsed(本回合出杀次数限制)不在这里设置——本函数不假设调用方一定是"当前回合玩家
 // 在自己出牌阶段出杀"(借刀杀人打破了这个假设:A 可能根本不是当前回合玩家)。谁该计入次数
 // 由各调用点自己在调用前决定:CARD_PLAYS['杀'].effect/playZhangbaSha 会设,借刀杀人不设。
-function resolveShaUse(g, me, targetSeat, usedAs, card){
+// resolveShaUse 的 shaColor 参数:这张杀的颜色,'red'/'black'/'none'/undefined 之一——不是
+// 直接传物理牌,由调用方各自算好再传入(普通杀/借刀杀人用 singleCardShaColor(card),丈八
+// 蛇矛两张当杀用 combinedShaColor(c1,c2)),resolveShaUse 内部只认这一份统一的颜色结果,
+// 不用再关心"这张杀是怎么凑出来的"。**这里曾经有一个真实 bug**:早期版本直接传物理牌
+// `card`、丈八蛇矛不传(undefined),导致"黑色杀对某某无效"这类效果(毅重/仁王盾)对丈八蛇矛
+// 的合成杀完全绕过、不管用两张什么颜色的牌合成都不生效——真实规则里合成杀是有颜色的
+// (两张都红→红,两张都黑→黑,一红一黑→无色),不是"没有颜色"。改成 shaColor 之后这个
+// bug 自然消失,不需要在这里特殊处理"丈八蛇矛"这个武器,颜色早在调用方就算对了。
+function resolveShaUse(g, me, targetSeat, usedAs, shaColor){
   const target=g.players[targetSeat];
-  // 于禁【毅重】(锁定技):目标无防具 + 这张杀是黑色 → 直接无效,不进响应阶段、不消耗闪、不受伤。
-  if(card && !isRed(card) && hasCap(target,'yizhong') && !(target.equips && target.equips.armor)){
-    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用的黑色【杀】因【毅重】无效');
+  // 于禁【毅重】(锁定技,目标无防具+黑色杀)/ 仁王盾(装备了这件防具+黑色杀) → 直接无效,
+  // 不进响应阶段、不消耗闪、不受伤。两者共用同一个 hasCap 入口(武将能力/装备能力不分来源),
+  // 只是 || 一个条件——"目标无防具"和"目标装备了仁王盾"structurally 互斥(装备区防具槽
+  // 只有一个,不可能同时是"空"和"仁王盾",不需要额外防御代码)。shaColor 为 'red'/'none'/
+  // undefined 时都安全跳过这个判断,只有精确等于 'black' 才命中。
+  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
+    const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
+    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效');
     g.phase='play';
     return;
   }
@@ -676,7 +689,7 @@ function respondJiedao(useSha){
       const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
       g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(card.name==='杀'?'【杀】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
       g.pending=null;
-      resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', card);
+      resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', singleCardShaColor(card));
       return g;
     }
     const weapon=A.equips.weapon;
@@ -756,7 +769,9 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     g.discard.push(me.hand.splice(hi,1)[0]);
     g.discard.push(me.hand.splice(lo,1)[0]);
     g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
-    resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)');
+    // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
+    // 不是"没有颜色"——c1/c2 是 splice 之前存的引用,不受后面 splice 影响。
+    resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2));
     return g;
   });
 }

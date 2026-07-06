@@ -15,6 +15,7 @@ const EQUIPS = {
   '诸葛连弩': { slot:'weapon', range:1, cap:'unlimitedSha', desc:'武器,射程1。装备后,你在自己的出牌阶段可以使用任意数量的【杀】(不再受每回合只能出1张的限制)。' },
   '丈八蛇矛': { slot:'weapon', range:3, cap:'twoAsSha', desc:'武器,射程3。你可以把任意两张手牌合起来当作一张【杀】使用。' },
   '八卦阵':   { slot:'armor', cap:'bagua', desc:'防具。当你需要打出【闪】时,可先翻开牌堆顶一张牌碰运气:翻到红色就当作你打出了【闪】,黑色则无效、仍需正常应对。' },
+  '仁王盾':   { slot:'armor', cap:'renwang', desc:'防具。黑色的【杀】对你无效。' },
   '青釭剑':   { slot:'weapon', range:2, cap:'ignoreArmor', desc:'武器,射程2。你使用【杀】时无视对方的防具(例如对方的【八卦阵】无法发动)。' },
   '麒麟弓':   { slot:'weapon', range:5, cap:'qilin', desc:'武器,射程5。你的【杀】对目标造成伤害时,可以弃掉对方装备的一匹坐骑。' },
   '的卢':     { slot:'plus1', dist:+1, desc:'坐骑(防御马)。其他角色计算与你的距离时+1,让你更难被【杀】攻击到。' },
@@ -163,6 +164,20 @@ function hasCap(player, cap){ return generalHasCap(player, cap) || equipHasCap(p
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
 function isRed(card){ return !!(card && (card.suit==='♥'||card.suit==='♦')); }
 function cardColor(card){ return isRed(card)?'red':'black'; }
+// singleCardShaColor: 普通杀(含转化牌,如龙胆的闪当杀、武圣的红牌当杀)的颜色——直接查这张
+// 物理牌本身的花色。给 resolveShaUse 的 shaColor 参数用,不是给"判定牌颜色"这类场景用
+// (判定区/铁骑/洛神那些判定,直接查 isRed(judgeCard) 即可,不涉及"杀的颜色"这个概念)。
+function singleCardShaColor(card){ return card ? (isRed(card)?'red':'black') : undefined; }
+// combinedShaColor: 丈八蛇矛"两张牌当一张杀"的颜色规则——不看单张牌花色,按两张牌的红黑
+// 组合决定:两张都红→红,两张都黑→黑,一红一黑→"无色"(仁王盾/毅重这类"黑杀无效"的效果
+// 对无色杀不生效)。这是一个真实存在的三态结果,不是"非红即黑"的二元判断,和 isRed 的语义
+// 不同,专门给合成杀这个场景用,单张牌的颜色判断永远只有红/黑两态,不需要这个函数。
+function combinedShaColor(c1, c2){
+  const r1=isRed(c1), r2=isRed(c2);
+  if(r1 && r2) return 'red';
+  if(!r1 && !r2) return 'black';
+  return 'none';
+}
 // 点数显示:1→A、11~13→J/Q/K,其余原数字;缺失回退空串
 function rankText(rank){ return {1:'A',11:'J',12:'Q',13:'K'}[rank] || (rank?String(rank):''); }
 // 牌面花色+点数的带色 HTML(红 #b33 / 黑 #3a2f28);缺 suit/rank 安全回退空串(兼容旧牌)
@@ -244,8 +259,9 @@ function buildDeck(){
   // 延时锦囊:闪电影响面广、变数大(可能连续传好几轮才炸),真实规则整副牌也只 1 张,先按 1 张放;
   // 乐不思蜀直接废掉对方一次出牌机会,强度不低,比闪电略多、比顺手/拆桥少很多,按 2 张放
   add('闪电', 1); add('乐不思蜀', 2); add('兵粮寸断', 2);
-  // 装备牌(系统性配比;装备是最小类=点缀):武器 8(4 把各 2,让特效武器更常登场)+ 防具 3(仅八卦阵一种,多给让判定机制常见)
-  add('诸葛连弩', 2); add('丈八蛇矛', 2); add('青釭剑', 2); add('麒麟弓', 2); add('八卦阵', 3);
+  // 装备牌(系统性配比;装备是最小类=点缀):武器 8(4 把各 2,让特效武器更常登场)+ 防具 5
+  // (八卦阵 3,判定博运气型、多给让机制常见;仁王盾 2,确定生效不需要靠数量凑概率)
+  add('诸葛连弩', 2); add('丈八蛇矛', 2); add('青釭剑', 2); add('麒麟弓', 2); add('八卦阵', 3); add('仁王盾', 2);
   // 坐骑:+1马 / -1马 各多几匹(同的卢/赤兔机制,无新逻辑),每匹 1 张,整体不至过多
   add('的卢', 1); add('绝影', 1); add('爪黄飞电', 1); add('大宛', 1);   // +1马 共 4 匹
   add('赤兔', 1); add('紫骍', 1); add('骕骦', 1);                        // -1马 共 3 匹
