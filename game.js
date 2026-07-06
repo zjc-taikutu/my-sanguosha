@@ -319,8 +319,12 @@ function finishGuicai(g, finalCard){
   const red = finishBaguaColor(g, finalCard);
   if(resume.type==='sha'){
     // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要
-    // 继续;贯石斧同样要在这里给一次触发机会,原因见 continueShaAfterTieqi 对应位置的注释)
-    if(red){ if(!maybeStartGuanshifu(g, resume.from, resume.to)) finishSingleShaTarget(g); }
+    // 继续;青龙偃月刀/贯石斧同样要在这里给一次触发机会,原因见 continueShaAfterTieqi 对应
+    // 位置的注释)
+    if(red){
+      if(maybeStartQinglong(g, resume.from, resume.to)) return;
+      if(!maybeStartGuanshifu(g, resume.from, resume.to)) finishSingleShaTarget(g);
+    }
     else { g.pending={from:resume.from, to:resume.to}; g.phase='respond'; }
   } else if(resume.type==='aoe'){
     if(red){
@@ -736,9 +740,11 @@ function continueShaAfterTieqi(g, from, to, noShan){
   if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
   if(r){
     g.pending=null;
-    // 贯石斧:这条路径(八卦阵判红,视为出闪)和 respondShan 里目标打出实体闪是同一件事——
-    // "这张杀被闪抵消了"——都要给贯石斧一个触发机会,不能只在 respondShan 里判断
-    // (八卦阵的判定发生在进入响应阶段之前,目标可能根本不会走到 respondShan)。
+    // 青龙偃月刀/贯石斧:这条路径(八卦阵判红,视为出闪)和 respondShan 里目标打出实体闪是
+    // 同一件事——"这张杀被闪抵消了"——都要给这两把武器一个触发机会,不能只在 respondShan
+    // 里判断(八卦阵的判定发生在进入响应阶段之前,目标可能根本不会走到 respondShan)。两者
+    // 装在同一个武器槽、互斥,不会同时满足两个 if。
+    if(maybeStartQinglong(g, from, to)) return;
     if(maybeStartGuanshifu(g, from, to)) return;
     finishSingleShaTarget(g);
     return;
@@ -1572,12 +1578,7 @@ function respondShan(useShan){
       // (没有可用牌就不弹出这个询问,直接走下面原有的收尾,不会卡在一个按不动的死胡同界面)。
       // 如果这次追加的杀又被闪抵消,会再次落到这里、再问一次——不需要额外写"连续触发"的循环
       // 逻辑,这是同一段代码天然支持的效果,触发上限由攻击者手里还有没有牌能当杀这个客观条件封顶。
-      if(hasCap(attacker,'qinglong') && (attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀'))){
-        g.pending={type:'qinglong', from:g.pending.from, to:mySeat};
-        g.phase='qinglong';
-        g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
-        return g;
-      }
+      if(maybeStartQinglong(g, g.pending.from, mySeat)) return g;
       // 贯石斧:杀被闪抵消(不管这个闪是实体牌/龙胆转化/倾国转化,触发条件只看"是否被闪挡下",
       // 不是"是否用了防具"——仁王盾/毅重让杀直接判无效,根本不会走到这个分支,不需要额外排除)。
       // 青龙偃月刀和贯石斧都装在同一个武器槽,互斥,不会同时满足两个 if。
@@ -1645,6 +1646,21 @@ function guanshifuOptionCount(p){
 // continueShaAfterTieqi/finishGuicai 里更早发生的、respondShan 根本不会被调用的另一条路径,
 // 两条路径都要给贯石斧同样的触发机会,所以抽成共用函数,三处调用点各自决定收尾方式。
 // 返回 true 表示已开 pending,调用方应立即 return、不做后续收尾。
+// maybeStartQinglong: 攻击者(fromSeat)是否要被问"是否发动青龙偃月刀,再次使用一张杀"。
+// 从 respondShan 内联判断抽出来的共用出口——和贯石斧同一个原因:八卦阵判红(视为出闪)是
+// 在 continueShaAfterTieqi/finishGuicai 里更早发生的、respondShan 根本不会被调用的另一条
+// 路径,原来只在 respondShan 里判断,导致"杀被八卦阵判红抵消"这个场景青龙偃月刀完全没有
+// 触发机会——这是排查贯石斧同类问题时顺带发现的遗留 bug(青龙偃月刀比贯石斧更早实现,当时
+// 没有意识到八卦阵判红会绕开 respondShan),这次一并修复,接入贯石斧同样的三处调用点。
+// 返回 true 表示已开 pending,调用方应立即 return、不做后续收尾。
+function maybeStartQinglong(g, fromSeat, toSeat){
+  const attacker=g.players[fromSeat];
+  if(!hasCap(attacker,'qinglong') || !(attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀'))) return false;
+  g.pending={type:'qinglong', from:fromSeat, to:toSeat};
+  g.phase='qinglong';
+  g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
+  return true;
+}
 function maybeStartGuanshifu(g, fromSeat, toSeat){
   const attacker=g.players[fromSeat];
   if(!hasCap(attacker,'guanshifu') || guanshifuOptionCount(attacker)<2) return false;
