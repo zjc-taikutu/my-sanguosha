@@ -1579,7 +1579,11 @@ function respondShan(useShan){
         g.log=pushLog(g.log, attackerHan.name+' 是否发动【寒冰剑】,防止伤害,改为弃置 '+me.name+' 两张牌…');
         return g;
       }
-      const dying = dealDamage(g, mySeat, 1, g.pending.from, '不闪', 'sha');
+      // 古锭刀:锁定技,自动生效,不问是否发动——命中这一刻(不是出杀那一刻)检查目标手牌数,
+      // 若此刻恰好无手牌则这次伤害+1。整体按一次 dealDamage 调用结算(amount 先算好再传),
+      // 不拆成两次调用,这样依赖"这次伤害共多少点"的钩子(如郭嘉【天妒】)才能看到正确数值。
+      const gudingBonus = hasCap(attacker,'gudingdao') && (me.hand||[]).length===0 ? 1 : 0;
+      const dying = dealDamage(g, mySeat, 1+gudingBonus, g.pending.from, '不闪', 'sha');
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
       if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
