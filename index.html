@@ -82,8 +82,13 @@
     gap:14px;
     margin-bottom:6px;
   }
+  /* 320px 曾是这里的上限,但排查装备栏换行问题时发现:2人局这一整列(top+me共用同一列)
+     会把 .seat.me 也一起卡在320px,比 .seat.me 自己的 max-width:640px 更早触顶——
+     column 本身才是真正的瓶颈,640px 那个限制从没机会生效。原始320px在引入时没有留下
+     具体理由,这里类比 .seat.me 420→640 那次的算法(.wrap 可用宽度约848px,留足边距):
+     直接对齐成640px,让 .seat.me 自己的 max-width 变回真正起作用的那道限制。 */
   .seats.opp1{
-    grid-template-columns:minmax(150px,320px);
+    grid-template-columns:minmax(150px,640px);
     grid-template-areas:"top" "me";
   }
   .seats.opp2{
@@ -383,9 +388,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=16"></script>
-<script src="data.js?v=16"></script>
-<script src="game.js?v=16"></script>
-<script src="render.js?v=16"></script>
+<script src="config.js?v=17"></script>
+<script src="data.js?v=17"></script>
+<script src="game.js?v=17"></script>
+<script src="render.js?v=17"></script>
 </body>
 </html>
