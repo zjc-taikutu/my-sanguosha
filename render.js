@@ -51,6 +51,22 @@ function resetXiaoguo(){ xiaoguoMode=false; }
 // 牌都可点,点了直接提交(和骁果同一个"点发动进选牌模式,选牌即提交"的单步交互模式)。
 let qinglongMode = false;
 function resetQinglong(){ qinglongMode=false; }
+// 贯石斧:杀被闪抵消后,装备者(攻击者)可选弃自己2张牌(手牌/装备混合)令这张杀依然造成伤害。
+// 不需要"发动"这一步单独确认——直接列出自己所有可弃项(手牌+非武器槽装备)供toggle多选,
+// 选够恰好2项才出现"确认发动",同屏始终有"不发动"按钮。guanshiPicks 存编码字符串
+// ('hand:idx' / 'equip:slot'),纯客户端不入库。
+let guanshiPicks = [];
+function resetGuanshi(){ guanshiPicks=[]; }
+// guanshifuOptions: 攻击者自己当前可弃的项(手牌逐张 + 非空装备槽逐件,武器槽排除——那就是
+// 贯石斧本身)。返回 {key,label} 列表,供 UI 渲染 toggle 按钮。
+function guanshifuOptions(p){
+  const list=[];
+  (p.hand||[]).forEach((c,idx)=>{ list.push({key:'hand:'+idx, label:'手牌【'+c.name+'】'}); });
+  EQUIP_SLOTS.forEach(slot=>{ if(slot!=='weapon' && p.equips && p.equips[slot]){
+    list.push({key:'equip:'+slot, label:EQUIP_SLOT_LABEL[slot]+'【'+p.equips[slot].name+'】'});
+  }});
+  return list;
+}
 // 张郃【巧变】完整版:回合开始服务端问"是否发动"(g.phase==='qiaobianTurnStart'),点"发动"后
 // 客户端进入纯本地状态机(不入库,不需要其他玩家响应)——① 'choosePhase':选一张手牌+选一个
 // 阶段(判定/摸牌/出牌/弃牌),一次性提交 qiaobianDeclare(cardIdx, phaseChoice);
@@ -251,6 +267,8 @@ function render(g){
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
   // 同款兜底:一旦不在"轮到自己(攻击者)响应青龙偃月刀"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong' && g.pending.from===mySeat)) resetQinglong();
+  // 同款兜底:一旦不在"轮到自己(攻击者)响应贯石斧"的状态,清空已选的弃牌项,不留残留。
+  if(!(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat)) resetGuanshi();
   // 同款兜底:只要不在"轮到自己的巧变回合开始询问"或"轮到自己的巧变移动询问"这两个状态,
   // 就退出巧变选牌/选阶段/选源/选目标模式——巧变完整版横跨两个不同的服务端阶段。
   if(!(g.phase==='qiaobianTurnStart' && g.pending && g.pending.type==='qiaobianTurnStart' && g.pending.seat===mySeat) &&
@@ -468,7 +486,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -573,6 +591,39 @@ function renderControls(g){
   if(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【青龙偃月刀】…');
+    return;
+  }
+  // 贯石斧:杀被闪抵消,装备者(攻击者)可弃自己2张牌(手牌/装备混合toggle多选)令这张杀依然
+  // 造成伤害。恰好选够2项才出现"确认发动";同屏始终有"不发动"。
+  if(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat){
+    const to=g.players[g.pending.to].name;
+    const opts=guanshifuOptions(g.players[mySeat]);
+    opts.forEach(o=>{
+      const picked=guanshiPicks.includes(o.key);
+      const b=document.createElement('button');
+      if(picked) b.className='primary';
+      b.textContent=(picked?'✓ ':'')+o.label;
+      b.onclick=()=>{
+        if(picked) guanshiPicks=guanshiPicks.filter(x=>x!==o.key);
+        else if(guanshiPicks.length<2) guanshiPicks=[...guanshiPicks, o.key];
+        render(g);
+      };
+      c.appendChild(b);
+    });
+    if(guanshiPicks.length===2){
+      const ok=document.createElement('button'); ok.className='primary';
+      ok.textContent='确认发动【贯石斧】'; ok.onclick=()=>{ const picks=guanshiPicks.slice(); resetGuanshi(); respondGuanshi(picks); };
+      c.appendChild(ok);
+    }
+    const nb=document.createElement('button');
+    nb.textContent='不发动'; nb.onclick=()=>{ resetGuanshi(); respondGuanshi(null); };
+    c.appendChild(nb);
+    setBanner('你对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,是否弃2张牌(已选 '+guanshiPicks.length+'/2)发动【贯石斧】令此【杀】依然造成伤害?');
+    return;
+  }
+  if(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi'){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【贯石斧】…');
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。

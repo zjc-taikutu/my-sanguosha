@@ -318,7 +318,9 @@ function finishGuicai(g, finalCard){
   // kind==='bagua'
   const red = finishBaguaColor(g, finalCard);
   if(resume.type==='sha'){
-    if(red){ finishSingleShaTarget(g); } // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要继续)
+    // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要
+    // 继续;贯石斧同样要在这里给一次触发机会,原因见 continueShaAfterTieqi 对应位置的注释)
+    if(red){ if(!maybeStartGuanshifu(g, resume.from, resume.to)) finishSingleShaTarget(g); }
     else { g.pending={from:resume.from, to:resume.to}; g.phase='respond'; }
   } else if(resume.type==='aoe'){
     if(red){
@@ -732,7 +734,15 @@ function continueShaAfterTieqi(g, from, to, noShan){
   // 八卦阵:被杀需出闪前先判定,红=视为出闪 → 杀被抵消,攻击者继续出牌(与正常出闪同结果)
   const r=tryBagua(g, to, {type:'sha', from, to});
   if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
-  if(r){ g.pending=null; finishSingleShaTarget(g); return; }
+  if(r){
+    g.pending=null;
+    // 贯石斧:这条路径(八卦阵判红,视为出闪)和 respondShan 里目标打出实体闪是同一件事——
+    // "这张杀被闪抵消了"——都要给贯石斧一个触发机会,不能只在 respondShan 里判断
+    // (八卦阵的判定发生在进入响应阶段之前,目标可能根本不会走到 respondShan)。
+    if(maybeStartGuanshifu(g, from, to)) return;
+    finishSingleShaTarget(g);
+    return;
+  }
   g.phase='respond'; // 黑/无八卦阵:照常进响应,等目标出闪或受伤
 }
 // respondTieqi: 仅攻击者(pending.from)可响应。不发动:直接接原尾巴(noShan=false)。
@@ -1568,6 +1578,10 @@ function respondShan(useShan){
         g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
         return g;
       }
+      // 贯石斧:杀被闪抵消(不管这个闪是实体牌/龙胆转化/倾国转化,触发条件只看"是否被闪挡下",
+      // 不是"是否用了防具"——仁王盾/毅重让杀直接判无效,根本不会走到这个分支,不需要额外排除)。
+      // 青龙偃月刀和贯石斧都装在同一个武器槽,互斥,不会同时满足两个 if。
+      if(maybeStartGuanshifu(g, g.pending.from, mySeat)) return g;
     } else {
       // 寒冰剑:杀命中造成伤害之前,装备者(攻击者)可选择防止此伤害、改为弃置目标两张牌——
       // 目标(mySeat,这一刻要受伤的人)完全没有牌可弃时不能发动,直接走原有的正常受伤流程,
@@ -1616,6 +1630,75 @@ function respondQinglong(activate, cardIdx){
     g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
     g.pending=null;
     resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card));
+    return g;
+  });
+}
+// ===== 贯石斧:杀被闪抵消后,攻击者可弃自己2张牌(手牌/装备混合)令这张杀依然造成伤害 =====
+// guanshifuOptionCount: 攻击者自己还有多少张牌可弃(手牌张数 + 非空装备槽数,装备槽排除武器槽本身——
+// 官方FAQ"可以弃装备区里的牌,除了贯石斧本身",武器槽此刻就是贯石斧,天然要排除)。
+function guanshifuOptionCount(p){
+  const equipCount = EQUIP_SLOTS.filter(s=> s!=='weapon' && p.equips && p.equips[s]).length;
+  return (p.hand||[]).length + equipCount;
+}
+// maybeStartGuanshifu: 攻击者(fromSeat)是否要被问"是否发动贯石斧"。共用出口——不只是
+// respondShan 里目标打出实体闪这一条路径会触发"杀被闪抵消",八卦阵判红(视为出闪)是在
+// continueShaAfterTieqi/finishGuicai 里更早发生的、respondShan 根本不会被调用的另一条路径,
+// 两条路径都要给贯石斧同样的触发机会,所以抽成共用函数,三处调用点各自决定收尾方式。
+// 返回 true 表示已开 pending,调用方应立即 return、不做后续收尾。
+function maybeStartGuanshifu(g, fromSeat, toSeat){
+  const attacker=g.players[fromSeat];
+  if(!hasCap(attacker,'guanshifu') || guanshifuOptionCount(attacker)<2) return false;
+  g.pending={type:'guanshi', from:fromSeat, to:toSeat};
+  g.phase='guanshi';
+  g.log=pushLog(g.log, attacker.name+' 是否发动【贯石斧】,弃两张牌令此【杀】依然造成伤害…');
+  return true;
+}
+// respondGuanshi: 仅攻击者(pending.from)可响应。picks 为 null/不足2项=不发动,直接走"杀被抵消"
+// 的原有收尾;恰好2项(每项 'hand:idx' 或 'equip:slot',不含 'equip:weapon')=同时弃掉这2张,
+// 不重新走 resolveShaUse(不会再触发闪/判定/其它武器特效),直接 dealDamage 一次让这张杀命中。
+function respondGuanshi(picks){
+  tx(g=>{
+    if(g.phase!=='guanshi'||!g.pending||g.pending.type!=='guanshi'||g.pending.from!==mySeat) return g;
+    const from=mySeat, to=g.pending.to;
+    const me=g.players[from]; // 攻击者本人(装备者)
+    if(!Array.isArray(picks) || picks.length!==2){
+      g.log=pushLog(g.log, me.name+'：不发动【贯石斧】');
+      g.pending=null;
+      finishSingleShaTarget(g);
+      return g;
+    }
+    // 校验:两项不重复、都合法(手牌下标存在 / 装备槽非空且不是武器槽本身)
+    const seen=new Set();
+    for(const p of picks){
+      if(seen.has(p)) return g;
+      seen.add(p);
+      if(p.startsWith('hand:')){
+        const idx=Number(p.slice(5));
+        if(!Number.isInteger(idx) || !me.hand[idx]) return g;
+      } else if(p.startsWith('equip:')){
+        const slot=p.slice(6);
+        if(slot==='weapon' || !EQUIP_SLOTS.includes(slot) || !me.equips[slot]) return g;
+      } else return g;
+    }
+    // 弃牌:先处理装备(不受手牌下标变动影响),再处理手牌(大下标先弹,避免 splice 错位)
+    const handIdxs=[];
+    for(const p of picks){
+      if(p.startsWith('equip:')){
+        const slot=p.slice(6);
+        const card=me.equips[slot]; me.equips[slot]=null; g.discard.push(card);
+        g.log=pushLog(g.log, me.name+' 弃置装备【'+card.name+'】(贯石斧)');
+        triggerHook(g, from, 'onLoseEquip', {count:1});
+      } else {
+        handIdxs.push(Number(p.slice(5)));
+      }
+    }
+    handIdxs.sort((a,b)=>b-a).forEach(idx=>{ g.discard.push(me.hand.splice(idx,1)[0]); });
+    if(handIdxs.length) g.log=pushLog(g.log, me.name+' 弃置'+handIdxs.length+'张手牌(贯石斧)');
+    g.log=pushLog(g.log, me.name+' 发动【贯石斧】,此【杀】依然对 '+g.players[to].name+' 造成伤害');
+    g.pending=null;
+    const dying = dealDamage(g, to, 1, from, '贯石斧强制命中', 'sha');
+    if(dying) return g; // 濒死流程接管
+    finishSingleShaTarget(g);
     return g;
   });
 }
