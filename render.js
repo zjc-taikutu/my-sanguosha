@@ -275,10 +275,16 @@ function render(g){
     // 手牌和装备任一非空即可选,而不是只看手牌——否则"手牌0但有装备"会被 UI 误挡在选目标这一步。
     const hasHandOrEquip = (p.hand||[]).length>0 || EQUIP_SLOTS.some(s=>p.equips && p.equips[s]);
     const inRange = !isShaSel || canReachSha(g, mySeat, i);                 // 杀才受攻击距离限制
-    // 默认不能选自己;闪电这类延时锦囊在 CARD_PLAYS 里声明了 allowSelf,放行自选(和服务端 playCard 同一条件)
-    const selSpec = selCard && CARD_PLAYS[isShaSel?'杀':selCard.name];
-    const allowSelf = !!(selSpec && selSpec.allowSelf);
-    const targetable = (i!==mySeat || allowSelf) && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
+    // 默认不能选自己;是否放行自选要按这张延时锦囊自己的 onlySelf 判断(闪电 onlySelf:true 只能选自己,
+    // 乐不思蜀/兵粮寸断 onlySelf:false 和普通牌一样不能选自己)。
+    // 之前误用 CARD_PLAYS[name].allowSelf(delayTrickPlay 这个共享对象,所有延时锦囊都是 allowSelf:true,
+    // 只用来放行服务端 playCard 的默认排自选校验)当"这张牌能不能选自己"的判断依据——allowSelf 为真时
+    // (i!==mySeat || allowSelf) 对任何座位恒真,等于"选中任意延时锦囊后谁都能点",和服务端 canTarget
+    // (按 DELAY_TRICKS[card.name].onlySelf 分别限制)不一致:闪电点别人在服务端被正确拒绝,但UI没跟着限制,
+    // 表现为"点了没反应"。这里直接查 DELAY_TRICKS 复刻服务端同一条判断,不再经 allowSelf 这层间接。
+    const selDT = selCard && DELAY_TRICKS[selCard.name];
+    const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat);
+    const targetable = selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
         // idx 在这里(渲染时/挂载 onclick 那一刻)冻结,而不是等点击时才读 selectedCardIdx——
