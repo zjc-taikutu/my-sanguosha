@@ -38,11 +38,22 @@ let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时
 // 这个标志只是"面板现在开着吗",供 render() 判断要不要跟着这次状态更新同步刷新面板内容。
 let logModalOpen = false;
 // 日志 toast:"刚刚发生了什么"的瞬时提示,和 banner("当前该谁做什么")信息类型不同,不复用。
-// null 是哨兵值,只在"页面/模块刚加载后的第一次 render()"这一刻生效一次——把它设成当时的
-// g.log 长度、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史最后一条
-// 日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的长度"比较,包括
-// Firebase 断线重连后的自动重新推送——不会重置回 null,所以重连瞬间不会被误判成"有新日志"。
-let lastToastedLogLen = null;
+// undefined 是哨兵值,只在"页面/模块刚加载后的第一次 render()"这一刻生效一次——把它设成当时
+// 最新一条日志的文本、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史
+// 最后一条日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的文本"比较,
+// 包括 Firebase 断线重连后的自动重新推送——不会重置回 undefined,所以重连瞬间不会被误判成
+// "有新日志"。
+// **这里存的是"最后一条日志的文本"而不是"g.log.length"**——曾经是按长度比较(`logLen >
+// lastToastedLogLen`),真实 bug:`pushLog`(game.js)`slice(-40)` 只保留最近 40 条,一旦总
+// 条数超过 40,`g.log.length` 会永远封顶在 41(第一次触顶那一刻变成 41,之后每次都是"切掉
+// 最老一条再 push 一条",长度维持 41 不变)——长度封顶之后 `logLen > lastToastedLogLen`
+// 永远算不出"有新增",toast 从触顶那一刻起永久失效,直到刷新页面重置这个变量。按"最新一条
+// 日志的文本是否变化"判断不受数组长度封顶影响,数组内容依然在滚动、最新一条文本一直在变。
+// 已知的小代价:如果连续两条日志文本恰好完全相同(比如两人先后都摸了两张牌,文案巧合一致),
+// 这里会漏弹一次——toast 本来就是"尽量提醒瞥一眼"而非"逐条必达"的定位(多条连续新日志时
+// 本来就只弹最后一条,不排队),这个概率很低的边界情况不值得为它引入递增序号之类的额外机制
+// (那需要改 pushLog 签名和所有调用点)。
+let lastToastedLogText = undefined;
 // colorizeLogLine: 只在 toast 这一处渲染路径把日志行里出现的玩家名字染上座位色(呼应座位卡片
 // 的 seatColor),不碰 g.log 本身的存储(依然是纯字符串,日志面板 renderLogModal 不受影响)。
 // 先转义整行,再用转义后的名字做字面 split/join 替换(不用正则,不用处理名字里的正则特殊字符);
@@ -386,12 +397,15 @@ function render(g){
 
   // 日志 toast:有新日志才弹,只弹最新一条(不排队)——连续好几条(比如无懈连锁反应)只看
   // 最后结果,完整过程本来就在 #logBtn 的日志面板里,toast 只负责"提醒瞥一眼",不保证条条都看到。
-  const logLen = (g.log||[]).length;
-  if(lastToastedLogLen===null){
-    lastToastedLogLen = logLen; // 第一次 render(加入房间/刷新页面那一刻),只记长度,不弹历史
-  } else if(logLen > lastToastedLogLen){
-    showLogToast(g, g.log[logLen-1]);
-    lastToastedLogLen = logLen;
+  // 按"最新一条文本是否变化"判断,不按数组长度(长度会被 pushLog 的 slice(-40) 封顶,详见上面
+  // lastToastedLogText 声明处的说明)。
+  const log = g.log||[];
+  const latestLog = log.length ? log[log.length-1] : null;
+  if(lastToastedLogText===undefined){
+    lastToastedLogText = latestLog; // 第一次 render(加入房间/刷新页面那一刻),只记文本,不弹历史
+  } else if(latestLog!==null && latestLog!==lastToastedLogText){
+    showLogToast(g, latestLog);
+    lastToastedLogText = latestLog;
   }
 }
 
