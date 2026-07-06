@@ -95,56 +95,72 @@
     grid-template-columns:minmax(120px,1fr) minmax(120px,1fr);
     grid-template-areas:"tl tr" "me me";
   }
+  /* ===== 座位卡片:武将头像铺底(第6步 UI 改版)=====
+     .seat 本身不再有 padding——padding 挪到 .seat-body,好让 .avatar-wrap 贴边铺满卡片
+     上半部分(顶天立地竖版构图),overflow:hidden 配合 border-radius 让头像跟着卡片圆角裁切。 */
   .seat{
     background:#1d1916;border:1px solid var(--line);
-    border-radius:12px;padding:12px 14px;position:relative;
-    width:100%;
+    border-radius:12px;overflow:hidden;position:relative;
+    width:100%;padding:0;
   }
+  .seat-body{padding:10px 14px 12px;}
   .seat.slot-top{grid-area:top;}
   .seat.slot-tl{grid-area:tl;}
   .seat.slot-tr{grid-area:tr;}
   .seat.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;}
-  .seat.dead{opacity:.45;filter:grayscale(.6);}
+  .seat.dead{opacity:.45;filter:grayscale(.6);} /* 连头像一起变灰,免费拿到,不用额外处理 */
   .seat.me{
     grid-area:me;
     border-color:var(--cinnabar);
     justify-self:center;
     width:100%;
     max-width:640px; /* 原 420px 在宽屏(1400px+)下明显窄于容器(.wrap 实际可用宽度约848px),放宽利用横向空间 */
-    padding:16px 20px;
   }
-  /* 自己的座位卡片信息量最大(武将+技能/体力/装备/攻击距离/手牌数),额外放大字号/间距,
-     减轻拥挤感——只影响 .me 这一张卡片,其他人的卡片(信息量本来就少)保持原尺寸不变。 */
-  .seat.me .nm{font-size:18px;}
-  .seat.me .hp{font-size:21px;margin-top:8px;}
-  .seat.me .equips{font-size:12.5px;gap:5px 16px;margin-top:8px;}
-  .seat.me .meta{font-size:13px;margin-top:6px;}
-  .seat .nm{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;}
+  /* 头像区:**不用 aspect-ratio**(试过,发现高度会跟着卡片宽度线性放大——.seat.me 在桌面
+     宽达640px,3:4比例算出来的头像高度暴涨到853px,把整张卡拉得极端离谱,这是实测截图后
+     才发现的问题,不是凭空猜的)。改成每个断点各自写一个固定像素高度,让"头像高度"和"卡片
+     宽度"彻底解耦——宽卡片(.seat.me)不会因为更宽就被迫更高。素材本身是竖版 300x400,
+     固定高度配合 object-fit:cover + object-position:center top 会按需裁切两侧或下半身,
+     但顶部(头部/上半身,构图里最重要的部分)始终完整保留,不会出现"头被裁掉"这种问题。 */
+  .avatar-wrap{position:relative;width:100%;height:260px;overflow:hidden;background:#15120f;}
+  .seat.me .avatar-wrap{height:300px;}
+  .avatar-wrap .avatar{width:100%;height:100%;object-fit:cover;object-position:center top;display:block;}
+  /* 图裂了不会显示浏览器原生的破图标——onerror 触发的是隐藏 <img>、显示这个占位块,不是加载失败的图裂图标 */
+  .avatar-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:10px;font-size:13px;color:var(--paper-dim);background:#241f1b;}
+  /* 蒙层:由上而下的深色渐变,保证左上(姓名/技能/判定区)和右上(血量)的文字在任何头像颜色下
+     都清晰可读;pointer-events:none 不挡下面判定区 chip 的点击。 */
+  .avatar-scrim{position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(180deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,.2) 55%, rgba(0,0,0,0) 78%);}
+  .overlay-left{position:absolute;top:8px;left:10px;right:56px;z-index:2;
+    display:flex;flex-direction:column;gap:4px;}
+  .avatar-wrap .nm{font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .avatar-wrap .skill-line{font-size:11px;color:var(--paper-dim);}
+  .avatar-wrap .hp{position:absolute;top:8px;right:10px;z-index:2;margin:0;font-size:16px;letter-spacing:1px;}
   .seat .tag{font-size:10px;letter-spacing:.1em;background:#332b24;color:var(--paper-dim);
     border-radius:4px;padding:1px 6px;}
   .seat .tag.turn{background:var(--gold);color:#1a1410;}
-  .hp{margin-top:6px;font-size:18px;letter-spacing:2px;color:var(--cinnabar-bright);}
   .hp .empty{color:#4a3f37;}
   .meta{font-size:12px;color:var(--paper-dim);margin-top:4px;}
-  .equips{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-top:6px;font-size:11px;color:var(--paper-dim);}
-  /* 之前 nowrap+ellipsis 会把长装备名(如"麒麟弓 射3"这类武器+射程后缀)截断成看不出是什么;
-     改为允许换行——2列 grid 每格独立撑高,不会导致左右两列错位,只是那一行整体变高。
-     金色 chip 样式(和判定区 .dchip 呼应但用金色区分,呼应装备本身的金色高亮):已装备的槽
-     浅金底+金色描边实心块(.filled),空槽虚线描边、无底色(.empty-slot),靠 render.js 按
-     "这个槽有没有装备"分别加 class,不是靠 :empty 这类结构伪类猜——槽位内容(标签+"—")
-     本身就不是空的,CSS 层面判断不出"有没有装备"。 */
-  /* justify-self:start——不设的话 .eslot 作为 grid 单元格的直接子项默认 stretch,
-     会被拉伸铺满整个格子宽度,变成一条通栏色块而不是贴合内容的小块。 */
-  .equips .eslot{display:inline-block;border-radius:6px;padding:2px 7px;justify-self:start;}
-  .equips .eslot.filled{border:1px solid rgba(176,141,79,.45);background:rgba(176,141,79,.09);}
-  .equips .eslot.empty-slot{border:1px dashed rgba(233,225,210,.14);background:none;}
-  .equips .eslot b{color:var(--gold);font-weight:700;}
-  .equips .empty{color:#4a3f37;}
-  /* 判定区(延时锦囊):和装备区呼应但视觉区分——紫色描边小 chip,呼应手牌 .card.trick 的锦囊配色
-     (一眼联想到"这是锦囊类"),不用装备区那种"固定槽位+暗色占位"风格,因为判定区没有槽位概念,
-     空的时候(见 render.js)整行直接不渲染,不留占位。 */
-  .delays{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;font-size:11px;}
-  .dlabel{color:var(--paper-dim);}
+  /* 自己的座位卡片信息量最大,额外放大字号/间距,减轻拥挤感——只影响 .me 这张卡片。 */
+  .seat.me .avatar-wrap .nm{font-size:17px;}
+  .seat.me .avatar-wrap .skill-line{font-size:12.5px;}
+  .seat.me .avatar-wrap .hp{font-size:19px;}
+  .seat.me .equip-list{font-size:12.5px;gap:5px;}
+  .seat.me .seat-body{padding:12px 16px 14px;}
+  .seat.me .meta{font-size:13px;margin-top:6px;}
+  /* 装备:从"2列chip网格"改成逐行列表(图标/文字标签+牌名+射程),不再需要金色描边小块——
+     每行本身已经是独立一行,列表形式下再逐行套色块会显得冗余、偏重,改版后干脆去掉盒子,
+     纯文字行,已装备的牌名保留金色高亮(呼应装备本身的金色主题色)区分于标签文字。
+     对手卡片的空槽整行不渲染(和判定区"空的时候不留占位"同一原则),只有 .seat.me
+     仍然显示全部4槽(含空槽虚线占位),因为你会想知道自己缺什么装备。 */
+  .equip-list{display:flex;flex-direction:column;gap:3px;margin-top:8px;font-size:11px;color:var(--paper-dim);}
+  .equip-list .erow b{color:var(--gold);font-weight:700;}
+  .equip-list .empty{color:#4a3f37;}
+  /* 判定区(延时锦囊):浮在头像左侧偏上(紧跟姓名/技能名下方,在 overlay-left 里自然堆叠,
+     不用手动算像素位置)。紫色描边小 chip 呼应手牌 .card.trick 的锦囊配色,和装备的金色系
+     区分开。头像区空间有限,这里不再重复"判定区"文字标签,靠 chip 本身+位置已经足够清楚。 */
+  .avatar-wrap .delays{display:flex;flex-wrap:wrap;align-items:center;gap:4px;}
   .dchip{display:inline-flex;align-items:center;gap:3px;border:1px solid #7a5fa0;border-radius:6px;
     padding:2px 6px;color:#c3aee0;background:rgba(122,95,160,.12);white-space:nowrap;}
 
@@ -249,18 +265,23 @@
     .seats{gap:8px;}
     .seats.opp1{grid-template-columns:minmax(120px,1fr);}
     .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);}
-    .seat{padding:9px 10px;}
-    .seat.me{max-width:100%;padding:12px 14px;}
-    .seat .nm{font-size:14px;gap:6px;}
-    .seat.me .nm{font-size:15px;}
-    .hp{font-size:15px;letter-spacing:1px;}
-    .seat.me .hp{font-size:17px;}
+    .seat-body{padding:8px 10px 10px;}
+    .seat.me{max-width:100%;}
+    .seat.me .seat-body{padding:10px 12px 12px;}
+    /* 窄屏收紧头像固定高度(比桌面矮),避免头像占比过高、把装备列表挤出视口太多——
+       具体数值 Playwright 实测后微调,不是凭空定的。 */
+    .avatar-wrap{height:170px;}
+    .seat.me .avatar-wrap{height:190px;}
+    .avatar-wrap .nm{font-size:13px;gap:5px;}
+    .seat.me .avatar-wrap .nm{font-size:14px;}
+    .avatar-wrap .skill-line{font-size:10px;}
+    .seat.me .avatar-wrap .skill-line{font-size:11px;}
+    .avatar-wrap .hp{font-size:14px;letter-spacing:1px;}
+    .seat.me .avatar-wrap .hp{font-size:16px;}
     .meta{font-size:11px;}
     .seat.me .meta{font-size:11.5px;}
-    .equips{font-size:10px;gap:2px 8px;}
-    .seat.me .equips{font-size:11px;gap:3px 10px;}
-    .equips .eslot{padding:1px 5px;}
-    .delays{font-size:10px;gap:4px;}
+    .equip-list{font-size:10px;}
+    .seat.me .equip-list{font-size:11px;gap:3px;}
     .dchip{padding:1px 5px;}
     /* 手牌:桌面 64x92 在窄屏上占太多行;缩小卡面本身,flex-wrap(已有,见 .hand)继续兜底
        "无论多少张手牌都不会横向溢出/需要横向滚动"这条硬指标——缩小是为了减少换行数量,
@@ -291,7 +312,11 @@
     }
     .card{width:46px;height:68px;}
     .card .big{font-size:19px;}
-    .equips .eslot{padding:1px 4px;}
+    /* 480px是这次风险最大的场景(3人局同屏挤最紧):头像高度再收一档,压到最低。 */
+    .avatar-wrap{height:130px;}
+    .seat.me .avatar-wrap{height:145px;}
+    .overlay-left{right:48px;}
+    .avatar-wrap .hp{right:8px;}
     /* 卡片更窄了,角标视觉+热区再收一档(极窄屏卡片更窄,热区若不跟着缩会重新顶到花色点数) */
     .card .info-badge-hit{width:18px;height:18px;}
     .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
@@ -398,9 +423,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=20"></script>
-<script src="data.js?v=20"></script>
-<script src="game.js?v=20"></script>
-<script src="render.js?v=20"></script>
+<script src="config.js?v=21"></script>
+<script src="data.js?v=21"></script>
+<script src="game.js?v=21"></script>
+<script src="render.js?v=21"></script>
 </body>
 </html>

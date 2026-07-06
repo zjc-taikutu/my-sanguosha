@@ -1,3 +1,23 @@
+// ---------- 座位卡片头像 ----------
+// generalAvatarSrc: 按 id 拼路径的约定式查询(不在 GENERALS 表里存 img 字段)——和 getGeneral(id)
+// 是唯一查询入口同一个道理,业务层永远调这个函数,不硬编码路径。"以后换图"只需要覆盖
+// assets/generals/{id}.svg(或同 id 的 .png,见 avatarError),不用碰这里的代码。
+function generalAvatarSrc(id){ return 'assets/generals/'+id+'.svg'; }
+// avatarError: <img onerror> 挂载。第一次失败(默认的 .svg 加载不到)尝试同 id 的 .png——
+// 这是为了"以后素材可能换成同名png"这个场景不用改代码,只要文件名前缀(id)不变。
+// 第二次仍失败(png 也没有,比如日后新增武将暂时没配图)才真正隐藏 <img>、显示占位块——
+// 不能只隐藏不管,浏览器会在原地画一个"图裂了"的破图标,必须真正 display:none 才行。
+function avatarError(imgEl){
+  if(imgEl.dataset.triedPng){
+    imgEl.style.display='none';
+    const ph = imgEl.parentElement && imgEl.parentElement.querySelector('.avatar-placeholder');
+    if(ph) ph.style.display='flex';
+    return;
+  }
+  imgEl.dataset.triedPng='1';
+  imgEl.src = imgEl.src.replace(/\.svg(\?.*)?$/, '.png');
+}
+
 // ---------- targeting UI state ----------
 let selectedCardIdx = null;
 // 丈八蛇矛「两张牌当杀」的纯客户端选牌状态(和 selectedCardIdx 互斥,从不入库)。
@@ -233,49 +253,64 @@ function render(g){
       : '<span class="empty">待开局</span>';
     const handBacks = '<div class="backs">'+'<div class="cardback"></div>'.repeat((p.hand||[]).length)+'</div>';
     const genLabel = g.started ? (gen?gen.name:'—') : '武将未定';
-    // 装备区(公开信息,和武将一样人人可见);地基阶段无真装备牌,四槽都显示暗色占位"—"。
-    // 读的是 normalize 补好的 p.equips,四槽必定齐全,不会 undefined.xxx 报错。
+    // 头像:只有真的选定了武将(gen 非空)才尝试加载图片,大厅/旧数据(gen为null)直接走占位块,
+    // 不发一次注定 404 的图片请求。占位块默认 style="display:none"(有 <img> 时靠 onerror 才会
+    // 显示),没有 <img> 时直接不带这行内联样式,保持默认可见。
+    const avatarImg = gen
+      ? '<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
+      : '';
+    const avatarPlaceholder = '<div class="avatar-placeholder"'+(gen?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
+    // 装备区(公开信息,和武将一样人人可见)。逐行列表(第6步头像铺底改版:从2列chip网格改成
+    // 一条条列表,配合每行"图标/标签+牌名+射程"的排布)。**对手卡片只渲染有装备的槽位,
+    // 空槽整行不显示**(和判定区"空的时候不留占位"同一原则)——头像铺底之后卡片整体变高,
+    // 对手卡片没必要像 .seat.me 那样恒定显示4行(含空槽虚线占位),只有 .seat.me 保留完整
+    // 4槽显示(含空槽),因为你会想知道自己缺什么装备。
     const eq = p.equips || emptyEquips();
-    // 马槽用中性名(防御马/进攻马),不用"＋1/－1"——避免空槽也被误读成有距离加成
     const slotLabels = { weapon:'武器', armor:'防具', plus1:'防御马', minus1:'进攻马' };
-    const equipRow = g.started
-      ? '<div class="equips">'+EQUIP_SLOTS.map(s=>{
+    const equipSlotsToShow = i===mySeat ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
+    const equipList = g.started
+      ? '<div class="equip-list">'+equipSlotsToShow.map(s=>{
           const c = eq[s];
-          // 只有武器槽显示射程(马/防具不需要);射程从 getEquip(牌名).range 读
           const rangeSuffix = (s==='weapon' && c && getEquip(c.name) && getEquip(c.name).range) ? ' 射'+getEquip(c.name).range : '';
-          // 已装备的牌加 "?" 角标查看特效说明(装备公开);inline onclick stopPropagation 不触发座位选目标
-          const eDesc = (c && getEquip(c.name) && getEquip(c.name).desc) || ''; // 悬停提示用
-          return '<span class="eslot '+(c?'filled':'empty-slot')+'"'+(c?' title="'+escapeHtml(eDesc)+'"':'')+'>'+slotLabels[s]+' '+(c
+          const eDesc = (c && getEquip(c.name) && getEquip(c.name).desc) || '';
+          return '<div class="erow '+(c?'filled':'empty-slot')+'"'+(c?' title="'+escapeHtml(eDesc)+'"':'')+'>'+slotLabels[s]+' '+(c
             ? '<b>'+cardFace(c)+' '+escapeHtml(c.name)+rangeSuffix+'</b> <span class="info-badge" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')">?</span>'
-            : '<span class="empty">—</span>')+'</span>';
+            : '<span class="empty">—</span>')+'</div>';
         }).join('')+'</div>'
       : '';
-    // 判定区(延时锦囊):公开信息,和装备区呼应但视觉上区分——每张牌一个紫色描边小 chip
-    // (紫色呼应手牌里 .card.trick 的锦囊配色,一眼联想到"这是锦囊类"),不是装备区那种固定
-    // 槽位+暗色占位的风格,因为判定区没有"应该有什么"这个固定槽位概念,空的时候整行不显示。
-    const delayRow = (g.started && (p.delays||[]).length>0)
-      ? '<div class="delays"><span class="dlabel">判定区</span>'+p.delays.map(c=>{
+    // 判定区(延时锦囊):浮在头像左侧偏上(在 overlay-left 里紧跟姓名/技能名堆叠),紫色描边
+    // 小 chip 呼应手牌 .card.trick 的锦囊配色。头像区空间有限,不再重复"判定区"文字标签。
+    const delayOverlay = (g.started && (p.delays||[]).length>0)
+      ? '<div class="delays">'+p.delays.map(c=>{
           const dDesc = getCardDesc(c.name);
           return '<span class="dchip"'+(dDesc?' title="'+escapeHtml(dDesc)+'"':'')+'>'+(cardFace(c)||'')+' '+escapeHtml(c.name)+
             ' <span class="info-badge" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">?</span></span>';
         }).join('')+'</div>'
       : '';
-    d.innerHTML =
-      // 姓名文字染身份色(纯识别用,不碰边框/outline——那些留给回合/选目标等状态高亮,优先级更高)
+    const nmLine =
       '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
         (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'')+
+      '</div>';
+    const skillLine = (g.started&&gen)
+      ? '<div class="skill-line" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'">'+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span></div>'
+      : '';
+    d.innerHTML =
+      '<div class="avatar-wrap">'+
+        avatarImg+
+        avatarPlaceholder+
+        '<div class="avatar-scrim"></div>'+
+        '<div class="overlay-left">'+nmLine+skillLine+delayOverlay+'</div>'+
+        '<div class="hp">'+hearts+'</div>'+
       '</div>'+
-      '<div class="meta"'+(g.started&&gen?' title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'"':'')+'>武将 '+escapeHtml(genLabel)+
-        (g.started&&gen?' · '+escapeHtml(gen.skill)+' <span class="info-badge" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+'</div>'+
-      '<div class="hp">'+hearts+'</div>'+
-      equipRow+
-      delayRow+
-      // 自己的座位卡显示当前攻击距离(= attackRange,无武器默认1),让玩家一眼知道能打多远
-      (i===mySeat && g.started ? '<div class="meta">攻击距离 '+attackRange(g,mySeat)+'</div>' : '')+
-      '<div class="meta">手牌 '+(p.hand||[]).length+' 张</div>'+
-      (i===mySeat?'':handBacks);
+      '<div class="seat-body">'+
+        equipList+
+        // 自己的座位卡显示当前攻击距离(= attackRange,无武器默认1),让玩家一眼知道能打多远
+        (i===mySeat && g.started ? '<div class="meta">攻击距离 '+attackRange(g,mySeat)+'</div>' : '')+
+        '<div class="meta">手牌 '+(p.hand||[]).length+' 张</div>'+
+        (i===mySeat?'':handBacks)+
+      '</div>';
     // targeting: clickable opponents when choosing a target card
     const meP=g.players[mySeat];
     const selCard=(selectedCardIdx!==null)?(meP.hand||[])[selectedCardIdx]:null;
@@ -312,7 +347,7 @@ function render(g){
         // 够不着:选了杀但超出攻击距离 —— 暗色点线 + 角标 + 悬浮说明,不可点
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
-        d.innerHTML += '<span class="tag" style="position:absolute;top:8px;right:8px;background:#3a2f28">够不着</span>';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
     }
     // 丈八蛇矛:已选满两张牌后,对手作为杀的目标(距离规则同普通杀,与 selectedCardIdx 路径互斥)
@@ -327,7 +362,7 @@ function render(g){
       } else if(i!==mySeat && p.alive && !reach){
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
-        d.innerHTML += '<span class="tag" style="position:absolute;top:8px;right:8px;background:#3a2f28">够不着</span>';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
     }
     // 徐晃【断粮】选目标:已选中一张要弃的牌后,点一名其他存活玩家提交(无距离限制)。
