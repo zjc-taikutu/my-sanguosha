@@ -1281,10 +1281,9 @@ function duelResponse(useSha){
       return g;
     }
     // 认输：受伤
-    // 注意:此处 sourceSeat 传的是 pending.from(决斗发起者)。决斗发起者本人认输受伤时,
-    // sourceSeat 会等于受害者本人,导致司马懿【反馈】等依赖"伤害来源"的技能在该边角不触发;
-    // 日后若要精确,应传"对手座位"(发起者受伤时传 pending.to,目标受伤时传 pending.from)。
-    const dying = dealDamage(g, mySeat, 1, g.pending.from, '不出【杀】', 'duel');
+    // sourceSeat 传 opp(决斗中的对方),不能传 g.pending.from——认输的可能是发起者本人,
+    // 那种情况下 sourceSeat 必须是对手而不是受害者自己,否则司马懿【反馈】等依赖伤害来源的技能会出错。
+    const dying = dealDamage(g, mySeat, 1, opp, '不出【杀】', 'duel');
     if(dying) return g; // 濒死流程接管,后续(轮转/阶段)延后到 finishDying 处理
     g.pending=null;
     if(checkWin(g)) return g;
