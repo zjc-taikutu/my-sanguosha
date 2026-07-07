@@ -1272,6 +1272,7 @@ function duelResponse(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      g.shaUsed=true; // 官方FAQ:决斗中打出杀同样破坏吕蒙【克己】,不能只在"主动使用杀"时置位,"打出"(应战)也算
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       if(played<needed){ g.pending.shaCount=played; return g; } // 吕布【无双】:这一轮还没出满,留在同一个人身上
@@ -1737,6 +1738,7 @@ function respondQinglong(activate, cardIdx){
     const card=me.hand[cardIdx];
     if(!card || !canUseAs(me,card,'杀')) return g; // 没这张牌/不能当杀:状态不变(双重保险)
     me.hand.splice(cardIdx,1); g.discard.push(card);
+    g.shaUsed=true; // 青龙偃月刀连续杀本质是又使用了一张杀,同样计入出杀次数限制/破坏克己
     const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
     g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
     g.pending=null;
