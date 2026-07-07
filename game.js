@@ -983,7 +983,7 @@ function doQiaobianMove(g, move){
 function dealDamage(g, seat, amount, sourceSeat, reason, srcType){
   const p=g.players[seat];
   if(!p) return false;
-  p.hp -= amount;
+  p.hp = Math.max(0, p.hp - amount);
   g.log=pushLog(g.log, p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点伤害（体力'+p.hp+'）');
   if(p.hp<=0){
     startDying(g, seat, srcType);
