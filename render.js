@@ -142,6 +142,36 @@ function showLogToast(g, text){
   void el.offsetWidth;
   el.classList.add('show');
 }
+
+// ===== "轮到你了"提示:语音 + 大字视觉双重触发,同一个去重 key(见 render() 里的调用点) =====
+// lastAnnouncedTurnKey:哨兵初始值 null(不是 undefined——这里不需要"第一次render不提示历史"
+// 这套逻辑,一开始就没有任何"已提示过的轮次",null 天然和任何真实 turnKey 字符串都不相等)。
+let lastAnnouncedTurnKey = null;
+// announceMyTurn:用浏览器内置 SpeechSynthesis 播报"轮到你了"。浏览器的自动播放策略可能在
+// 玩家还没和页面发生过任何交互时静默拒绝播放(不抛错、就是没声音)——showMyTurnBanner 是
+// 专门给这种情况准备的视觉兜底,两者同时触发,不互相依赖对方是否成功。
+function announceMyTurn(){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance('轮到你了');
+    u.lang = 'zh-CN';
+    window.speechSynthesis.cancel(); // 避免多次快速触发时语音排队堆积
+    window.speechSynthesis.speak(u);
+  }catch(e){ /* 语音播放失败静默忽略,反正有大字视觉兜底 */ }
+}
+// showMyTurnBanner: 居中大字短暂覆层,和 showLogToast 同一套"class 加/减触发CSS动画"写法,
+// 但视觉上更醒目(更大字号、居中、短暂遮罩),专用于"轮到我了"这一个场景,不复用常驻的
+// .banner(那是被决斗/技能询问等很多场景复用的"当前该谁做什么"提示条,改大会影响那些场景)。
+function showMyTurnBanner(){
+  const el = document.getElementById('myTurnBanner');
+  if(!el) return;
+  el.textContent = '轮到你了';
+  el.classList.remove('show');
+  void el.offsetWidth; // 强制回流,保证连续触发时动画能重新播放(和 showLogToast 的写法一致)
+  el.classList.add('show');
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(()=>{ el.classList.remove('show'); }, 1800);
+}
 // queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
 // 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
 // 上限 5 条:无懈连锁反应这种极端场景可能一次性新增十几条日志,全部排队展示会等很久、
@@ -287,6 +317,18 @@ function render(g){
     return;
   }
   normalize(g);
+  // 轮到自己出牌阶段:语音+大字视觉双重提示,同一个触发时机、同一套去重判断——只在这个
+  // 阶段"刚刚开始"时提示一次,不会因为同一阶段内的其它状态变化(如无关的日志/别人操作)
+  // 而反复重复提示。key 用 (roundNum,turn) 组合:同一玩家在不同轮次会重新拿到同一个
+  // turn 座位号,必须靠 roundNum 区分,不能只用 turn 本身。
+  if(g.started && g.phase==='play' && g.turn===mySeat){
+    const turnKey = g.roundNum+'-'+g.turn;
+    if(lastAnnouncedTurnKey!==turnKey){
+      lastAnnouncedTurnKey = turnKey;
+      announceMyTurn();
+      showMyTurnBanner();
+    }
+  }
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
