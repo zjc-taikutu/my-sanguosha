@@ -378,7 +378,10 @@ function render(g){
     // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
     // 手牌和装备任一非空即可选,而不是只看手牌——否则"手牌0但有装备"会被 UI 误挡在选目标这一步。
     const hasHandOrEquip = (p.hand||[]).length>0 || EQUIP_SLOTS.some(s=>p.equips && p.equips[s]);
-    const inRange = !isShaSel || canReachSha(g, mySeat, i);                 // 杀才受攻击距离限制
+    // 顺手牵羊/兵粮寸断(直接使用场景,不是徐晃【断粮】那条路径)距离限制均为1,和服务端
+    // canTarget 的口径一致;过河拆桥/乐不思蜀/闪电均无此限制,不在这个判断范围内。
+    const distLimited = !!(selCard && (selCard.name==='顺手牵羊' || selCard.name==='兵粮寸断'));
+    const inRange = (!isShaSel || canReachSha(g, mySeat, i)) && (!distLimited || distance(g, mySeat, i) <= 1);
     // 默认不能选自己;是否放行自选要按这张延时锦囊自己的 onlySelf 判断(闪电 onlySelf:true 只能选自己,
     // 乐不思蜀/兵粮寸断 onlySelf:false 和普通牌一样不能选自己)。
     // 之前误用 CARD_PLAYS[name].allowSelf(delayTrickPlay 这个共享对象,所有延时锦囊都是 allowSelf:true,
@@ -401,10 +404,13 @@ function render(g){
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, c0, i), ()=>playCard(idx, actionId, i)); };
-      } else if(isShaSel && i!==mySeat && p.alive && !inRange){
-        // 够不着:选了杀但超出攻击距离 —— 暗色点线 + 角标 + 悬浮说明,不可点
+      } else if((isShaSel||distLimited) && i!==mySeat && p.alive && !inRange){
+        // 够不着:选了杀但超出攻击距离,或选了顺手牵羊/兵粮寸断但超出距离1 —— 暗色点线 + 角标 +
+        // 悬浮说明,不可点(和杀同款视觉,避免玩家点了却被服务端 canTarget 拒绝)。
         d.style.outline='2px dotted #6b5b4d';
-        d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
+        d.title = isShaSel
+          ? '攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）'
+          : '距离外（距离 '+distance(g,mySeat,i)+' ＞ 1）';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
     }

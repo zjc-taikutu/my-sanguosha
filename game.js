@@ -509,6 +509,7 @@ const CARD_PLAYS = {
   '顺手牵羊': {
     target:true,
     canPlay:(g,me,card)=> card.name==='顺手牵羊',
+    canTarget:(g,me,card,targetSeat)=> distance(g, mySeat, targetSeat) <= 1,
     effect:(g,me,card,targetSeat)=>{
       g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【顺手牵羊】');
       startTrick(g, {trick:'顺手牵羊', from:mySeat, to:targetSeat});
@@ -543,7 +544,13 @@ const delayTrickPlay = {
   noDiscard:true,
   allowSelf:true,
   canPlay:(g,me,card)=> !!DELAY_TRICKS[card.name],
-  canTarget:(g,me,card,targetSeat)=> DELAY_TRICKS[card.name].onlySelf ? targetSeat===mySeat : targetSeat!==mySeat,
+  canTarget:(g,me,card,targetSeat)=>{
+    const spec=DELAY_TRICKS[card.name];
+    if(spec.onlySelf) return targetSeat===mySeat;
+    if(targetSeat===mySeat) return false;
+    if(card.name==='兵粮寸断' && distance(g, mySeat, targetSeat) > 1) return false;
+    return true;
+  },
   effect:(g,me,card,targetSeat)=>{
     g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【'+card.name+'】');
     // 打出时的无懈窗口:和决斗/顺手/拆桥同一套 startTrick,card 透传进 pending,
