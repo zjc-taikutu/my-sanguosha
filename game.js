@@ -710,8 +710,15 @@ function respondJiedao(useSha){
     const weapon=A.equips.weapon;
     if(!weapon) return g; // 理论上不会(resolveTrick 进这个阶段前已校验),双重保险
     A.equips.weapon=null;
-    g.discard.push(weapon);
-    g.log=pushLog(g.log, A.name+' 选择弃置武器【'+weapon.name+'】(借刀杀人)');
+    const user=g.players[g.pending.from]; // 借刀杀人的使用者(不是A、不是B)
+    if(user && user.alive){
+      user.hand.push(weapon);
+      g.log=pushLog(g.log, A.name+' 选择交出武器【'+weapon.name+'】,'+user.name+' 获得此牌(借刀杀人)');
+    } else {
+      // 使用者已阵亡(理论边界):没有手牌可归还,兜底弃入弃牌堆,防止牌凭空消失
+      g.discard.push(weapon);
+      g.log=pushLog(g.log, A.name+' 选择交出武器【'+weapon.name+'】,但使用者已不在场,该牌弃置(借刀杀人)');
+    }
     triggerHook(g, mySeat, 'onLoseEquip', {count:1});
     g.pending=null; g.phase='play';
     return g;
