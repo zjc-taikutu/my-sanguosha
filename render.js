@@ -57,6 +57,10 @@ function resetQinglong(){ qinglongMode=false; }
 // ('hand:idx' / 'equip:slot'),纯客户端不入库。
 let guanshiPicks = [];
 function resetGuanshi(){ guanshiPicks=[]; }
+// 郭嘉【遗计】分配阶段:yijiPicks 依次记录"第i张牌分配给哪个座位号",纯客户端不入库。
+// 每次点一个座位号就 push 进去(允许重复,如都给自己/都给同一人),攒够 cards.length 张就提交。
+let yijiPicks = [];
+function resetYiji(){ yijiPicks=[]; }
 // guanshifuOptions: 攻击者自己当前可弃的项(手牌逐张 + 非空装备槽逐件,武器槽排除——那就是
 // 贯石斧本身)。返回 {key,label} 列表,供 UI 渲染 toggle 按钮。
 function guanshifuOptions(p){
@@ -269,6 +273,8 @@ function render(g){
   if(!(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong' && g.pending.from===mySeat)) resetQinglong();
   // 同款兜底:一旦不在"轮到自己(攻击者)响应贯石斧"的状态,清空已选的弃牌项,不留残留。
   if(!(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat)) resetGuanshi();
+  // 同款兜底:一旦不在"轮到自己分配遗计牌"的状态,清空已选的分配项,不留残留。
+  if(!(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign' && g.pending.seat===mySeat)) resetYiji();
   // 同款兜底:只要不在"轮到自己的巧变回合开始询问"或"轮到自己的巧变移动询问"这两个状态,
   // 就退出巧变选牌/选阶段/选源/选目标模式——巧变完整版横跨两个不同的服务端阶段。
   if(!(g.phase==='qiaobianTurnStart' && g.pending && g.pending.type==='qiaobianTurnStart' && g.pending.seat===mySeat) &&
@@ -486,7 +492,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -624,6 +630,58 @@ function renderControls(g){
   if(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【贯石斧】…');
+    return;
+  }
+  // 郭嘉【遗计】:受伤后是否发动,看牌堆顶2张(不足2张时可能只有1张)分给任意角色(含自己)。
+  if(g.phase==='yijiAsk' && g.pending && g.pending.type==='yijiAsk' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【遗计】'; b1.onclick=()=>respondYijiAsk(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondYijiAsk(false);
+    c.appendChild(b2);
+    setBanner('你受到了伤害,是否发动【遗计】,观看牌堆顶两张牌并分配?');
+    return;
+  }
+  if(g.phase==='yijiAsk' && g.pending && g.pending.type==='yijiAsk'){
+    const p=g.players[g.pending.seat].name;
+    setBanner('等待 '+escapeHtml(p)+' 决定是否发动【遗计】…'); // 不剧透是否受伤/发动详情之外的任何牌面信息
+    return;
+  }
+  // 郭嘉【遗计】分配阶段:g.pending.cards 是共享状态里的真实牌面,理论上任何客户端都能读到——
+  // 必须严格只在 mySeat===pending.seat 时才把牌面画出来,其余客户端只看不剧透的 banner,
+  // 和现有对手手牌只显示牌背的处理原则一致(见 CLAUDE.md 的技术债提示)。
+  if(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign' && g.pending.seat===mySeat){
+    const cards=g.pending.cards;
+    const alivePlayers=g.players.map((p,i)=>({p,i})).filter(o=>o.p && o.p.alive);
+    const idx=yijiPicks.length; // 当前正在为第几张牌选接收者(0-based),渲染这一刻冻结,不在 onclick 里读可变的 yijiPicks
+    const isLast=(idx===cards.length-1);
+    const card=cards[idx];
+    const cardBox=document.createElement('div'); cardBox.className='card '+(card.name==='杀'?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':'trick');
+    cardBox.style.display='inline-block'; cardBox.style.marginRight='10px';
+    cardBox.innerHTML='<div class="corner">'+(cardFace(card)||card.name)+'</div><div class="big">'+card.name+'</div><div class="corner br">'+card.name+'</div>';
+    c.appendChild(cardBox);
+    alivePlayers.forEach(o=>{
+      const b=document.createElement('button');
+      b.textContent='给 '+(o.i===mySeat?'自己':o.p.name);
+      // 选到最后一张牌时,这次点击就直接提交(不是"选满再点确认"那套,少一步交互);
+      // 不是最后一张就只是累积选择、留在同一 tx 之外继续问下一张。
+      b.onclick = isLast
+        ? ()=>{ const picks=[...yijiPicks, o.i]; resetYiji(); respondYijiAssign(picks); }
+        : ()=>{ yijiPicks=[...yijiPicks, o.i]; render(g); };
+      c.appendChild(b);
+    });
+    if(idx>0){
+      const back=document.createElement('button'); back.className='ghost';
+      back.textContent='上一步(重选)'; back.onclick=()=>{ yijiPicks=yijiPicks.slice(0,-1); render(g); };
+      c.appendChild(back);
+    }
+    setBanner('【遗计】选择第'+(idx+1)+'/'+cards.length+'张牌交给谁?');
+    return;
+  }
+  if(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign'){
+    const p=g.players[g.pending.seat].name;
+    setBanner(escapeHtml(p)+' 正在分配【遗计】看到的牌…'); // 不渲染牌面,严格保密
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。

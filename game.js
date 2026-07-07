@@ -99,6 +99,20 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 郭嘉【遗计】询问阶段:seat 应是数字座位号且对应玩家存活;任一不对就整体判无效,防止卡死。
+  if(g.pending && g.pending.type==='yijiAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 郭嘉【遗计】分配阶段:seat 同上;cards 应是非空数组(牌堆不足2张时会是1张,长度1或2皆合法)。
+  if(g.pending && g.pending.type==='yijiAssign'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.cards) || d.cards.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 方天画戟排队(g.fangtianQueue):非活跃时应为 null(和 g.pending/g.aoe 同款标量哨兵)。
   // 活跃时 from/idx 应是数字、targets 应是非空数组——任一不对就整体判无效清空,防止卡死。
   if(g.fangtianQueue===undefined) g.fangtianQueue=null;
@@ -295,13 +309,14 @@ function finishGuicai(g, finalCard){
   if(resume.kind==='delayJudge'){
     const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], finalCard, resume.card);
     if(result==='pending'){
-      // 又挂起了(嵌套濒死或嵌套鬼才)。和 continueDelayResolution 的收尾同一套逻辑,不能省略:
-      // 若新挂起是濒死,它的 resume 只有 {type:'delay'}(dealDamage/startDying 不知道 seat是谁,
-      // 这个信息只有这里——鬼才改判后重新触发的 finishDelayCard——才知道),这里必须补上 seat,
-      // 否则 finishDying 读 resume.seat 是 undefined,g.players[undefined] 直接抛异常(真实 bug:
-      // 鬼才替换了延时锦囊的判定牌、替换后结果致命时才会走到这条分支,此前测试没覆盖到这个组合)。
-      // 若新挂起是鬼才(嵌套鬼才改判),它的 resume 已经自带完整信息,绝不能覆盖。
-      if(g.pending.type==='dying') g.pending.resume={type:'delay', seat:resume.seat};
+      // 又挂起了(嵌套濒死、嵌套鬼才、或郭嘉【遗计】)。和 continueDelayResolution 的收尾同一套
+      // 逻辑,不能省略:若新挂起是濒死或遗计(g.pending.type==='dying'||'yijiAsk'),它的 resume
+      // 只有 {type:'delay'}(dealDamage/startDying 不知道 seat是谁,这个信息只有这里——鬼才改判
+      // 后重新触发的 finishDelayCard——才知道),这里必须补上 seat,否则接回流程时读 resume.seat
+      // 是 undefined,g.players[undefined] 直接抛异常(真实 bug:鬼才替换了延时锦囊的判定牌、
+      // 替换后结果致命时才会走到这条分支,此前测试没覆盖到这个组合)。若新挂起是鬼才(嵌套鬼才
+      // 改判),它的 resume 已经自带完整信息,绝不能覆盖。
+      if(g.pending.type==='dying' || g.pending.type==='yijiAsk') g.pending.resume={type:'delay', seat:resume.seat};
       return;
     }
     continueDelayResolution(g, resume.seat);
@@ -780,6 +795,10 @@ function respondTieqi(activate){
 function finishTieqiJudge(g, from, to, card){
   const red=isRed(card);
   g.log=pushLog(g.log, g.players[from].name+' 发动【铁骑】,判定为'+(red?'红':'黑'));
+  // 天妒:铁骑判定归属者是 from(发动铁骑的攻击者)自己的判定,若 from 恰好是郭嘉可以收下判定牌
+  // (现实中不会发生——铁骑是马超专属 cap,一人不能同时是马超又是郭嘉——但函数写法上不应该
+  // 硬编码排除这种情况,和 maybeTiandu 本身"只查 hasCap,不硬编码武将名"的原则一致)。
+  maybeTiandu(g, from, card);
   continueShaAfterTieqi(g, from, to, red);
 }
 // playZhangbaSha: 丈八蛇矛特效——任意两张手牌当一个【杀】。与 playCard 平级(playCard 只吃单张)。
@@ -989,8 +1008,21 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType){
     startDying(g, seat, srcType);
     return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解决时统一处理)
   }
-  // 实际受伤且存活 -> 触发"受到伤害后"钩子(如郭嘉【天妒】)。srcType 标识伤害来源类型('sha'/'duel'/'aoe'),现有钩子忽略,备将来用。
-  if(amount>0) triggerHook(g, seat, 'onDamaged', { amount, sourceSeat, srcType });
+  // 实际受伤且存活 -> 触发"受到伤害后"钩子(如郭嘉【遗计】)。srcType 标识伤害来源类型('sha'/'duel'/'aoe'/'delay'/'xiaoguo'),
+  // 用于事后接回被打断的流程(见下)。
+  if(amount>0){
+    // 郭嘉【遗计】这类"受伤后可选发动、需要挂起等玩家决定"的钩子,和濒死求桃是同一类问题:
+    // 钩子在 dealDamage 内部同步执行,而 dealDamage 的调用方几乎都有自己的收尾尾巴(如
+    // respondShan 的 `g.pending=null;finishSingleShaTarget(g);`),如果钩子设了新 pending 却
+    // 没有信号告诉调用方"别做你自己的收尾了",调用方的尾巴会在同一个 tx 里紧接着把这个新
+    // pending 立刻覆盖掉,pending 从未真正对任何客户端可见过。这里用"钩子执行前后 g.pending
+    // 引用是否变化"来判断钩子有没有开出一个需要打断当前流程的新 pending——钩子如果想要这个
+    // 效果,必须真的重新赋值一个新对象给 g.pending(如 `g.pending={type:'yijiAsk',...}`),
+    // 单纯读取/不动 g.pending 则不会误判。
+    const pendingBefore = g.pending;
+    triggerHook(g, seat, 'onDamaged', { amount, sourceSeat, srcType });
+    if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
+  }
   return false;
 }
 // ===== 濒死求桃:血量<=0 不立刻死亡,按座位顺序逐个询问是否打出【桃】救援 =====
@@ -1061,6 +1093,16 @@ function finishDying(g, actuallyDied){
   }
   g.pending=null;
   if(checkWin(g)) return;
+  resumeAfterInterrupt(g, resume, seat);
+}
+// resumeAfterInterrupt: "临时打断了原有流程、事后要接回被打断那条流程尾巴"这类场景的统一
+// 出口——目前有两个来源会走到这里:①濒死解决(finishDying,可能真死也可能被救回);
+// ②郭嘉【遗计】的可选发动结算完毕(不会死人,但同样需要接回被打断的流程)。两者的 resume
+// 结构完全一致(`{type:srcType,...}`,取值就是 dealDamage 的 srcType 参数,'delay'/'xiaoguo'
+// 需要额外字段,由各自的挂起入口负责补全——见 continueDelayResolution/finishGuicai 的
+// delayJudge 分支/respondXiaoguoChoice),seat 是被打断的那个人(dealDamage 的 seat 参数,
+// 也就是 resume.type==='sha'/'duel'/'aoe' 时这里需要的那个座位号)。
+function resumeAfterInterrupt(g, resume, seat){
   if(resume.type==='duel'){
     if(!g.players[g.turn].alive){
       startTurn(g, nextAlive(g, g.turn));
@@ -1071,21 +1113,71 @@ function finishDying(g, actuallyDied){
     aoeAdvance(g, seat);
   } else if(resume.type==='delay'){
     // 判定区的牌(如闪电)致命挂起后的接回:真死了就换到下一个存活玩家的回合(该玩家的判定阶段
-    // 从头 startTurn);被桃救回就继续处理这位玩家判定区剩余的牌(可能再次挂起濒死或鬼才,机制
-    // 天然支持连续多张——具体怎么继续、怎么区分"新挂起是濒死还是鬼才",见 continueDelayResolution)。
+    // 从头 startTurn);被桃救回(或郭嘉遗计这种非致命打断)就继续处理这位玩家判定区剩余的牌
+    // (可能再次挂起濒死或鬼才或遗计,机制天然支持连续多次——具体怎么继续、怎么区分新挂起的
+    // 类型,见 continueDelayResolution)。
     if(!g.players[resume.seat].alive){
       startTurn(g, nextAlive(g, resume.seat));
     } else {
       continueDelayResolution(g, resume.seat);
     }
   } else if(resume.type==='xiaoguo'){
-    // 骁果"受到1点伤害"选项致命挂起后的接回:不管目标是否真死,都继续找下一个有资格的
-    // 候选乐进(或最终真正切换回合)——resume 在 respondXiaoguoChoice 里已经带上完整信息。
+    // 骁果"受到1点伤害"选项致命挂起(或遗计这种非致命打断)后的接回:不管目标是否真死,都
+    // 继续找下一个有资格的候选乐进(或最终真正切换回合)——resume 在 respondXiaoguoChoice
+    // 里已经带上完整信息。
     advanceXiaoguo(g, resume.endingSeat, resume.lastAsker);
   } else { // 'sha' 及其它:攻击者继续出牌阶段——若这是方天画戟排队目标中的一个,继续问下一个而不是直接回play
-    // (checkWin 在本函数前面已经调过一次,这里不用 finishSingleShaTarget 以免重复调用)
     if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
   }
+}
+// ===== 郭嘉【遗计】:受伤后可选发动,看牌堆顶2张、分给任意角色(含自己) =====
+// respondYijiAsk: 仅本人(pending.seat)可响应。不发动/发动都要用 resumeAfterInterrupt 接回被
+// 打断的流程(resume 是 onDamaged 钩子里存的 {type:srcType,...},和濒死解决同一套约定)——
+// 不能像最初设想那样硬编码 phase='play',因为遗计可能在决斗/AOE/延时锦囊判定/骁果等非
+// "出牌阶段互殴"的场景中触发,这些场景各自需要接回不同的尾巴。
+function respondYijiAsk(activate){
+  tx(g=>{
+    if(g.phase!=='yijiAsk'||!g.pending||g.pending.type!=='yijiAsk'||g.pending.seat!==mySeat) return g;
+    const seat=mySeat, resume=g.pending.resume;
+    if(!activate){
+      g.log=pushLog(g.log, g.players[seat].name+'：不发动【遗计】');
+      g.pending=null;
+      if(checkWin(g)) return g;
+      resumeAfterInterrupt(g, resume, seat);
+      return g;
+    }
+    const n = Math.min(2, (g.deck||[]).length);
+    if(n===0){ // 双重保险,理论上 onDamaged 已经拦过(牌堆空时钩子根本不会挂起这个 pending)
+      g.pending=null;
+      if(checkWin(g)) return g;
+      resumeAfterInterrupt(g, resume, seat);
+      return g;
+    }
+    const cards = g.deck.splice(0, n); // 从牌堆顶取,不进日志(私密信息)
+    g.pending = { type:'yijiAssign', seat, cards, resume };
+    g.phase='yijiAssign';
+    g.log=pushLog(g.log, g.players[seat].name+' 发动【遗计】,正在分配牌…'); // 不写牌面
+    return g;
+  });
+}
+// respondYijiAssign: 仅本人可响应。assignments 是长度等于 cards.length 的座位号数组(cards[i]
+// 交给 assignments[i]),可以重复(都给自己/都给同一人/分给不同人都合法)。
+function respondYijiAssign(assignments){
+  tx(g=>{
+    if(g.phase!=='yijiAssign'||!g.pending||g.pending.type!=='yijiAssign'||g.pending.seat!==mySeat) return g;
+    const {cards, resume}=g.pending;
+    if(!Array.isArray(assignments) || assignments.length!==cards.length) return g;
+    for(const seat of assignments){
+      const tgt=g.players[seat];
+      if(!tgt || !tgt.alive) return g; // 任一目标非法/已阵亡,整体拒绝,状态不变(双重保险)
+    }
+    assignments.forEach((seat, i)=>{ g.players[seat].hand.push(cards[i]); });
+    g.log=pushLog(g.log, g.players[mySeat].name+' 【遗计】分配了'+cards.length+'张牌给 '+assignments.map(s=>g.players[s].name).join('、'));
+    g.pending=null;
+    if(checkWin(g)) return g;
+    resumeAfterInterrupt(g, resume, mySeat);
+    return g;
+  });
 }
 // ===== 方天画戟:队列驱动的多目标杀,共用出口 =====
 // finishSingleShaTarget: 一个目标的杀响应/判定彻底结束时统一走这里(毅重/仁王盾无效、八卦阵/鬼才改判
@@ -1901,10 +1993,33 @@ function processOneDelayCard(g, seat){
   if(maybeGuicai(g, seat, judgeCard, {kind:'delayJudge', seat, trickName:card.name, card})==='pending') return 'pending';
   return finishDelayCard(g, seat, spec, judgeCard, card);
 }
+// maybeTiandu: 郭嘉【天妒】——若 seat 是郭嘉(caps.tiandu)且这张判定牌确实在弃牌堆里
+// (judge() 已经把牌推进 g.discard),从弃牌堆移除、改放进郭嘉手牌,记日志。返回 true=已获得,
+// 返回 false=不是郭嘉或条件不满足(调用方不需要做任何额外处理,判定牌该在哪还在哪)。
+// 边界(官方FAQ已确认,当前项目无此场景但先注释说明):由他人技能造成的判定(如马超【铁骑】,
+// 判定归属永远是马超本人而不是郭嘉,除非将来某种机制打破"一人一将"的假设)、或郭嘉的技能造成
+// 他人的判定,都不适用天妒——这里只处理"seat 自己进行的判定"这一种情况,调用方传入的 seat
+// 必须是判定的真正归属者(闪电/兵粮寸断/乐不思蜀是判定区所有者、铁骑是马超本人、洛神是甄姬本人)。
+// 注意:天妒作用于"判定牌"本身(finalCard,judge() 抽出来的那张牌),和延时锦囊牌自身
+// (闪电/乐不思蜀/兵粮寸断这张锦囊卡)是两个不同的对象、两件独立的事——天妒只影响判定牌的
+// 归属,不影响延时锦囊卡本身该弃置还是传给下家(那部分逻辑不变,continueTiandu 无关)。
+function maybeTiandu(g, seat, card){
+  const p=g.players[seat];
+  if(!p || !hasCap(p,'tiandu') || !card) return false;
+  const idx=g.discard.lastIndexOf(card);
+  if(idx<0) return false;
+  g.discard.splice(idx,1);
+  p.hand.push(card);
+  g.log=pushLog(g.log, p.name+' 【天妒】发动,获得判定牌【'+card.name+'】');
+  return true;
+}
 // finishDelayCard: 用最终判定牌(可能被鬼才替换过)调用该延时锦囊的 effect,处理去向(传下家/弃置)。
 // 返回 'pending'=effect 内部触发了濒死(如闪电致命,牌本身仍正常进弃牌堆,和是否致命无关)、'done'=处理完毕。
 function finishDelayCard(g, seat, spec, finalCard, card){
   const result=spec.effect(g, seat, finalCard, card);
+  // 天妒:判定牌(finalCard)生效后,若 seat 是郭嘉可以收下——这是独立于延时锦囊卡(card)本身
+  // 去向的另一件事,不管 card 接下来是传给下家还是弃置,finalCard 该不该被天妒收走都不受影响。
+  maybeTiandu(g, seat, finalCard);
   if(typeof result==='number' && g.players[result]){
     g.players[result].delays = g.players[result].delays || [];
     g.players[result].delays.push(card);
@@ -1922,13 +2037,13 @@ function discardOrVanish(g, card){
 }
 // continueDelayResolution: resolveDelayTricks(g,seat) 结果的统一处理——startTurn、finishDying 的
 // resume.type==='delay' 分支、finishGuicai 的 resume.kind==='delayJudge' 分支三处共用。
-// 'pending' 时:若新挂起是濒死(g.pending.type==='dying'),它的 resume 只有 {type:'delay'}(因为
-// dealDamage/startDying 只知道 srcType 字符串,不知道 seat),这里补上 seat;若新挂起是鬼才
-// (g.pending.type==='guicai'),它的 resume 在 maybeGuicai 里已经自带完整信息,绝不能覆盖。
-// 'done' 时统一走 enterDrawPhase,进入(或跳过)摸牌阶段。
+// 'pending' 时:若新挂起是濒死或郭嘉【遗计】(g.pending.type==='dying'||'yijiAsk'),它的 resume
+// 只有 {type:'delay'}(因为 dealDamage/startDying 只知道 srcType 字符串,不知道 seat),这里补上
+// seat;若新挂起是鬼才(g.pending.type==='guicai'),它的 resume 在 maybeGuicai 里已经自带完整
+// 信息,绝不能覆盖。'done' 时统一走 enterDrawPhase,进入(或跳过)摸牌阶段。
 function continueDelayResolution(g, seat){
   if(resolveDelayTricks(g, seat)==='pending'){
-    if(g.pending.type==='dying') g.pending.resume={type:'delay', seat};
+    if(g.pending.type==='dying' || g.pending.type==='yijiAsk') g.pending.resume={type:'delay', seat};
     return;
   }
   continueTurnStart(g, seat);
@@ -1971,6 +2086,12 @@ function finishLuoshenJudge(g, seat, card){
   const p=g.players[seat];
   if(isRed(card)){
     g.log=pushLog(g.log, p.name+' 发动【洛神】,判定为红,洛神结束');
+    // 天妒:洛神判红时判定牌留在弃牌堆(洛神本身没有拿走它),若 seat 恰好是郭嘉可以额外收下——
+    // 这是唯一需要在这里调用 maybeTiandu 的分支。黑色分支(下面 else)本来就会把判定牌搬进
+    // p.hand,如果也调用 maybeTiandu 会变成"先被天妒判定为已在弃牌堆里"(此时其实不在,已被
+    // 洛神搬进手牌了)而返回 false、不会真的重复移动,但语义上容易让人误以为两个技能在竞争
+    // 同一张牌,所以刻意不在黑色分支调用,避免这种"看起来在做什么、实际上什么也没做"的死代码。
+    maybeTiandu(g, seat, card);
     enterDrawPhase(g);
   } else {
     const idx=g.discard.lastIndexOf(card);

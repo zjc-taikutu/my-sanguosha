@@ -101,12 +101,22 @@ DELAY_TRICKS['兵粮寸断'] = {
 // 技能有两种表达:被动能力挂 caps(经 generalHasCap/generalCapValue 查),触发型挂 hooks(经 triggerHook 分发);统一经 getGeneral(id) 取用。
 const GENERALS = {
   zhangfei:      { id:'zhangfei',      name:'张飞',   maxHp:4, skill:'咆哮', desc:'出牌阶段,你可以使用任意数量的【杀】。', caps:{ unlimitedSha:true } },
-  guojia:        { id:'guojia',        name:'郭嘉',   maxHp:3, skill:'天妒', desc:'当你受到伤害后,你摸一张牌(受到几点伤害就摸几张)。',
+  guojia: { id:'guojia', name:'郭嘉', maxHp:3, skill:'天妒/遗计',
+    desc:'天妒:当你的判定牌生效后,你可以获得此牌。遗计:当你受到1点伤害后,你可以选择观看牌堆顶两张牌,然后将这两张牌分别交给任意角色(可以是自己)。',
+    caps:{ tiandu:true },
     hooks:{
-      // 受伤后摸等量牌。ctx={amount, sourceSeat};直接在当前 tx 的 g 上操作,不开新事务。
       onDamaged(g, seat, ctx){
-        drawN(g, seat, ctx.amount);
-        g.log = pushLog(g.log, g.players[seat].name+' 【天妒】发动,摸'+ctx.amount+'张牌');
+        const p=g.players[seat];
+        if(!p || !p.alive || (g.deck||[]).length===0) return; // 牌堆空则无法发动,静默跳过
+        // resume 记下"遗计问完之后该接回哪条被打断的流程"——取值就是 dealDamage 本来就在传的
+        // ctx.srcType,和濒死求桃(startDying)同一套约定,复用同一个 resumeAfterInterrupt 出口。
+        // 'delay'/'xiaoguo' 这两种 srcType 需要的额外字段(seat/endingSeat/lastAsker),由各自
+        // 原有的挂起入口负责补全(见 continueDelayResolution/finishGuicai 的 delayJudge 分支/
+        // respondXiaoguoChoice,这几处已经对 g.pending.type==='dying' 做同样的事,这次一并
+        // 扩展到 'yijiAsk'),这里不需要关心这些细节。
+        g.pending = { type:'yijiAsk', seat, resume:{type:ctx.srcType} };
+        g.phase = 'yijiAsk';
+        g.log = pushLog(g.log, p.name+' 是否发动【遗计】,观看牌堆顶两张牌…');
       }
     } },
   sunshangxiang: { id:'sunshangxiang', name:'孙尚香', maxHp:4, skill:'枭姬', desc:'当你失去装备区里的一张装备牌时,你摸两张牌。', hooks:{ onLoseEquip:(g, seat, ctx)=>{ const n = 2 * (ctx && ctx.count || 1); drawN(g, seat, n); g.log=pushLog(g.log, g.players[seat].name+' 发动【枭姬】,摸'+n+'张牌'); } } },
