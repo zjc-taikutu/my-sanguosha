@@ -3,19 +3,22 @@
 // 是唯一查询入口同一个道理,业务层永远调这个函数,不硬编码路径。"以后换图"只需要覆盖
 // assets/generals/{id}.svg(或同 id 的 .png,见 avatarError),不用碰这里的代码。
 function generalAvatarSrc(id){ return 'assets/generals/'+id+'.svg'; }
-// avatarError: <img onerror> 挂载。第一次失败(默认的 .svg 加载不到)尝试同 id 的 .png——
-// 这是为了"以后素材可能换成同名png"这个场景不用改代码,只要文件名前缀(id)不变。
-// 第二次仍失败(png 也没有,比如日后新增武将暂时没配图)才真正隐藏 <img>、显示占位块——
+// avatarError: <img onerror> 挂载。依次尝试 svg(默认) → png → jpg → jpeg → webp → gif,
+// 这是为了"以后素材可能换成同 id 的其它常见格式"这个场景不用改代码,只要文件名前缀(id)不变。
+// 全部格式都试完仍失败(比如日后新增武将暂时没配图)才真正隐藏 <img>、显示占位块——
 // 不能只隐藏不管,浏览器会在原地画一个"图裂了"的破图标,必须真正 display:none 才行。
+const AVATAR_FALLBACK_EXTS = ['png','jpg','jpeg','webp','gif']; // 默认从 .svg 开始,失败后按此顺序依次重试
 function avatarError(imgEl){
-  if(imgEl.dataset.triedPng){
+  const tried = imgEl.dataset.avatarTry ? parseInt(imgEl.dataset.avatarTry, 10) : 0;
+  if(tried >= AVATAR_FALLBACK_EXTS.length){
     imgEl.style.display='none';
     const ph = imgEl.parentElement && imgEl.parentElement.querySelector('.avatar-placeholder');
     if(ph) ph.style.display='flex';
     return;
   }
-  imgEl.dataset.triedPng='1';
-  imgEl.src = imgEl.src.replace(/\.svg(\?.*)?$/, '.png');
+  const nextExt = AVATAR_FALLBACK_EXTS[tried];
+  imgEl.dataset.avatarTry = String(tried+1);
+  imgEl.src = imgEl.src.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, '.'+nextExt);
 }
 
 // ---------- targeting UI state ----------
