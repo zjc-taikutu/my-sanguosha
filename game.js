@@ -861,11 +861,12 @@ function playShaFangtian(cardIdx, targets){
     return g;
   });
 }
-// duanLiang: 徐晃【断粮】——出牌阶段限一次,弃置任意一张手牌,视为对一名其他角色使用了一张
-// 【兵粮寸断】。不需要真的持有兵粮寸断这张牌:弃掉的牌是真实牌、正常进弃牌堆;判定区里放的
-// 是临时构造的虚拟对象 {name:'兵粮寸断', virtual:true},走和真实兵粮寸断完全一样的
-// startTrick/resolveTrick/回合开始判定流程(可被无懈可击抵消),虚拟牌离场时经 discardOrVanish
-// 直接消失,不会进弃牌堆重新流通、污染牌堆构成。真实规则断粮无距离限制,这里不做距离校验。
+// duanLiang: 徐晃【断粮】——出牌阶段限一次,将一张黑色基本牌或黑色装备牌当【兵粮寸断】
+// 使用,距离2以内。官方规则不是"弃任意牌"(此前的实现有误);选中的这张真实牌直接传给
+// startTrick 的 info.card,走和真实兵粮寸断完全一样的 startTrick/resolveTrick/回合开始判定
+// 流程(可被无懈可击抵消)——resolveTrick 按 info.trick 字段('兵粮寸断')分派,discardOrVanish
+// 只看 card.virtual 标记,两者都跟牌的真实身份无关,不需要构造虚拟对象,判定完直接以真实
+// 身份进弃牌堆即可。距离校验复用和杀同一套 distance(g,mySeat,targetSeat)<=2。
 function duanLiang(cardIdx, targetSeat){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
@@ -873,12 +874,15 @@ function duanLiang(cardIdx, targetSeat){
     if(!hasCap(me,'duanliang') || g.duanliangUsed) return g;
     const card=me.hand[cardIdx];
     if(!card) return g;
+    const isBlack = card.suit==='♠' || card.suit==='♣';
+    const isBasicOrEquip = BASIC_CARDS.includes(card.name) || !!getEquip(card.name);
+    if(!isBlack || !isBasicOrEquip) return g;
     if(targetSeat===mySeat || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
+    if(distance(g, mySeat, targetSeat) > 2) return g;
     g.duanliangUsed=true;
     me.hand.splice(cardIdx,1);
-    g.discard.push(card); // 弃置的牌是真实牌,正常进弃牌堆
-    g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【断粮】,视为对 '+g.players[targetSeat].name+' 使用了一张【兵粮寸断】');
-    startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:{name:'兵粮寸断', virtual:true}});
+    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
+    startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:card});
     return g;
   });
 }

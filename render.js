@@ -42,10 +42,11 @@ let fangtianMode = false;
 let fangtianPicks = [];          // 已选额外目标座位号,最多 3 个(含最少1个,不强制选满)
 function resetFangtian(){ fangtianMode=false; fangtianPicks=[]; }
 // 徐晃【断粮】:出牌阶段点"发动断粮"进选牌+选目标模式(纯客户端,不入库)。
-// 先点一张手牌(任意牌都行,不检查牌名)选中,再点一名其他玩家座位提交;和普通出牌选目标
-// 的交互很像,但不走 CARD_PLAYS/playCard(断粮不认牌名,是独立的技能动作)。
+// 先点一张黑色基本牌/黑色装备牌(官方规则,不是任意牌)选中,再点距离2以内的一名其他玩家
+// 座位提交;和普通出牌选目标的交互很像,但不走 CARD_PLAYS/playCard(断粮是独立的技能动作,
+// 选中的这张牌本身当【兵粮寸断】使用,不是弃置)。
 let duanliangMode = false;
-let duanliangCardIdx = null;    // 已选中要弃置的手牌下标(单选)
+let duanliangCardIdx = null;    // 已选中要当兵粮寸断使用的手牌下标(单选)
 function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 // 乐进【骁果】:点"发动"进选牌模式(纯客户端,不入库),只有基本牌可点,点了直接提交(仿鬼才)。
 let xiaoguoMode = false;
@@ -443,13 +444,22 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
     }
-    // 徐晃【断粮】选目标:已选中一张要弃的牌后,点一名其他存活玩家提交(无距离限制)。
+    // 徐晃【断粮】选目标:已选中一张黑色基本牌/黑色装备牌后,点距离2以内的其他存活玩家提交
+    // (官方规则"对距离2以内的角色使用",和杀的攻击距离同一套 distance() 口径,复用同款
+    // "够不着"暗色点线+角标的视觉写法)。
     if(duanliangMode && duanliangCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
-      // 同上:idx 挂载时冻结,不在点击时才读 duanliangCardIdx
-      const idx=duanliangCardIdx;
-      d.style.cursor='pointer';
-      d.style.outline='2px dashed var(--cinnabar-bright)';
-      d.onclick=()=>{ confirmAndPlay('弃置一张牌,对 '+g.players[i].name+' 发动【断粮】(视为使用【兵粮寸断】)？', ()=>duanLiang(idx, i)); };
+      const inRange = distance(g, mySeat, i) <= 2;
+      if(inRange){
+        // 同上:idx 挂载时冻结,不在点击时才读 duanliangCardIdx
+        const idx=duanliangCardIdx;
+        d.style.cursor='pointer';
+        d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.onclick=()=>{ confirmAndPlay('将这张牌当【兵粮寸断】使用,对 '+g.players[i].name+' 发动【断粮】？', ()=>duanLiang(idx, i)); };
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='距离外（距离 '+distance(g,mySeat,i)+' ＞ 2）';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
+      }
     }
     // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
     if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
@@ -1127,10 +1137,10 @@ function renderControls(g){
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetFangtian(); render(g); }; c.appendChild(cb);
     } else if(duanliangMode){
-      // 断粮选牌+选目标模式:先选一张手牌(任意牌都行),再点上方一名其他玩家提交。提供取消。
+      // 断粮选牌+选目标模式:先选一张黑色基本牌/黑色装备牌,再点距离2以内的其他玩家提交。提供取消。
       setBanner(duanliangCardIdx===null
-        ? '【断粮】选择一张要弃置的手牌(任意牌都行)。'
-        : '已选中要弃置的牌,点上方一名其他玩家,视为对其使用【兵粮寸断】(或点牌取消选中)。');
+        ? '【断粮】选择一张黑色基本牌或黑色装备牌当【兵粮寸断】使用。'
+        : '已选中,点上方距离2以内的一名其他玩家,当【兵粮寸断】对其使用(或点牌取消选中)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetDuanliang(); render(g); }; c.appendChild(cb);
     } else if(zhangbaMode){
@@ -1164,8 +1174,11 @@ function renderControls(g){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);
     }
-    // 断粮入口:出牌阶段限一次,手牌非空才值得开这个入口(没牌可弃就跟没有技能一样不渲染)。
-    if(!zhangbaMode && !duanliangMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && (me.hand||[]).length>0){
+    // 断粮入口:出牌阶段限一次,手牌里至少有一张黑色基本牌/黑色装备牌才值得开这个入口
+    // (没有符合条件的牌就跟没有技能一样不渲染,不能只看"手牌非空"——那样会出现点进去
+    // 一张能选的牌都没有的死胡同界面)。
+    const hasDuanliangCard = (me.hand||[]).some(c=>(c.suit==='♠'||c.suit==='♣') && (BASIC_CARDS.includes(c.name)||!!getEquip(c.name)));
+    if(!zhangbaMode && !duanliangMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && hasDuanliangCard){
       const db=document.createElement('button'); db.className='ghost';
       db.textContent='发动【断粮】'; db.onclick=()=>{ selectedCardIdx=null; duanliangMode=true; duanliangCardIdx=null; render(g); }; c.appendChild(db);
     }
@@ -1230,9 +1243,12 @@ function renderHand(g){
       usable=true;
       onClick=()=>{ qiaobianCardIdx = (qiaobianCardIdx===idx?null:idx); render(g); };
     } else if(g.phase==='play'&&myTurn&&duanliangMode){
-      // 断粮选牌模式:任意一张牌都可以选(不检查牌名),点= 切换选中(单选,再点别的牌会换选中)
-      usable=true;
-      onClick=()=>{ duanliangCardIdx = (duanliangCardIdx===idx?null:idx); render(g); };
+      // 断粮选牌模式:官方规则只能选黑色基本牌或黑色装备牌(不是任意牌),不满足条件的牌
+      // 照常灰显不可点。点=切换选中(单选,再点别的合法牌会换选中)。
+      const isBlack = card.suit==='♠' || card.suit==='♣';
+      const isBasicOrEquip = BASIC_CARDS.includes(card.name) || !!getEquip(card.name);
+      usable = isBlack && isBasicOrEquip;
+      if(usable) onClick=()=>{ duanliangCardIdx = (duanliangCardIdx===idx?null:idx); render(g); };
     } else if(g.phase==='play'&&myTurn&&fangtianMode){
       // 方天画戟选目标模式:手牌只有这一张(触发条件已限定),不需要再点手牌本身,
       // 目标全部在座位区(见下方 seat 循环里的 fangtianMode 分支)选择,这里留空不可点。

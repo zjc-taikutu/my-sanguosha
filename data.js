@@ -154,7 +154,7 @@ const GENERALS = {
     desc:'出牌阶段,你使用【杀】指定一名角色为目标后,若该角色手牌数≥你的体力值,或手牌数≤你的攻击范围,你可以令此【杀】不可被【闪】抵消。',
     caps:{ liegong:true } },
   xuhuang:       { id:'xuhuang',       name:'徐晃',   maxHp:4, skill:'断粮',
-    desc:'出牌阶段限一次,你可以弃置一张牌,然后选择一名其他角色,视为你对其使用一张【兵粮寸断】。',
+    desc:'出牌阶段限一次,你可以将一张黑色基本牌或黑色装备牌当【兵粮寸断】使用(距离2以内)。',
     caps:{ duanliang:true } },
   yujin:         { id:'yujin',         name:'于禁',   maxHp:4, skill:'毅重',
     desc:'锁定技,若你的装备区里没有防具牌,黑色【杀】对你无效。',
