@@ -108,9 +108,12 @@ let logModalOpen = false;
 // 永远算不出"有新增",toast 从触顶那一刻起永久失效,直到刷新页面重置这个变量。按"最新一条
 // 日志的文本是否变化"判断不受数组长度封顶影响,数组内容依然在滚动、最新一条文本一直在变。
 // 已知的小代价:如果连续两条日志文本恰好完全相同(比如两人先后都摸了两张牌,文案巧合一致),
-// 这里会漏弹一次——toast 本来就是"尽量提醒瞥一眼"而非"逐条必达"的定位(多条连续新日志时
-// 本来就只弹最后一条,不排队),这个概率很低的边界情况不值得为它引入递增序号之类的额外机制
+// 这里会漏弹一次——这个概率很低的边界情况不值得为它引入递增序号之类的额外机制
 // (那需要改 pushLog 签名和所有调用点)。
+// 【排队展示,不再只弹最后一条】曾经这里"多条连续新日志只弹最后一条",导致延时锦囊判定
+// (乐不思蜀/兵粮寸断的"判定为XX,生效/无效"这条中间结果)被同一次事务里紧跟着的下一条日志
+// 淹没、玩家完全看不到判定过程发生了什么——已改成把本次新增的全部日志交给 queueLogToasts
+// 排队依次展示(见该函数),上限5条防止无懈连锁反应这类极端场景排队太久。
 let lastToastedLogText = undefined;
 // colorizeLogLine: 只在 toast 这一处渲染路径把日志行里出现的玩家名字染上座位色(呼应座位卡片
 // 的 seatColor),不碰 g.log 本身的存储(依然是纯字符串,日志面板 renderLogModal 不受影响)。
@@ -138,6 +141,27 @@ function showLogToast(g, text){
   el.classList.remove('show');
   void el.offsetWidth;
   el.classList.add('show');
+}
+// queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
+// 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
+// 上限 5 条:无懈连锁反应这种极端场景可能一次性新增十几条日志,全部排队展示会等很久、
+// 影响体验,这里只展示"最近的几条"(丢弃更早的),不追求条条必达——toast 本来就是
+// "尽量提醒瞥一眼"的定位,完整过程始终能在 #logBtn 的日志面板里查看。
+const LOG_TOAST_QUEUE_CAP = 5;
+let toastQueue = [];
+let toastQueueRunning = false;
+function queueLogToasts(g, lines){
+  const capped = lines.length > LOG_TOAST_QUEUE_CAP ? lines.slice(-LOG_TOAST_QUEUE_CAP) : lines;
+  toastQueue.push(...capped);
+  if(toastQueueRunning) return;
+  toastQueueRunning = true;
+  const step=()=>{
+    if(toastQueue.length===0){ toastQueueRunning=false; return; }
+    const text = toastQueue.shift();
+    showLogToast(g, text);
+    setTimeout(step, 1200);
+  };
+  step();
 }
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
@@ -533,17 +557,26 @@ function render(g){
   // (Firebase 是实时推送,面板开着的时候底下状态可能还在变,不刷新就会显示过期日志)。
   if(logModalOpen) renderLogModal(g);
 
-  // 日志 toast:有新日志才弹,只弹最新一条(不排队)——连续好几条(比如无懈连锁反应)只看
-  // 最后结果,完整过程本来就在 #logBtn 的日志面板里,toast 只负责"提醒瞥一眼",不保证条条都看到。
-  // 按"最新一条文本是否变化"判断,不按数组长度(长度会被 pushLog 的 slice(-40) 封顶,详见上面
-  // lastToastedLogText 声明处的说明)。
+  // 日志 toast:有新日志才弹,把本次新增的日志(可能不止一条,比如延时锦囊判定这类一次事务
+  // 里连续 pushLog 好几次)排队依次展示——早期版本"只弹最新一条"会把中间结果(比如判定牌本身
+  // 生效/无效那条)淹没掉,只看到判定后紧跟着的下一条日志,看不出判定过程发生了什么。
+  // 定位新增日志的起点:不能按数组长度(会被 pushLog 的 slice(-40) 封顶,详见上面
+  // lastToastedLogText 声明处的说明),而是从数组末尾往前找"上次已展示的那条文本"出现的位置——
+  // 找不到(日志被封顶顶掉、或全新房间)就只展示这次拿到的全部(newLines,由下面的上限兜底)。
   const log = g.log||[];
-  const latestLog = log.length ? log[log.length-1] : null;
   if(lastToastedLogText===undefined){
-    lastToastedLogText = latestLog; // 第一次 render(加入房间/刷新页面那一刻),只记文本,不弹历史
-  } else if(latestLog!==null && latestLog!==lastToastedLogText){
-    showLogToast(g, latestLog);
-    lastToastedLogText = latestLog;
+    lastToastedLogText = log.length ? log[log.length-1] : null; // 第一次render,只记文本,不弹历史
+  } else if(log.length){
+    let startIdx = log.length; // 默认:没有新增
+    for(let i=log.length-1; i>=0; i--){
+      if(log[i]===lastToastedLogText){ startIdx=i+1; break; }
+      if(i===0) startIdx=0; // 没找到,说明这段时间新增了不止能追溯的量,从头展示这次拿到的全部
+    }
+    const newLines = log.slice(startIdx);
+    if(newLines.length){
+      queueLogToasts(g, newLines);
+      lastToastedLogText = log[log.length-1];
+    }
   }
 }
 

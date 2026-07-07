@@ -76,7 +76,13 @@ DELAY_TRICKS['闪电'] = {
 DELAY_TRICKS['乐不思蜀'] = {
   onlySelf:false,
   effect:(g, seat, judgeCard, card)=>{
-    if(judgeCard.suit!=='♥') g.skipPlay=true;
+    const name=g.players[seat].name;
+    if(judgeCard.suit!=='♥'){
+      g.skipPlay=true;
+      g.log=pushLog(g.log, name+' 判定不为红桃,【乐不思蜀】生效,跳过出牌阶段');
+    } else {
+      g.log=pushLog(g.log, name+' 判定为红桃,【乐不思蜀】无效');
+    }
   }
 };
 // 兵粮寸断:只能放别人判定区。官方原文"若判定结果不为梅花,则跳过其摸牌阶段"——精确到
@@ -93,7 +99,13 @@ DELAY_TRICKS['乐不思蜀'] = {
 DELAY_TRICKS['兵粮寸断'] = {
   onlySelf:false,
   effect:(g, seat, judgeCard, card)=>{
-    if(judgeCard.suit!=='♣') g.skipDraw=true;
+    const name=g.players[seat].name;
+    if(judgeCard.suit!=='♣'){
+      g.skipDraw=true;
+      g.log=pushLog(g.log, name+' 判定不为梅花,【兵粮寸断】生效,跳过摸牌阶段');
+    } else {
+      g.log=pushLog(g.log, name+' 判定为梅花,【兵粮寸断】无效');
+    }
   }
 };
 
