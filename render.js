@@ -1,13 +1,19 @@
 // ---------- 座位卡片头像 ----------
 // generalAvatarSrc: 按 id 拼路径的约定式查询(不在 GENERALS 表里存 img 字段)——和 getGeneral(id)
 // 是唯一查询入口同一个道理,业务层永远调这个函数,不硬编码路径。"以后换图"只需要覆盖
-// assets/generals/{id}.svg(或同 id 的 .png,见 avatarError),不用碰这里的代码。
-function generalAvatarSrc(id){ return 'assets/generals/'+id+'.svg'; }
-// avatarError: <img onerror> 挂载。依次尝试 svg(默认) → png → jpg → jpeg → webp → gif,
+// assets/generals/{id}.jpg(或同 id 的其它格式,见 avatarError),不用碰这里的代码。
+function generalAvatarSrc(id){ return 'assets/generals/'+id+'.jpg'; }
+// avatarError: <img onerror> 挂载。依次尝试 jpg(默认) → jpeg → png → webp → gif → svg,
 // 这是为了"以后素材可能换成同 id 的其它常见格式"这个场景不用改代码,只要文件名前缀(id)不变。
 // 全部格式都试完仍失败(比如日后新增武将暂时没配图)才真正隐藏 <img>、显示占位块——
 // 不能只隐藏不管,浏览器会在原地画一个"图裂了"的破图标,必须真正 display:none 才行。
-const AVATAR_FALLBACK_EXTS = ['png','jpg','jpeg','webp','gif']; // 默认从 .svg 开始,失败后按此顺序依次重试
+// 【曾经的闪烁 bug】默认格式曾经是 svg,但项目里实际所有武将素材都是 .jpg,没有任何 .svg
+// 文件——导致每次渲染头像都必然先经历一次注定失败的 .svg 请求(等404)、fallback 到当时
+// 排在前面的 .png(同样不存在,再失败一次),才轮到 .jpg 成功显示,这个"连续多次失败再成功"
+// 的加载过程在每次页面重绘时都会重演一遍,就是头像闪烁的根源。现在默认直接用 jpg(和实际
+// 素材一致,一次请求即可成功),svg 挪到 fallback 链末尾(不再作为默认首选,仅保留兼容,
+// 万一以后真的换成 svg 素材)。
+const AVATAR_FALLBACK_EXTS = ['jpeg','png','webp','gif','svg']; // 默认从 .jpg 开始(和当前实际素材一致,一次请求即可成功,不再有先失败几次的闪烁),失败后依次重试其它格式
 function avatarError(imgEl){
   const tried = imgEl.dataset.avatarTry ? parseInt(imgEl.dataset.avatarTry, 10) : 0;
   if(tried >= AVATAR_FALLBACK_EXTS.length){
