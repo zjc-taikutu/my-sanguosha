@@ -27,6 +27,51 @@ function avatarError(imgEl){
   imgEl.src = imgEl.src.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, '.'+nextExt);
 }
 
+// ---------- 手牌卡面图(基本牌/普通锦囊/延时锦囊/装备牌,不含武将头像) ----------
+// CARD_PINYIN: 牌名(与 data.js 的 CARD_DESC/EQUIPS 的 key 完全对应)→拼音文件名前缀的
+// 约定式映射表,和 generalAvatarSrc 同一个道理——业务层永远查这张表,不硬编码路径。
+// 图片是通用美术图(按牌名配一张,不按具体花色点数),所以每张牌实例真实的花色点数信息
+// 靠 .corner 角标叠加显示,不受这张表影响。新增牌时在这里补一条映射即可。
+const CARD_PINYIN = {
+  '杀':'sha', '闪':'shan', '桃':'tao',
+  '决斗':'juedou', '无中生有':'wuzhongshengyou', '顺手牵羊':'shunshouqianyang',
+  '过河拆桥':'guohechaiqiao', '无懈可击':'wuxiekeji', '南蛮入侵':'nanmanruqin',
+  '万箭齐发':'wanjianqifa', '闪电':'shandian', '乐不思蜀':'lebusishu',
+  '兵粮寸断':'bingliangcunduan', '借刀杀人':'jiedaosharen', '五谷丰登':'wugufengdeng',
+  '桃园结义':'taoyuanjieyi',
+  '诸葛连弩':'zhugeliannu', '青釭剑':'qinggangjian', '青龙偃月刀':'qinglongyanyuedao',
+  '丈八蛇矛':'zhangbashemao', '贯石斧':'guanshifu', '方天画戟':'fangtianhuaji',
+  '麒麟弓':'qilingong', '寒冰剑':'hanbingjian', '古锭刀':'gudingdao',
+  '八卦阵':'baguazhen', '仁王盾':'renwangdun',
+  '的卢':'dilu', '绝影':'jueying', '爪黄飞电':'zhuahuangfeidian',
+  '赤兔':'chitu', '紫骍':'zixing', '大宛':'dawan', '骕骦':'sushuang'
+};
+// cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
+// null 处理成"没有图片可用",直接退化回纯文字(和 no-art 场景走同一条路径,不需要区分)。
+function cardImageSrc(name){
+  const py = CARD_PINYIN[name];
+  return py ? ('assets/cards/'+py+'.jpg') : null;
+}
+// CARD_FALLBACK_EXTS: 和 AVATAR_FALLBACK_EXTS 同款设计——默认 jpg 优先(cardImageSrc 已经
+// 直接返回 .jpg),这里只需要列出"jpg失败之后"还要依次重试的格式,不需要再包含jpg本身。
+const CARD_FALLBACK_EXTS = ['jpeg','png','webp','gif'];
+// cardImgError: <img onerror> 挂载。全部格式都试完仍失败(比如这张牌暂时还没准备图片素材)
+// 才真正隐藏 <img>、给 .card 加上 no-art 标记——让 CSS 把 .big 牌名大字显示出来兜底,
+// 不能让玩家看到"只有花色角标、看不出是什么牌"的半吊子状态(和 avatarError 的占位块是
+// 同一个"不能放着不管、必须真正切换成看得懂的兜底显示"的原则)。
+function cardImgError(imgEl){
+  const tried = imgEl.dataset.cardTry ? parseInt(imgEl.dataset.cardTry, 10) : 0;
+  if(tried >= CARD_FALLBACK_EXTS.length){
+    imgEl.style.display='none';
+    const cardEl = imgEl.closest('.card');
+    if(cardEl) cardEl.classList.add('no-art');
+    return;
+  }
+  const nextExt = CARD_FALLBACK_EXTS[tried];
+  imgEl.dataset.cardTry = String(tried+1);
+  imgEl.src = imgEl.src.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, '.'+nextExt);
+}
+
 // ---------- targeting UI state ----------
 let selectedCardIdx = null;
 // 丈八蛇矛「两张牌当杀」的纯客户端选牌状态(和 selectedCardIdx 互斥,从不入库)。
@@ -1329,7 +1374,11 @@ function renderHand(g){
     const duanliangPicked = duanliangMode && duanliangCardIdx===idx;
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
     el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qiaobianPicked)?' selected':'');
-    el.innerHTML='<div class="corner">'+(cardFace(card)||card.name)+'</div><div class="big">'+card.name+'</div><div class="corner br">'+card.name+'</div>';
+    const imgSrc = cardImageSrc(card.name);
+    const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
+    const cornerText = cardFace(card)||'';
+    el.innerHTML = imgTag+'<div class="corner">'+cornerText+'</div><div class="big">'+card.name+'</div><div class="corner br">'+cornerText+'</div>';
+    el.classList.toggle('no-art', !imgSrc); // 映射表里根本没有这张牌时,标记一下,让.big立刻可见(不用等onerror触发)
 
     let usable=false, onClick=null;
     if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.asking===mySeat){

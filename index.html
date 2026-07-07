@@ -182,13 +182,24 @@
   .hand{display:flex;gap:10px;flex-wrap:wrap;}
   .card{
     width:64px;height:92px;border-radius:10px;background:#f1ead9;color:#1a1410;
-    border:1px solid #00000022;position:relative;cursor:pointer;
+    border:1px solid #00000022;position:relative;cursor:pointer;overflow:hidden;
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 0 rgba(0,0,0,.3);transition:transform .08s;user-select:none;
   }
   .card:hover{transform:translateY(-4px);}
-  .card .big{font-size:30px;font-weight:800;}
-  .card .corner{position:absolute;top:5px;left:7px;font-size:13px;font-weight:700;}
+  /* 完整卡面图(assets/cards/,见 render.js 的 CARD_PINYIN/cardImageSrc):铺满卡片、
+     叠在最底层(z-index:0),.corner/.big 都要盖在它上面。 */
+  .card .card-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;}
+  /* .big 默认隐藏——有图片时不需要文字牌名;只有 .no-art(映射表缺失、或全部候选格式都
+     加载失败)时才显示出来兜底,保证"没图的牌"依然能看出是什么牌,不会退化成只有花色
+     角标的半吊子状态。display:block 和原来的默认行为一致(块级元素在 flex 父级下自动
+     blockify,视觉效果不变)。 */
+  .card .big{font-size:30px;font-weight:800;display:none;position:relative;z-index:1;}
+  .card.no-art .big{display:block;}
+  /* 角标叠加在图片上层:深色半透明底+圆角,保证图片背景再花哨,花色点数文字都清晰可读——
+     这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),不能被图片替代或省略。 */
+  .card .corner{position:absolute;top:5px;left:7px;font-size:13px;font-weight:700;z-index:1;
+    background:rgba(0,0,0,.55);border-radius:4px;padding:1px 4px;}
   .card .corner.br{top:auto;left:auto;bottom:5px;right:7px;transform:rotate(180deg);}
   .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
   .card.tao .big,.card.tao .corner{color:var(--jade);}
@@ -442,9 +453,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=54"></script>
-<script src="data.js?v=54"></script>
-<script src="game.js?v=54"></script>
-<script src="render.js?v=54"></script>
+<script src="config.js?v=55"></script>
+<script src="data.js?v=55"></script>
+<script src="game.js?v=55"></script>
+<script src="render.js?v=55"></script>
 </body>
 </html>
