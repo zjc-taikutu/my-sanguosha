@@ -54,8 +54,9 @@ DELAY_TRICKS['闪电'] = {
     return nextAlive(g, seat);
   }
 };
-// 乐不思蜀:只能放在别人判定区(onlySelf:false)。回合开始判定颜色(红/黑两大类,不像闪电要精确花色,
-// 用现有 isRed 即可):红色=判定失败,无效果;黑色=判定成功,跳过这个回合的出牌阶段——
+// 乐不思蜀:只能放在别人判定区(onlySelf:false)。回合开始判定,官方原文是"若判定结果不为
+// 红桃,则跳过其出牌阶段"——精确到花色(♥),不是红/黑两大类:红桃♥=判定失败,无效果;
+// 黑桃/梅花/方块(含方块这张"红色但不是红桃"的牌)=判定成功,跳过这个回合的出牌阶段。
 // 摸牌阶段依然正常摸牌,只是不给出牌机会,所以不能在这里直接切阶段(这时候还没摸牌),
 // 只能设一个标志位 g.skipPlay,交给 doDraw 在摸完牌、原本要进 play 阶段的那一刻消费掉。
 // 无论红黑,乐不思蜀本身都作废(不返回值,resolveDelayTricks 默认分支进弃牌堆);不产生伤害,
@@ -63,11 +64,13 @@ DELAY_TRICKS['闪电'] = {
 DELAY_TRICKS['乐不思蜀'] = {
   onlySelf:false,
   effect:(g, seat, judgeCard, card)=>{
-    if(!isRed(judgeCard)) g.skipPlay=true;
+    if(judgeCard.suit!=='♥') g.skipPlay=true;
   }
 };
-// 兵粮寸断:只能放别人判定区。判定黑色=判定失败,跳过该玩家这个回合的摸牌阶段;
-// 红色=判定成功,无效果。和乐不思蜀"黑色触发"的条件字面相同,但影响的阶段相反
+// 兵粮寸断:只能放别人判定区。官方原文"若判定结果不为梅花,则跳过其摸牌阶段"——精确到
+// 花色(♣),不是红/黑两大类:梅花♣=判定失败,无效果;红桃/黑桃/方块(含黑桃这张"黑色但
+// 不是梅花"的牌)=判定成功,跳过该玩家这个回合的摸牌阶段。和乐不思蜀"跳过阶段"的触发
+// 条件各自锁定不同花色,不是同一个"红/黑"判断的镜像,影响的阶段也相反
 // (兵粮寸断管摸牌 g.skipDraw,乐不思蜀管出牌 g.skipPlay)——两个标志位各管一段、
 // 互不覆盖;真正消费的地方是 enterDrawPhase(见 game.js),会同时兼顾两者同时命中的情况。
 // 无论红黑,兵粮寸断本身都作废(不返回值,resolveDelayTricks 默认分支进弃牌堆),不像
@@ -75,7 +78,7 @@ DELAY_TRICKS['乐不思蜀'] = {
 DELAY_TRICKS['兵粮寸断'] = {
   onlySelf:false,
   effect:(g, seat, judgeCard, card)=>{
-    if(!isRed(judgeCard)) g.skipDraw=true;
+    if(judgeCard.suit!=='♣') g.skipDraw=true;
   }
 };
 
