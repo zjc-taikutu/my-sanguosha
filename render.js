@@ -317,17 +317,23 @@ function render(g){
     return;
   }
   normalize(g);
-  // 轮到自己出牌阶段:语音+大字视觉双重提示,同一个触发时机、同一套去重判断——只在这个
-  // 阶段"刚刚开始"时提示一次,不会因为同一阶段内的其它状态变化(如无关的日志/别人操作)
-  // 而反复重复提示。key 用 (roundNum,turn) 组合:同一玩家在不同轮次会重新拿到同一个
-  // turn 座位号,必须靠 roundNum 区分,不能只用 turn 本身。
-  if(g.started && g.phase==='play' && g.turn===mySeat){
-    const turnKey = g.roundNum+'-'+g.turn;
-    if(lastAnnouncedTurnKey!==turnKey){
-      lastAnnouncedTurnKey = turnKey;
-      announceMyTurn();
-      showMyTurnBanner();
-    }
+  // 轮到自己回合:语音+大字视觉双重提示,同一个触发时机、同一套去重判断——只在"刚刚轮到
+  // 自己回合"这一刻提示一次,不会因为同一回合内的其它状态变化(如无关的日志/别人操作)
+  // 而反复重复提示。
+  // 【曾经的时机偏差】判断条件曾经是 g.phase==='play'&&g.turn===mySeat,导致提示要等
+  // 玩家自己点了摸牌按钮、阶段从'draw'推进到'play'之后才触发,比"轮到你回合"这个真正的
+  // 时间点晚了一步——现在改成只看"轮到谁"(g.turn===mySeat),不管当前是draw还是play哪个
+  // 子阶段,回合刚开始(摸牌按钮出现的那一刻)就立刻提示。
+  // turnKey 也不能再包含 g.phase:否则同一个回合从draw切到play,key会变化,又会被误判成
+  // "新的一次轮到自己"而重复触发一次提示。key 用 (turn,roundNum) 组合:同一玩家在不同
+  // 轮次会重新拿到同一个 turn 座位号,必须靠 roundNum 区分,不能只用 turn 本身。
+  const turnKey = g.started ? (g.turn+':'+(g.roundNum||0)) : null;
+  if(g.started && g.turn===mySeat && turnKey!==lastAnnouncedTurnKey){
+    announceMyTurn();
+    showMyTurnBanner();
+    lastAnnouncedTurnKey = turnKey;
+  } else if(g.turn!==mySeat){
+    lastAnnouncedTurnKey = undefined;
   }
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
