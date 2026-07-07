@@ -1425,17 +1425,21 @@ function resolveTrick(g, info){
     return;
   }
   // 顺手/拆桥:目标手牌(隐藏,整体算1个"随机手牌"选项) + 每件已装备(公开,各1个具体选项)
+  // + 判定区每张延时锦囊(公开,各1个具体选项,官方规则明确判定区也在可选范围内)
   if(!tgt || !tgt.alive){ g.pending=null; g.phase='play'; return; }
   const handCount=(tgt.hand||[]).length;
   const equipSlots=EQUIP_SLOTS.filter(s=>tgt.equips[s]);
-  const optCount=(handCount>0?1:0)+equipSlots.length;
+  const delayCount=(tgt.delays||[]).length;
+  const optCount=(handCount>0?1:0)+equipSlots.length+delayCount;
   if(optCount===0){
-    g.log=pushLog(g.log, tgt.name+' 没有手牌和装备,【'+info.trick+'】无效果');
+    g.log=pushLog(g.log, tgt.name+' 没有手牌、装备或判定区的牌,【'+info.trick+'】无效果');
     g.pending=null; g.phase='play'; return;
   }
   if(optCount===1){
     // 唯一选择:免弹窗直接结算
-    if(handCount>0) applyTrickOnHand(g, info); else applyTrickOnEquip(g, info, equipSlots[0]);
+    if(handCount>0) applyTrickOnHand(g, info);
+    else if(equipSlots.length>0) applyTrickOnEquip(g, info, equipSlots[0]);
+    else applyTrickOnDelay(g, info, 0);
     g.pending=null; g.phase='play'; return;
   }
   // 多个可选:开使用者选牌子阶段(只有 from 能操作)
@@ -1461,7 +1465,18 @@ function applyTrickOnEquip(g, info, slot){
   // 失主(info.to)的装备离开装备区 → 触发失去装备钩子(如孙尚香【枭姬】)。顺手/拆桥单次仅动一槽,恒失去 1 张。
   triggerHook(g, info.to, 'onLoseEquip', { count:1 });
 }
-// pickResolve: 选牌子阶段结算。choice='hand' 或槽名。仅使用者可操作;失效项(手牌已空/槽已空)安全回 play 防软锁。
+// applyTrickOnDelay: 拿/拆目标判定区里第idx张延时锦囊。判定区是公开信息 -> 日志写明牌名。
+// 顺手拿到的延时锦囊进使用者手牌后就是一张普通牌(和普通规则一致,可以再次正常打出使用)。
+function applyTrickOnDelay(g, info, idx){
+  const tgt=g.players[info.to];
+  const card=(tgt.delays||[])[idx]; if(!card) return;
+  tgt.delays.splice(idx,1);
+  const me=g.players[info.from];
+  if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 顺走 '+tgt.name+' 判定区的【'+card.name+'】'); }
+  else { g.discard.push(card); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 判定区的【'+card.name+'】'); }
+}
+// pickResolve: 选牌子阶段结算。choice='hand' 或装备槽名 或 'delay:'+下标(判定区第几张)。
+// 仅使用者可操作;失效项(手牌已空/槽已空/判定区那张已不在)安全回 play 防软锁。
 function pickResolve(choice){
   tx(g=>{
     if(g.phase!=='pick'||!g.pending||g.pending.type!=='pick'||g.pending.from!==mySeat) return g;
@@ -1471,6 +1486,10 @@ function pickResolve(choice){
     if(choice==='hand'){
       if((tgt.hand||[]).length===0){ g.pending=null; g.phase='play'; return g; } // 失效兜底
       applyTrickOnHand(g, info);
+    } else if(typeof choice==='string' && choice.startsWith('delay:')){
+      const idx=Number(choice.slice(6));
+      if(!Number.isInteger(idx) || !(tgt.delays||[])[idx]){ g.pending=null; g.phase='play'; return g; } // 失效兜底
+      applyTrickOnDelay(g, info, idx);
     } else {
       if(!EQUIP_SLOTS.includes(choice) || !tgt.equips[choice]){ g.pending=null; g.phase='play'; return g; } // 失效兜底
       applyTrickOnEquip(g, info, choice);

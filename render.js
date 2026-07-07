@@ -376,8 +376,9 @@ function render(g){
     const isJiedaoSel=!!(selCard && selCard.name==='借刀杀人');             // 借刀杀人走专属两步选择,不进通用单目标块
     const needHandOrEquip=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
     // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
-    // 手牌和装备任一非空即可选,而不是只看手牌——否则"手牌0但有装备"会被 UI 误挡在选目标这一步。
-    const hasHandOrEquip = (p.hand||[]).length>0 || EQUIP_SLOTS.some(s=>p.equips && p.equips[s]);
+    // 手牌、装备、判定区(延时锦囊)任一非空即可选——否则"手牌0但有装备/判定区的牌"会被
+    // UI 误挡在选目标这一步(官方规则判定区也在可拿/可拆范围内,见 CLAUDE.md 改动记录)。
+    const hasHandOrEquip = (p.hand||[]).length>0 || EQUIP_SLOTS.some(s=>p.equips && p.equips[s]) || (p.delays||[]).length>0;
     // 顺手牵羊/兵粮寸断(直接使用场景,不是徐晃【断粮】那条路径)距离限制均为1,和服务端
     // canTarget 的口径一致;过河拆桥/乐不思蜀/闪电均无此限制,不在这个判断范围内。
     const distLimited = !!(selCard && (selCard.name==='顺手牵羊' || selCard.name==='兵粮寸断'));
@@ -1080,7 +1081,12 @@ function renderControls(g){
       const b=document.createElement('button');
       b.textContent=verb+'装备【'+tgt.equips[s].name+'】'; b.onclick=()=>pickResolve(s); c.appendChild(b);
     }});
-    setBanner('对 '+escapeHtml(tgt?tgt.name:'目标')+' 使用【'+escapeHtml(g.pending.trick)+'】,选择'+verb+'哪张牌（手牌随机、装备可指定）。');
+    // 判定区(延时锦囊)公开:逐张列出具体牌名供指定,官方规则明确判定区也在可拿/可拆范围内
+    if(tgt) (tgt.delays||[]).forEach((card,idx)=>{
+      const b=document.createElement('button');
+      b.textContent=verb+'判定区【'+card.name+'】'; b.onclick=()=>pickResolve('delay:'+idx); c.appendChild(b);
+    });
+    setBanner('对 '+escapeHtml(tgt?tgt.name:'目标')+' 使用【'+escapeHtml(g.pending.trick)+'】,选择'+verb+'哪张牌（手牌随机、装备/判定区可指定）。');
     return;
   }
   if(g.phase==='pick' && g.pending){
