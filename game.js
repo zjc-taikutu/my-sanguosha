@@ -31,7 +31,7 @@ function joinRoom(){
     joinError = null;
     if(g === null){
       g = { started:false, players:[], turn:0, phase:'lobby', deck:[], discard:[],
-            pending:null, shaUsed:false, log:['房间已创建,等待玩家加入'] };
+            pending:null, shaUsed:false, roundNum:1, roundSeatsActed:[], log:['房间已创建,等待玩家加入'] };
     }
     g.players = g.players || [];
     // bug2:先按本地标识找"我自己"(刷新重连),能回到原座位
@@ -75,6 +75,9 @@ function normalize(g){
   g.discard = g.discard || [];
   g.log = g.log || [];
   g.players = g.players || [];
+  // 轮次计数:数字/数组防御,Firebase 吞空数组、旧存档可能没有这两个字段
+  if(!Number.isInteger(g.roundNum)) g.roundNum=1;
+  if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
   g.players.forEach(p=>{ if(p){ p.hand = p.hand || []; if(typeof p.alive!=='boolean') p.alive=true;
     // 体力上限防御:旧数据/异常路径缺失时回退,避免血条/桃回血读到 undefined
     if(typeof p.maxHp!=='number') p.maxHp = MAX_HP;
@@ -1965,6 +1968,14 @@ function respondXiaoguoChoice(choice){
 // 顺序:先声明轮到谁,再问张郃是否发动【巧变】(可能连判定阶段本身都跳过,必须在结算判定区
 // 之前问),再结算判定区(回合开始的判定阶段,在摸牌之前),最后进摸牌阶段。
 function startTurn(g, seat){
+  if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
+  if(!Number.isInteger(g.roundNum)) g.roundNum=1;
+  if(g.roundSeatsActed.includes(seat)){
+    g.roundNum++;
+    g.roundSeatsActed=[seat];
+  } else {
+    g.roundSeatsActed.push(seat);
+  }
   g.turn=seat; g.shaUsed=false; g.duanliangUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueQiaobianCheck(g, seat);
