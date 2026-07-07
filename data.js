@@ -51,7 +51,17 @@ DELAY_TRICKS['闪电'] = {
       const dying = dealDamage(g, seat, 3, undefined, '【闪电】发动', 'delay');
       return dying ? 'pending' : undefined;
     }
-    return nextAlive(g, seat);
+    // 判定不中:移到下一名"判定区里没有【闪电】"的其他存活角色(官方通则:同一判定区不能有两张同名牌)。
+    // 找不到合法去处(极端边界:2人局且对方判定区已有另一张闪电)则作废进弃牌堆、不传回自己,
+    // 否则本回合判定循环会立刻再判一次造成死循环。
+    const n=g.players.length;
+    for(let k=1;k<=n;k++){
+      const s=(seat+k)%n;
+      if(s===seat) break;
+      const p=g.players[s];
+      if(p && p.alive && !(p.delays||[]).some(c=>c && c.name==='闪电')) return s;
+    }
+    g.log = pushLog(g.log, '场上没有可传递的判定区,【闪电】作废');
   }
 };
 // 乐不思蜀:只能放在别人判定区(onlySelf:false)。回合开始判定,官方原文是"若判定结果不为
