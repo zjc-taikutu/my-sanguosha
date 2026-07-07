@@ -391,7 +391,9 @@ function render(g){
     // 表现为"点了没反应"。这里直接查 DELAY_TRICKS 复刻服务端同一条判断,不再经 allowSelf 这层间接。
     const selDT = selCard && DELAY_TRICKS[selCard.name];
     const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat);
-    const targetable = selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange;
+    // 官方规则:同一判定区不能有两张同名的延时类锦囊牌,和服务端 canTarget 的 hasDup 判断口径一致。
+    const hasDupDelay = !!(selDT && (p.delays||[]).some(c=>c && c.name===selCard.name));
+    const targetable = selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange && !hasDupDelay;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
         // idx 在这里(渲染时/挂载 onclick 那一刻)冻结,而不是等点击时才读 selectedCardIdx——
@@ -412,6 +414,12 @@ function render(g){
           ? '攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）'
           : '距离外（距离 '+distance(g,mySeat,i)+' ＞ 1）';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
+      } else if(selDT && hasDupDelay && selfOK && p.alive){
+        // 判定区已有同名延时锦囊:官方规则不允许重复,暗色点线 + 角标 + 悬浮说明,不可点
+        // (同款视觉,避免玩家点了却被服务端 canTarget 拒绝)。
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='判定区已有【'+selCard.name+'】,不能重复放置';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">已有同名</span>';
       }
     }
     // 丈八蛇矛:已选满两张牌后,对手作为杀的目标(距离规则同普通杀,与 selectedCardIdx 路径互斥)
