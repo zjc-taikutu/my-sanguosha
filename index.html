@@ -185,6 +185,9 @@
     border:1px solid #00000022;position:relative;cursor:pointer;overflow:hidden;
     display:flex;flex-direction:column;
     box-shadow:0 2px 0 rgba(0,0,0,.3);transition:transform .08s;user-select:none;
+    --badge:20px; /* 角标(.corner)/问号图标(.info-badge-hit)的统一基准尺寸,以后想
+      整体调大调小只改这一处;响应式断点只需要覆盖这一个变量,不用再分别调整多处硬编码
+      尺寸(见 CLAUDE.md)。 */
   }
   .card:hover{transform:translateY(-4px);}
   /* ===== 卡片分区版式(顶部标题栏+下方插画区域,更接近实体卡牌观感)=====
@@ -200,13 +203,21 @@
   /* 没图时(映射表缺失、或全部候选格式都加载失败)插画区域留一块占位底色,不完全空白,
      也不会露出浏览器原生的"图裂了"破图标(<img>本身已被 cardImgError display:none)。 */
   .card.no-art .card-art-box{background:rgba(0,0,0,.08);}
-  /* 角标定位基准几经调整,这是最新版本——相对整张卡片(.card)定位,不是相对插画区域
-     (.card-art-box)。曾经的两版:①最初是 .card 的直接子元素、相对整张卡片定位,但没有
-     顶开标题栏高度,top:5px 落在标题栏那一行、和牌名文字视觉重叠;②随后挪进 .card-art-box
-     内部改成相对插画区域定位,虽然避开了标题栏,但视觉上角标位置变成跟着插画区域的尺寸走,
-     不是按整张卡片的尺寸算——这次改回①的定位基准(.card 的直接子元素),但用
-     top:calc(22%+5px) 顶开标题栏高度(标题栏本身也是用 22% 定义的,同一个基准,不会因为
-     响应式断点下卡片高度变化而重新错位),避免重蹈①的重叠问题。
+  /* 角标定位基准/尺寸几经调整,这是最新版本。
+     【定位基准的历史】①最初是 .card 的直接子元素、相对整张卡片定位,但没有顶开标题栏
+     高度,top:5px 落在标题栏那一行、和牌名文字视觉重叠;②随后挪进 .card-art-box 内部
+     改成相对插画区域定位,避开了标题栏,但视觉上角标位置变成跟着插画区域的尺寸走;
+     ③改回 .card 的直接子元素、用 top:calc(22%+5px) 顶开标题栏高度;④尝试过把 top 也
+     改成 0(和右上角"?"图标严格对齐同一水平线),但当时角标固定 26px、和标题栏空间
+     争夺严重,4字牌名会被挤到换行,尝试失败后退回③。
+     【这次的改动:角标改用统一尺寸变量 --badge(声明在 .card 上,见上方),并配合把
+     --badge 从 26px 调小到 20px(桌面端)——角标变小之后,和 .card-title 标题栏
+     不再需要"顶开标题栏高度"这道额外的空间隔离,可以放心地重新采用 top:0;left:0,
+     和 .info-badge-hit(同样 top:0;right:0)严格对齐在同一条水平线,形成真正的左右
+     对角】。宽高从写死的 26px 改成 var(--badge),字号从写死的 11px 改成
+     calc(var(--badge) * 0.42)(按比例跟随角标尺寸缩放,不再是独立维护的一个数字)——
+     响应式断点只需要覆盖 .card 的 --badge 这一个变量,.corner 和 .info-badge-hit 的
+     尺寸/字号会通过 calc() 公式自动重新算出,不用再逐处手动对齐多套硬编码数值。
      只保留左上角一个角标,右下角(.corner.br)已删除——单个角标已经能完整传达花色点数
      信息,不需要两处重复;render.js 的 renderHand 也不再生成 .corner.br 这个 div。
      半透明圆形徽章(金色细边+米金色文字)而不是方形深底硬贴标签:圆形+径向渐变(边缘更透明、
@@ -219,10 +230,10 @@
      影响。深色渐变底+金边保证插画背景再花哨,花色点数文字都清晰可读——这是每张牌实例的
      真实游戏机制信息(如乐不思蜀判定看花色),不能被图片替代或省略。 */
   .corner{
-    position:absolute; top:calc(22% + 5px); left:5px; z-index:2;
-    width:26px; height:26px; border-radius:50%;
+    position:absolute; top:0; left:0; z-index:2;
+    width:var(--badge); height:var(--badge); border-radius:50%;
     display:flex; align-items:center; justify-content:center;
-    font-size:11px; font-weight:700;
+    font-size:calc(var(--badge) * 0.42); font-weight:700;
     background:radial-gradient(circle, rgba(20,14,8,.75) 0%, rgba(20,14,8,.55) 70%, rgba(20,14,8,0) 100%);
     border:1px solid rgba(212,175,110,.5);
     color:#e8d5a8;
@@ -267,10 +278,14 @@
      把居中于热区内的视觉圆圈推离真正的右上角、往卡片中线靠,和左上角花色点数重新撞上
      (这正是上一版放右上角失败的原因,不是"位置本身不行",是"热区盒子相对卡片太大,把圆圈
      挤离了角落")。这次视觉圆圈已经缩得很小,热区盒子跟着按各断点等比例收紧、贴着真正的
-     右上角,不再让圆圈被推向中间——已用真实渲染测量确认(见 CLAUDE.md)三档宽度下都不重叠。*/
-  .card .info-badge-hit{position:absolute;top:0;right:0;width:26px;height:26px;display:flex;
+     右上角,不再让圆圈被推向中间——已用真实渲染测量确认(见 CLAUDE.md)三档宽度下都不重叠。
+     热区盒子和 .corner 共用同一个 --badge 尺寸变量(声明在 .card 上):两者本来就该是
+     严格对称的左右对角,共用一个变量后不可能出现"一个改了另一个忘了改"这种不对称——
+     内层视觉圆圈比热区盒子小 8px(和原来 26px 热区配 18px 圆圈同一个比例关系),字号
+     按 --badge 的比例算,不再是独立维护的数字。 */
+  .card .info-badge-hit{position:absolute;top:0;right:0;width:var(--badge);height:var(--badge);display:flex;
     align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
-  .card .info-badge-hit .info-badge{width:18px;height:18px;font-size:11px;}
+  .card .info-badge-hit .info-badge{width:calc(var(--badge) - 8px);height:calc(var(--badge) - 8px);font-size:calc(var(--badge) * 0.35);}
 
   /* ===== 日志 toast:"刚刚发生了什么"的瞬时提示,和 .banner("当前该谁做什么")信息类型不同,
      不共用元素/不共用配色——banner 是朱红(行动焦点),这里用金色(氛围提示,呼应 .phase-pill)。
@@ -350,18 +365,15 @@
        "无论多少张手牌都不会横向溢出/需要横向滚动"这条硬指标——缩小是为了减少换行数量,
        不是靠它来防溢出(防溢出这件事从一开始就是 flex-wrap 的职责,缩小前后都不会溢出)。 */
     .hand{gap:6px;}
-    .card{width:50px;height:74px;}
+    .card{width:50px;height:74px;--badge:16px;} /* 角标/问号图标统一收窄到16px,.corner
+      和 .info-badge-hit 的尺寸/字号靠 calc() 公式自动跟着算,不用再分别写死两套数值。 */
     .card-title{font-size:11px;}
     .card.trick .card-title,.card.steal .card-title{font-size:9px;}
-    /* 圆形徽章角标按比例缩小:26px在缩小后的50x74卡片上比例偏大,容易遮挡插画。 */
-    .corner{width:20px;height:20px;font-size:9px;}
     /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
-       视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。 */
+       视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。这个 .info-badge
+       是座位卡专用的、和手牌卡片的 .card .info-badge-hit .info-badge 是两个不同的东西,
+       不受 --badge 变量影响,继续独立维护尺寸。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
-    /* 手牌卡片角标:视觉圆圈和热区盒子一起收紧(热区也要缩,不然盒子相对卡片太大又会把
-       圆圈推离右上角、挤向花色点数,见上面基础规则的说明)。 */
-    .card .info-badge-hit{width:22px;height:22px;}
-    .card .info-badge-hit .info-badge{width:14px;height:14px;font-size:9px;}
     #logToast{font-size:15px;padding:8px 16px;}
   }
   /* ===== 极窄手机断点(叠加在上面 640px 断点之上,数值更紧、且改了 opp2 的结构) ===== */
@@ -374,17 +386,13 @@
       grid-template-columns:minmax(0,1fr);
       grid-template-areas:"tl" "tr" "me";
     }
-    .card{width:46px;height:68px;}
+    .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
+      跟着 --badge 自动缩小,不用逐处对齐。 */
     .card-title{font-size:10px;}
     .card.trick .card-title,.card.steal .card-title{font-size:8px;}
     /* 480px是这次风险最大的场景(3人局同屏挤最紧):头像框再收一档,仍严格保持3:4比例。 */
     .avatar-box{width:60px;height:80px;}
     .seat.me .avatar-box{width:72px;height:96px;}
-    /* 卡片更窄了,角标视觉+热区再收一档(极窄屏卡片更窄,热区若不跟着缩会重新顶到花色点数) */
-    .card .info-badge-hit{width:18px;height:18px;}
-    .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
-    /* 圆形徽章角标在这一档卡片(46x68)上再收紧一次。 */
-    .corner{width:17px;height:17px;font-size:8px;}
     #logToast{font-size:14px;padding:7px 14px;}
   }
 
@@ -489,9 +497,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=60"></script>
-<script src="data.js?v=60"></script>
-<script src="game.js?v=60"></script>
-<script src="render.js?v=60"></script>
+<script src="config.js?v=61"></script>
+<script src="data.js?v=61"></script>
+<script src="game.js?v=61"></script>
+<script src="render.js?v=61"></script>
 </body>
 </html>
