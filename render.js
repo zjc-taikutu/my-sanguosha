@@ -48,7 +48,8 @@ const CARD_PINYIN = {
 };
 const SKILL_PINYIN = {
   '天妒':'tiandu', '遗计':'yiji', '枭姬':'xiaoji', '反馈':'fankui',
-  '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi'
+  '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi',
+  '苦肉':'kurou'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
@@ -1643,6 +1644,11 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'kurou')){
+      const kb=document.createElement('button'); kb.className='ghost';
+      kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
+      c.appendChild(kb);
+    }
     if(!zhangbaMode && !duanliangMode && !qixiMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);

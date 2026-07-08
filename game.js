@@ -1346,6 +1346,15 @@ function resumeAfterInterrupt(g, resume, seat){
     // 继续找下一个有资格的候选乐进(或最终真正切换回合)——resume 在 respondXiaoguoChoice
     // 里已经带上完整信息。
     advanceXiaoguo(g, resume.endingSeat, resume.lastAsker);
+  } else if(resume.type==='kurou'){
+    // 黄盖【苦肉】主动自伤后的接回:若濒死被救回,继续摸两张;若真死且游戏未结束,轮到下个存活玩家。
+    if(!g.players[seat] || !g.players[seat].alive){
+      startTurn(g, nextAlive(g, seat));
+    } else {
+      drawN(g, seat, 2);
+      g.log=pushLog(g.log, g.players[seat].name+' 【苦肉】结算,摸两张牌');
+      g.phase='play';
+    }
   } else { // 'sha' 及其它:攻击者继续出牌阶段——若这是方天画戟排队目标中的一个,继续问下一个而不是直接回play
     if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
   }
@@ -2076,6 +2085,21 @@ function endPlay(){
     // 不冲突——巧变一回合限一次,选了"出牌阶段"就不会再选"弃牌阶段",但不能假设这里一定
     // 不会发生,统一走 advancePastDiscard 判断,不重复写一遍 if/else)。
     advancePastDiscard(g);
+    return g;
+  });
+}
+function kuRou(){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'kurou')) return g;
+    g.log=pushLog(g.log, me.name+' 发动【苦肉】');
+    markSkillSound(g, '苦肉');
+    const interrupted = dealDamage(g, mySeat, 1, mySeat, '【苦肉】', 'kurou');
+    if(interrupted) return g;
+    drawN(g, mySeat, 2);
+    g.log=pushLog(g.log, me.name+' 【苦肉】结算,摸两张牌');
+    g.phase='play';
     return g;
   });
 }
