@@ -48,7 +48,8 @@ const CARD_PINYIN = {
 };
 const SKILL_PINYIN = {
   '天妒':'tiandu', '遗计':'yiji', '枭姬':'xiaoji', '反馈':'fankui',
-  '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi'
+  '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi',
+  '苦肉':'kurou', '集智':'jizhi', '制衡':'zhiheng'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
@@ -107,6 +108,9 @@ function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 let qixiMode = false;
 let qixiCardIdx = null;
 function resetQixi(){ qixiMode=false; qixiCardIdx=null; }
+let zhihengMode = false;
+let zhihengPicks = [];
+function resetZhiheng(){ zhihengMode=false; zhihengPicks=[]; }
 // 乐进【骁果】:点"发动"进选牌模式(纯客户端,不入库),只有基本牌可点,点了直接提交(仿鬼才)。
 let xiaoguoMode = false;
 function resetXiaoguo(){ xiaoguoMode=false; }
@@ -395,7 +399,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetQiaobian(); resetJiedao(); resetFangtian(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
@@ -532,6 +536,7 @@ function render(g){
   // 同款兜底:只要不在「自己的出牌阶段」,就退出断粮选牌+选目标模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetDuanliang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQixi();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhiheng();
   // 同款兜底:一旦不在"轮到自己响应骁果"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
   // 同款兜底:一旦不在"轮到自己(攻击者)响应青龙偃月刀"的状态,退出选牌模式,不留残留。
@@ -1616,6 +1621,15 @@ function renderControls(g){
         : '已选中,点上方一名有手牌、装备或判定区牌的其他玩家,当【过河拆桥】对其使用(或点牌取消选中)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetQixi(); render(g); }; c.appendChild(cb);
+    } else if(zhihengMode){
+      setBanner('【制衡】选择任意张手牌弃置,然后摸等量牌(已选 '+zhihengPicks.length+' 张)。');
+      if(zhihengPicks.length>=1){
+        const ok=document.createElement('button'); ok.className='primary';
+        ok.textContent='确认制衡'; ok.onclick=()=>{ const picks=zhihengPicks.slice(); confirmAndPlay('发动【制衡】:弃'+picks.length+'张牌,然后摸'+picks.length+'张牌？', ()=>zhiHeng(picks)); };
+        c.appendChild(ok);
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetZhiheng(); render(g); }; c.appendChild(cb);
     } else if(zhangbaMode){
       // 丈八选牌模式:选两张手牌当杀,再点目标。提供取消。
       setBanner('丈八蛇矛:选两张手牌当作【杀】(已选 '+zhangbaPicks.length+'/2)'+(zhangbaPicks.length===2?'，攻击距离 '+attackRange(g,mySeat)+'，点上方一名对手作为目标。':'。'));
@@ -1643,7 +1657,16 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'kurou')){
+      const kb=document.createElement('button'); kb.className='ghost';
+      kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
+      c.appendChild(kb);
+    }
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'zhiheng') && !g.zhihengUsed && (me.hand||[]).length>=1){
+      const sb=document.createElement('button'); sb.className='ghost';
+      sb.textContent='发动【制衡】'; sb.onclick=()=>{ selectedCardIdx=null; zhihengMode=true; zhihengPicks=[]; render(g); }; c.appendChild(sb);
+    }
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);
     }
@@ -1651,24 +1674,24 @@ function renderControls(g){
     // (没有符合条件的牌就跟没有技能一样不渲染,不能只看"手牌非空"——那样会出现点进去
     // 一张能选的牌都没有的死胡同界面)。
     const hasDuanliangCard = (me.hand||[]).some(c=>(c.suit==='♠'||c.suit==='♣') && (BASIC_CARDS.includes(c.name)||!!getEquip(c.name)));
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && hasDuanliangCard){
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && hasDuanliangCard){
       const db=document.createElement('button'); db.className='ghost';
       db.textContent='发动【断粮】'; db.onclick=()=>{ selectedCardIdx=null; duanliangMode=true; duanliangCardIdx=null; render(g); }; c.appendChild(db);
     }
     const hasQixiCard = (me.hand||[]).some(c=>c && (c.suit==='♠'||c.suit==='♣'));
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'qixi') && hasQixiCard){
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'qixi') && hasQixiCard){
       const qb=document.createElement('button'); qb.className='ghost';
       qb.textContent='发动【奇袭】'; qb.onclick=()=>{ selectedCardIdx=null; qixiMode=true; qixiCardIdx=null; render(g); }; c.appendChild(qb);
     }
     // 方天画戟入口:锁定技,仅当手牌恰好只剩这最后一张、且这张牌能当杀、且本回合还能出杀时才出现——
     // 不满足条件(手里还有别的牌)时和没有这把武器一样,普通单目标出杀流程完全不受影响。
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'fangtian') && canSha
+    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'fangtian') && canSha
        && (me.hand||[]).length===1 && canUseAs(me,(me.hand||[])[0],'杀')){
       const fb=document.createElement('button'); fb.className='ghost';
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetQiaobian();resetJiedao();resetFangtian();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -1741,8 +1764,9 @@ function renderHand(g){
     const picked = zhangbaMode && zhangbaPicks.includes(idx);
     const duanliangPicked = duanliangMode && duanliangCardIdx===idx;
     const qixiPicked = qixiMode && qixiCardIdx===idx;
+    const zhihengPicked = zhihengMode && zhihengPicks.includes(idx);
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
-    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||qiaobianPicked)?' selected':'');
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||zhihengPicked||qiaobianPicked)?' selected':'');
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
@@ -1804,6 +1828,14 @@ function renderHand(g){
       // 奇袭选牌模式:任意黑色手牌都能当【过河拆桥】使用。
       usable = card.suit==='♠' || card.suit==='♣';
       if(usable) onClick=()=>{ qixiCardIdx = (qixiCardIdx===idx?null:idx); render(g); };
+    } else if(g.phase==='play'&&myTurn&&zhihengMode){
+      // 制衡选牌模式:任意手牌都可弃置,点牌 toggle 多选,最后由按钮一次性提交。
+      usable = true;
+      onClick=()=>{
+        if(zhihengPicked) zhihengPicks = zhihengPicks.filter(x=>x!==idx);
+        else zhihengPicks.push(idx);
+        render(g);
+      };
     } else if(g.phase==='play'&&myTurn&&fangtianMode){
       // 方天画戟选目标模式:手牌只有这一张(触发条件已限定),不需要再点手牌本身,
       // 目标全部在座位区(见下方 seat 循环里的 fangtianMode 分支)选择,这里留空不可点。

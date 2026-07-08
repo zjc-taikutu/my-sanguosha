@@ -191,6 +191,8 @@ function normalize(g){
   if(typeof g.skipDiscard!=='boolean') g.skipDiscard=false;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
   if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
+  // 孙权【制衡】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
+  if(typeof g.zhihengUsed!=='boolean') g.zhihengUsed=false;
   return g;
 }
 function pushLog(log, msg){
@@ -238,6 +240,9 @@ function drawN(g, seat, n){
     if(!ensureDeck(g)) break;
     g.players[seat].hand.push(g.deck.pop());
   }
+}
+function isTrickCardName(name){
+  return !!name && !BASIC_CARDS.includes(name) && !getEquip(name);
 }
 // 通用判定:翻牌堆顶一张(堆空则先重洗弃牌堆),亮出后进弃牌堆,返回这张牌(供调用方看花色/颜色)。
 // 通用无副作用——不含任何具体技能逻辑,闪电/乐不思蜀等日后复用。堆+弃都空则返回 null,调用方容错。
@@ -748,6 +753,11 @@ function playCard(cardIdx, actionId, targetSeat){
     me.hand.splice(cardIdx,1);
     if(!spec.noDiscard) g.discard.push(card); // 装备牌 noDiscard:不进弃牌堆,由 effect 放进装备区
     spec.effect(g, me, card, targetSeat);
+    if(hasCap(me,'jizhi') && isTrickCardName(actionId)){
+      drawN(g, mySeat, 1);
+      g.log=pushLog(g.log, me.name+' 发动【集智】,摸一张牌');
+      markSkillSound(g, '集智');
+    }
     markCardSound(g, actionId); // playCard 是普通出牌的统一出口,这里加一次就覆盖所有走这个入口的牌
     return g;
   });
@@ -1346,6 +1356,15 @@ function resumeAfterInterrupt(g, resume, seat){
     // 继续找下一个有资格的候选乐进(或最终真正切换回合)——resume 在 respondXiaoguoChoice
     // 里已经带上完整信息。
     advanceXiaoguo(g, resume.endingSeat, resume.lastAsker);
+  } else if(resume.type==='kurou'){
+    // 黄盖【苦肉】主动自伤后的接回:若濒死被救回,继续摸两张;若真死且游戏未结束,轮到下个存活玩家。
+    if(!g.players[seat] || !g.players[seat].alive){
+      startTurn(g, nextAlive(g, seat));
+    } else {
+      drawN(g, seat, 2);
+      g.log=pushLog(g.log, g.players[seat].name+' 【苦肉】结算,摸两张牌');
+      g.phase='play';
+    }
   } else { // 'sha' 及其它:攻击者继续出牌阶段——若这是方天画戟排队目标中的一个,继续问下一个而不是直接回play
     if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
   }
@@ -2079,6 +2098,41 @@ function endPlay(){
     return g;
   });
 }
+function kuRou(){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'kurou')) return g;
+    g.log=pushLog(g.log, me.name+' 发动【苦肉】');
+    markSkillSound(g, '苦肉');
+    const interrupted = dealDamage(g, mySeat, 1, mySeat, '【苦肉】', 'kurou');
+    if(interrupted) return g;
+    drawN(g, mySeat, 2);
+    g.log=pushLog(g.log, me.name+' 【苦肉】结算,摸两张牌');
+    g.phase='play';
+    return g;
+  });
+}
+function zhiHeng(cardIdxs){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'zhiheng') || g.zhihengUsed) return g;
+    if(!Array.isArray(cardIdxs) || cardIdxs.length<1) return g;
+    const unique=[...new Set(cardIdxs)].filter(i=>Number.isInteger(i)).sort((a,b)=>b-a);
+    if(unique.length!==cardIdxs.length) return g;
+    if(unique.some(i=>i<0 || i>=(me.hand||[]).length)) return g;
+    const moved=[];
+    unique.forEach(i=>{ moved.push(me.hand.splice(i,1)[0]); });
+    moved.forEach(c=>{ if(c) g.discard.push(c); });
+    g.zhihengUsed=true;
+    drawN(g, mySeat, moved.length);
+    g.log=pushLog(g.log, me.name+' 发动【制衡】,弃'+moved.length+'张牌并摸'+moved.length+'张牌');
+    markSkillSound(g, '制衡');
+    g.phase='play';
+    return g;
+  });
+}
 function discardCard(cardIdx){
   tx(g=>{
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
@@ -2189,7 +2243,7 @@ function startTurn(g, seat){
   } else {
     g.roundSeatsActed.push(seat);
   }
-  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false;
+  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.zhihengUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueGuanxingCheck(g, seat);
 }
