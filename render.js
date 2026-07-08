@@ -177,17 +177,47 @@ let lastToastedLogText = undefined;
 // 名字长度<2的不参与染色:三国杀满屏都是单字游戏术语(杀/闪/桃/牌/堆/弃...),1个字的玩家名
 // 几乎必然和这些词撞在一起,误染色概率很高;2字以上撞上无关词组纯属巧合,概率低很多,
 // 这里只接受"低概率的巧合误染色"这一种代价,不为它再引入正则/语境匹配的复杂度。
+// colorizeLogLine: 在原始纯文本上一次性算好所有"该染色的区间"（长名字优先占坑、已占用的
+// 区间后续短名字不能再匹配),再统一拼出最终HTML,不对已生成的HTML做二次查找替换——旧实现
+// 靠反复对同一段文本做"整串split/join"来判断该给谁上色,当一个玩家名字是另一个玩家名字的
+// 子字符串时(如"AA"和"BAA"),长名字"BAA"先被包进彩色span,但"AA"这几个字符依然字面存在
+// 于生成出的HTML字符串内部,轮到处理"AA"时又在已生成的HTML里重新匹配到、再包一层嵌套span,
+// 内层颜色覆盖外层,导致同一个名字在一句话里被拆成两种颜色。这次改成先在纯文本坐标系里
+// 用 claimed 数组标记哪些字符位置已经被占用,长名字优先占坑,从根本上避免嵌套/重叠染色。
 function colorizeLogLine(g, text){
-  let escaped = escapeHtml(text);
   const entries = (g.players||[]).map((p,i)=>({i,p}))
     .filter(o=>o.p && o.p.name && o.p.name.length>=2)
-    .sort((a,b)=>b.p.name.length-a.p.name.length);
+    .sort((a,b)=>b.p.name.length-a.p.name.length); // 长名字优先占坑,避免被短名字的子串匹配抢先
+
+  const claimed = new Array(text.length).fill(false);
+  const matches = []; // {start,end,color}
   entries.forEach(({i,p})=>{
-    const escName = escapeHtml(p.name);
-    if(!escName) return;
-    escaped = escaped.split(escName).join('<span style="color:'+seatColor(i)+'">'+escName+'</span>');
+    const name = p.name;
+    let searchFrom = 0;
+    while(true){
+      const idx = text.indexOf(name, searchFrom);
+      if(idx<0) break;
+      const end = idx+name.length;
+      let overlap = false;
+      for(let k=idx;k<end;k++){ if(claimed[k]){ overlap=true; break; } }
+      if(!overlap){
+        for(let k=idx;k<end;k++) claimed[k]=true;
+        matches.push({start:idx, end, color:seatColor(i)});
+      }
+      searchFrom = idx+1; // 继续找同一个名字在这条日志里的其它出现位置(比如同时提到来源和目标)
+    }
   });
-  return escaped;
+  matches.sort((a,b)=>a.start-b.start);
+
+  let result = '';
+  let cursor = 0;
+  matches.forEach(m=>{
+    result += escapeHtml(text.slice(cursor, m.start));
+    result += '<span style="color:'+m.color+'">'+escapeHtml(text.slice(m.start, m.end))+'</span>';
+    cursor = m.end;
+  });
+  result += escapeHtml(text.slice(cursor));
+  return result;
 }
 function showLogToast(g, text){
   const el = document.getElementById('logToast');
