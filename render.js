@@ -326,6 +326,21 @@ function maybePlaySkillSound(g){
   }catch(e){}
 }
 
+// isToastworthyLog: 判断一条日志文本是否值得弹 toast 提醒——覆盖出牌动作("使用【"/"打出【"/
+// "当【")、延时锦囊判定结果("生效"/"无效",如"【乐不思蜀】生效"/"【兵粮寸断】无效"、闪电
+// 判定命中的"【闪电】发动")、伤害结算("受到",dealDamage 统一走"受到N点伤害"这个固定文案,
+// 覆盖所有伤害来源)、以及部分技能发动提示("发动")。不是每条新增日志都弹——摸牌/回合切换
+// 这类高频但信息量低的日志不触发,避免刷屏。
+function isToastworthyLog(text){
+  return text.includes('使用【')
+    || text.includes('打出【')
+    || text.includes('当【')
+    || text.includes('生效')      // 延时锦囊判定成功(如"【乐不思蜀】生效"、"【兵粮寸断】生效"、"【闪电】发动")
+    || text.includes('无效')      // 延时锦囊判定失败/未生效(如"【乐不思蜀】无效")
+    || text.includes('受到')      // 受到伤害(掉血)
+    || text.includes('发动');     // 闪电等判定生效的措辞变体,以及部分技能发动提示
+}
+
 // queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
 // 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
 // 上限 5 条:无懈连锁反应这种极端场景可能一次性新增十几条日志,全部排队展示会等很久、
@@ -335,7 +350,10 @@ const LOG_TOAST_QUEUE_CAP = 5;
 let toastQueue = [];
 let toastQueueRunning = false;
 function queueLogToasts(g, lines){
-  const capped = lines.length > LOG_TOAST_QUEUE_CAP ? lines.slice(-LOG_TOAST_QUEUE_CAP) : lines;
+  // 先按 isToastworthyLog 过滤掉不值得弹的日志(摸牌/回合切换等),上限只针对过滤后剩下的
+  // 这些"真正会弹"的日志计数,不该把无关日志也算进这5条名额里。
+  const worthy = lines.filter(isToastworthyLog);
+  const capped = worthy.length > LOG_TOAST_QUEUE_CAP ? worthy.slice(-LOG_TOAST_QUEUE_CAP) : worthy;
   toastQueue.push(...capped);
   if(toastQueueRunning) return;
   toastQueueRunning = true;
@@ -343,7 +361,8 @@ function queueLogToasts(g, lines){
     if(toastQueue.length===0){ toastQueueRunning=false; return; }
     const text = toastQueue.shift();
     showLogToast(g, text);
-    setTimeout(step, 1200);
+    // 间隔要略大于动画总时长(2.5s),否则下一条会在上一条淡入-停留-淡出还没播完时就提前打断它。
+    setTimeout(step, 2600);
   };
   step();
 }
