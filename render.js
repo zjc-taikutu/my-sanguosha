@@ -551,7 +551,13 @@ function render(g){
       ? ('❤'.repeat(Math.max(0,p.hp)) + '<span class="empty">'+'♡'.repeat(Math.max(0,p.maxHp-p.hp))+'</span>')
       : '<span class="empty">待开局</span>';
     const handBacks = '<div class="backs">'+'<div class="cardback"></div>'.repeat((p.hand||[]).length)+'</div>';
-    const genLabel = g.started ? (gen?gen.name:'—') : '武将未定';
+    // 未正式开局时(g.started仍为false,含三选一选将阶段pickingGeneral):不能显示具体武将
+    // 名字——但 gen(=getGeneral(p.general))在这个玩家选完之后就已经非空了(respondPickGeneral
+    // 立即赋值,不等其他人选完),所以这里不能直接判断"gen是否非空"来决定显示什么,而是要按
+    // "选没选"这个状态本身区分文案:还没选显示"武将未定",已经选定(但还没到大家都选完、正式
+    // 开局那一刻)显示"武将已选择"——只暴露"选没选"这个状态,不暴露选的是谁,和"其他玩家选择
+    // 进度"那部分的隐藏信息原则一致。这是每个座位各自独立判断,不只是自己这个座位。
+    const genLabel = g.started ? (gen?gen.name:'—') : (gen ? '武将已选择' : '武将未定');
     // 头像:必须同时满足"真的选定了武将(gen 非空)"和"g.started"才显示真实头像——只查 gen
     // 不够:三选一选将阶段(pickingGeneral)里,玩家选定后 p.general 就已经被设成真实武将id
     // (respondPickGeneral 立即赋值,不等其他人选完),但正式开局(finishGeneralAssign)前
@@ -871,14 +877,18 @@ function renderControls(g){
     // 两种开局模式的按钮并列:随机武将(原有行为,直接分配)/三选一(进入 pickingGeneral
     // 阶段各自选择)。不管哪种模式,startGame(mode) 内部都靠"开局前不放回抽样锁定这局武将池"
     // 保证同局武将互不重复,这里的按钮只负责传参、不做任何重复性判断。
+    // 两个按钮视觉权重必须一致(都用 ghost,不用 primary/ghost 这种"一个突出一个不突出"的
+    // 搭配)——这两个是平等的两种模式选择,不是"默认推荐项+备选项"的关系,主次视觉会误导玩家
+    // 下意识觉得该点哪个。人数计数两边都要显示(之前只有随机武将那个有,三选一没有,容易让人
+    // 忽略"三选一同样受人数门槛限制"这件事)。
     const btnRandom=document.createElement('button');
-    btnRandom.className='primary'; btnRandom.textContent='开始游戏(随机武将)（'+cnt+'/'+SEATS+'）';
+    btnRandom.className='ghost'; btnRandom.textContent='开始游戏(随机武将)（'+cnt+'/'+SEATS+'）';
     btnRandom.disabled = cnt<MIN_PLAYERS;
     btnRandom.onclick=()=>startGame('random');
     c.appendChild(btnRandom);
 
     const btnPick=document.createElement('button');
-    btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)';
+    btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)（'+cnt+'/'+SEATS+'）';
     btnPick.disabled = cnt<MIN_PLAYERS;
     btnPick.onclick=()=>startGame('pick');
     c.appendChild(btnPick);
