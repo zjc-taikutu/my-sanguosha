@@ -195,12 +195,27 @@
      那些场景不适合放大预览,所以只在手牌容器 .hand 内的 .card 上生效,不写成全局 .card:hover。
      transform-origin:bottom center——从底部中心往上放大,而不是整体居中放大,这样卡片
      左右两侧不会因为放大而把相邻手牌顶开位置;z-index 提升到最高,保证放大后盖在
-     其它手牌上方而不是被压在下面。 */
-  .hand .card{ transition:transform .15s ease, box-shadow .15s ease; transform-origin:bottom center; }
-  .hand .card:hover{
-    transform:translateY(-30px) scale(2.2);
-    z-index:50;
-    box-shadow:0 12px 24px rgba(0,0,0,.5);
+     其它手牌上方而不是被压在下面。
+     真机踩过一个坑:iOS Safari 会用"触摸模拟:hover状态"(第一次点触发hover效果,第二次点
+     才真正触发click)让不支持hover的触屏设备也能"看到"CSS里写的hover效果——这套效果本来
+     就没打算给手机用,结果被意外触发,连带两个问题:①手机上点一张牌变成要点两次才能真正
+     打出(第一次点击被hover动画"消耗"掉了,这是此前一直存在但没被明确报告过的隐藏可用性
+     问题,根因和下面这条是同一个);②项目里每次游戏状态更新会把整排手牌DOM销毁重建(含
+     图片重新加载),放大+阴影动画叠加高频重绘,在iOS上开销叠加导致明显卡顿甚至卡死。
+     修复:改用 @media (hover:hover) and (pointer:fine) 限定——hover:hover 要求设备真的
+     支持悬停交互,pointer:fine 要求是精确指点设备(鼠标),两者一起用比单独查hover:hover更
+     严格,即使某些触屏设备的浏览器错误报告hover:hover也会被pointer:coarse挡住,触屏设备
+     完全不会解析到这段规则,自然也不会被"模拟hover"误触发。box-shadow的transition也一并
+     移进媒体查询内部,只在真正会用到悬停放大效果的设备上才声明这段动画(基础.card规则只
+     保留transform的transition,不支持hover的设备不需要解析这段无用声明)。 */
+  .hand .card{ transition:transform .15s ease; transform-origin:bottom center; }
+  @media (hover: hover) and (pointer: fine){
+    .hand .card:hover{
+      transform:translateY(-30px) scale(2.2);
+      z-index:50;
+      box-shadow:0 12px 24px rgba(0,0,0,.5);
+      transition:transform .15s ease, box-shadow .15s ease;
+    }
   }
   /* ===== 卡片分区版式(顶部标题栏+下方插画区域,更接近实体卡牌观感)=====
      曾经是"图片铺满全卡+.big牌名大字靠no-art控制显示/隐藏"这版,现在改成固定分区:
@@ -521,9 +536,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=68"></script>
-<script src="data.js?v=68"></script>
-<script src="game.js?v=68"></script>
-<script src="render.js?v=68"></script>
+<script src="config.js?v=69"></script>
+<script src="data.js?v=69"></script>
+<script src="game.js?v=69"></script>
+<script src="render.js?v=69"></script>
 </body>
 </html>
