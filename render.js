@@ -1377,14 +1377,20 @@ function renderHand(g){
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 四角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
+    // 【曾经的定位遗留问题】.corner 曾经是 .card-title/.card-art-box 的同级兄弟节点,相对
+    // 整张卡片(.card)绝对定位——但卡片顶部22%被标题栏占据,导致角标实际贴到标题栏附近,
+    // 不是贴在插画区域的四个角落。现在把两个 .corner 挪进 .card-art-box 内部,让它们相对
+    // 插画区域本身定位(.card-art-box 是 position:relative),top:5px/left:7px 这些数值不用
+    // 改,含义自然变成"插画区域内部的5px/7px",准确贴在插画区域角落,不会再侵入标题栏。
     const imgSrc = cardImageSrc(card.name);
     const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
     const cornerText = cardFace(card)||'';
     el.innerHTML =
       '<div class="card-title">'+card.name+'</div>'
-      +'<div class="card-art-box">'+imgTag+'</div>'
-      +'<div class="corner">'+cornerText+'</div>'
-      +'<div class="corner br">'+cornerText+'</div>';
+      +'<div class="card-art-box">'+imgTag
+        +'<div class="corner">'+cornerText+'</div>'
+        +'<div class="corner br">'+cornerText+'</div>'
+      +'</div>';
     el.classList.toggle('no-art', !imgSrc); // no-art 现在只控制插画区域的占位底色,不再控制牌名文字的显示/隐藏
 
     let usable=false, onClick=null;

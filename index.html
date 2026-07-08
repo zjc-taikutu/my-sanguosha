@@ -200,16 +200,20 @@
   /* 没图时(映射表缺失、或全部候选格式都加载失败)插画区域留一块占位底色,不完全空白,
      也不会露出浏览器原生的"图裂了"破图标(<img>本身已被 cardImgError display:none)。 */
   .card.no-art .card-art-box{background:rgba(0,0,0,.08);}
-  /* 角标叠加在插画区域(.card-art-box)左上/右下角,不是整张卡片的左上/右下角——
-     标题栏(.card-title)固定占卡片顶部22%高度,若角标继续用相对整张卡片的 top:5px 定位,
-     会正好落在标题栏文字所在的那一行,和牌名文字视觉重叠、糊成一团(真实截图验证时
-     发现的问题,不是凭空预防)。top 用 calc(22%+5px) 顶开标题栏的高度,让角标准确落在
-     插画区域内的左上角,不再和标题栏冲突;深色半透明底+圆角保证插画背景再花哨,花色
-     点数文字都清晰可读——这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),
-     不能被图片替代或省略。 */
-  .card .corner{position:absolute;top:calc(22% + 5px);left:7px;font-size:13px;font-weight:700;z-index:2;
+  /* 角标现在是 .card-art-box 的子元素(不再是 .card 的直接子元素),相对插画区域本身
+     绝对定位,不是相对整张卡片——.card-art-box 有 position:relative,top:5px/left:7px
+     这些数值的含义天然就是"插画区域内部的5px/7px",准确贴在插画区域左上/右下角。
+     【曾经踩过的坑】改版式引入标题栏(.card-title 占卡片顶部22%高度)时,.corner 一开始
+     仍是 .card 的直接子元素、相对整张卡片定位,top:5px 因此落在标题栏那一行、和牌名文字
+     视觉重叠——当时用 top:calc(22%+5px) 顶开标题栏高度作为临时修复。这次把 .corner 挪进
+     .card-art-box 内部后,定位基准本身换成了插画区域,不再需要那个百分比换算,顺带把
+     calc(22%+5px) 改回朴素的 top:5px——同一个视觉效果,写法更直接、不依赖标题栏和插画
+     区域两者高度比例的耦合关系。深色半透明底+圆角保证插画背景再花哨,花色点数文字都
+     清晰可读——这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),不能被图片
+     替代或省略。 */
+  .card-art-box .corner{position:absolute;top:5px;left:7px;font-size:13px;font-weight:700;z-index:2;
     background:rgba(0,0,0,.55);border-radius:4px;padding:1px 4px;}
-  .card .corner.br{top:auto;left:auto;bottom:5px;right:7px;transform:rotate(180deg);}
+  .card-art-box .corner.br{top:auto;left:auto;bottom:5px;right:7px;transform:rotate(180deg);}
   .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
   .card.tao .card-title{color:var(--jade);}
   .card.shan .card-title{color:#2f5b86;}
@@ -328,7 +332,7 @@
     .card{width:50px;height:74px;}
     .card-title{font-size:11px;}
     .card.trick .card-title,.card.steal .card-title{font-size:9px;}
-    .card .corner{font-size:11px;}
+    .card-art-box .corner{font-size:11px;}
     /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
        视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
@@ -461,9 +465,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=56"></script>
-<script src="data.js?v=56"></script>
-<script src="game.js?v=56"></script>
-<script src="render.js?v=56"></script>
+<script src="config.js?v=57"></script>
+<script src="data.js?v=57"></script>
+<script src="game.js?v=57"></script>
+<script src="render.js?v=57"></script>
 </body>
 </html>
