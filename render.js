@@ -46,6 +46,10 @@ const CARD_PINYIN = {
   '的卢':'dilu', '绝影':'jueying', '爪黄飞电':'zhuahuangfeidian',
   '赤兔':'chitu', '紫骍':'zixing', '大宛':'dawan', '骕骦':'sushuang'
 };
+const SKILL_PINYIN = {
+  '天妒':'tiandu', '遗计':'yiji', '枭姬':'xiaoji', '反馈':'fankui',
+  '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng'
+};
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
 // 判断影响,和早期"图片铺满全卡、靠no-art控制牌名文字显示/隐藏"那版不同(见 CLAUDE.md)。
@@ -242,6 +246,20 @@ function maybePlayCardSound(g){
     audio.play().catch(()=>{}); // 浏览器可能因为还没有用户交互而拒绝播放,静默忽略,不影响游戏运行
   }catch(e){}
 }
+// maybePlaySkillSound: 和 maybePlayCardSound 同一模式,独立字段(lastSkillSound)+独立哨兵变量。
+let lastPlayedSkillSeq = undefined;
+function maybePlaySkillSound(g){
+  if(!g.lastSkillSound) return;
+  if(lastPlayedSkillSeq===undefined){ lastPlayedSkillSeq=g.lastSkillSound.seq; return; }
+  if(g.lastSkillSound.seq===lastPlayedSkillSeq) return;
+  lastPlayedSkillSeq = g.lastSkillSound.seq;
+  const py = SKILL_PINYIN[g.lastSkillSound.name];
+  if(!py) return;
+  try{
+    const audio = new Audio('assets/audio/'+py+'.mp3');
+    audio.play().catch(()=>{});
+  }catch(e){}
+}
 
 // queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
 // 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
@@ -407,6 +425,7 @@ function render(g){
     lastAnnouncedTurnKey = undefined;
   }
   maybePlayCardSound(g); // 打出手牌语音:和上面announceMyTurn同一批"每次状态更新都检测一次"的位置
+  maybePlaySkillSound(g); // 技能发动语音:同一批检测
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。

@@ -131,7 +131,7 @@ const GENERALS = {
         g.log = pushLog(g.log, p.name+' 是否发动【遗计】,观看牌堆顶两张牌…');
       }
     } },
-  sunshangxiang: { id:'sunshangxiang', name:'孙尚香', maxHp:3, skill:'枭姬', desc:'当你失去装备区里的一张装备牌时,你摸两张牌。', hooks:{ onLoseEquip:(g, seat, ctx)=>{ const n = 2 * (ctx && ctx.count || 1); drawN(g, seat, n); g.log=pushLog(g.log, g.players[seat].name+' 发动【枭姬】,摸'+n+'张牌'); } } },
+  sunshangxiang: { id:'sunshangxiang', name:'孙尚香', maxHp:3, skill:'枭姬', desc:'当你失去装备区里的一张装备牌时,你摸两张牌。', hooks:{ onLoseEquip:(g, seat, ctx)=>{ const n = 2 * (ctx && ctx.count || 1); drawN(g, seat, n); g.log=pushLog(g.log, g.players[seat].name+' 发动【枭姬】,摸'+n+'张牌'); markSkillSound(g, '枭姬'); } } },
   zhaoyun:       { id:'zhaoyun',       name:'赵云',   maxHp:4, skill:'龙胆', desc:'你可以将【杀】当【闪】、【闪】当【杀】使用(1:1 转化)。', caps:{ longdan:true } },
   lvmeng:        { id:'lvmeng',        name:'吕蒙',   maxHp:4, skill:'克己', desc:'若你于出牌阶段未使用或打出过【杀】,你可以跳过弃牌阶段(手牌超过体力上限也不必弃牌)。', caps:{ keji:true } },
   simayi:        { id:'simayi',        name:'司马懿', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
@@ -148,6 +148,7 @@ const GENERALS = {
         const j = Math.floor(Math.random()*src.hand.length);
         g.players[seat].hand.push(src.hand.splice(j,1)[0]);
         g.log = pushLog(g.log, g.players[seat].name+' 【反馈】发动,获得 '+src.name+' 一张牌');
+        markSkillSound(g, '反馈');
       }
     } },
   machao:        { id:'machao',        name:'马超',   maxHp:4, skill:'马术/铁骑',

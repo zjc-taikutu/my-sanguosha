@@ -32,6 +32,7 @@ function joinRoom(){
     if(g === null){
       g = { started:false, players:[], turn:0, phase:'lobby', deck:[], discard:[],
             pending:null, shaUsed:false, roundNum:1, roundSeatsActed:[], lastCardSound:null,
+            lastSkillSound:null,
             log:['房间已创建,等待玩家加入'] };
     }
     g.players = g.players || [];
@@ -81,6 +82,8 @@ function normalize(g){
   if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
+  // 技能发动语音事件:同上,旧存档回退 null
+  if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   g.players.forEach(p=>{ if(p){ p.hand = p.hand || []; if(typeof p.alive!=='boolean') p.alive=true;
     // 体力上限防御:旧数据/异常路径缺失时回退,避免血条/桃回血读到 undefined
     if(typeof p.maxHp!=='number') p.maxHp = MAX_HP;
@@ -192,6 +195,14 @@ function pushLog(log, msg){
 function markCardSound(g, cardName){
   const seq = (g.lastCardSound && g.lastCardSound.seq) ? g.lastCardSound.seq : 0;
   g.lastCardSound = { name: cardName, seq: seq+1 };
+}
+// markSkillSound: 和 markCardSound 同一模式,独立字段(lastSkillSound),记录"这次真正发动了
+// 哪个技能"这个语音播放事件,供 render.js 的 maybePlaySkillSound 检测并播放对应语音
+// (assets/audio/{SKILL_PINYIN拼音}.mp3)。只在"确认真的发动/生效"的分支调用,不在"仅仅有
+// 资格/被询问是否发动"时调用。
+function markSkillSound(g, skillName){
+  const seq = (g.lastSkillSound && g.lastSkillSound.seq) ? g.lastSkillSound.seq : 0;
+  g.lastSkillSound = { name: skillName, seq: seq+1 };
 }
 function nextAlive(g, from){
   const n=g.players.length; // 按实际玩家数取模,支持 2 或 3 人
@@ -306,6 +317,7 @@ function respondGuicai(useReplace, cardIdx){
       me.hand.splice(cardIdx,1);
       g.discard.push(card);
       g.log=pushLog(g.log, me.name+' 发动【鬼才】,打出'+card.suit+rankText(card.rank)+' 替换判定牌');
+      markSkillSound(g, '鬼才');
       finishGuicai(g, card);
       return g;
     }
@@ -750,6 +762,7 @@ function respondJiedao(useSha){
       const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
       g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(card.name==='杀'?'【杀】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
       markCardSound(g, '杀');
+      if(card.name!=='杀'){ if(hasCap(A,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(A,'wusheng')) markSkillSound(g,'武圣'); }
       g.pending=null;
       resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', singleCardShaColor(card));
       return g;
@@ -1197,6 +1210,7 @@ function respondYijiAsk(activate){
     g.pending = { type:'yijiAssign', seat, cards, resume };
     g.phase='yijiAssign';
     g.log=pushLog(g.log, g.players[seat].name+' 发动【遗计】,正在分配牌…'); // 不写牌面
+    markSkillSound(g, '遗计');
     return g;
   });
 }
@@ -1305,6 +1319,7 @@ function duelResponse(useSha){
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       markCardSound(g, '杀');
+      if(card.name!=='杀'){ if(hasCap(me,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(me,'wusheng')) markSkillSound(g,'武圣'); }
       if(played<needed){ g.pending.shaCount=played; return g; } // 吕布【无双】:这一轮还没出满,留在同一个人身上
       g.pending.active = (mySeat===g.pending.from)?g.pending.to:g.pending.from;
       g.pending.shaCount = 0; // 换人,计数归零重新开始
@@ -1706,6 +1721,10 @@ function aoeRespond(useCard){
       const label = card.name===need ? '打出【'+need+'】' : '打出【'+card.name+'】当【'+need+'】';
       g.log=pushLog(g.log, me.name+' '+label+',抵消【'+g.aoe.trick+'】');
       markCardSound(g, need);
+      if(card.name!==need){
+        if(hasCap(me,'longdan')) markSkillSound(g,'龙胆');
+        else if(need==='杀' && hasCap(me,'wusheng')) markSkillSound(g,'武圣');
+      }
       aoeAdvance(g, mySeat);
       return g;
     }
@@ -1734,6 +1753,7 @@ function respondShan(useShan){
       const played=(g.pending.shanCount||0)+1;
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       markCardSound(g, '闪');
+      if(card.name!=='闪' && hasCap(me,'longdan')) markSkillSound(g,'龙胆');
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
       // 青龙偃月刀:杀被闪抵消,装备者(攻击者)可选择再对同一目标使用一张杀——不计入 g.shaUsed
       // 次数限制、无距离限制(官方原文括号里明确写了),只在攻击者手里确实有能当杀的牌时才问
@@ -2084,6 +2104,7 @@ function maybeTiandu(g, seat, card){
   g.discard.splice(idx,1);
   p.hand.push(card);
   g.log=pushLog(g.log, p.name+' 【天妒】发动,获得判定牌【'+card.name+'】');
+  markSkillSound(g, '天妒');
   return true;
 }
 // finishDelayCard: 用最终判定牌(可能被鬼才替换过)调用该延时锦囊的 effect,处理去向(传下家/弃置)。
