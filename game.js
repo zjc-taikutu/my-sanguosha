@@ -540,7 +540,13 @@ const CARD_PLAYS = {
   '杀': {
     target:true,
     canPlay:(g,me,card)=> canUseAs(me,card,'杀') && (!g.shaUsed || hasCap(me,'unlimitedSha')), // 无限杀:张飞【咆哮】或诸葛连弩
-    canTarget:(g,me,card,targetSeat)=> canReachSha(g, mySeat, targetSeat), // 只有杀受攻击距离限制
+    canTarget:(g,me,card,targetSeat)=>{
+      const target=g.players[targetSeat];
+      // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【杀】的目标——距离校验之外额外叠加的
+      // 一层限制,和距离一样都是"canTarget"这个 seam 的用途(见架构约定:只有杀挂了canTarget)。
+      if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
+      return canReachSha(g, mySeat, targetSeat); // 只有杀受攻击距离限制
+    },
     effect:(g,me,card,targetSeat)=>{
       const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
       g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
@@ -555,6 +561,13 @@ const CARD_PLAYS = {
   '决斗': {
     target:true,
     canPlay:(g,me,card)=> card.name==='决斗',
+    // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【决斗】的目标。决斗本身无距离限制,
+    // 所以这里不像杀那样叠加 canReachSha,只单独处理这一条限制。
+    canTarget:(g,me,card,targetSeat)=>{
+      const target=g.players[targetSeat];
+      if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
+      return true;
+    },
     effect:(g,me,card,targetSeat)=>{
       g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【决斗】');
       // 先开无懈窗口；无人无懈才真正进入 duel 弃杀流程（见 resolveTrick）
@@ -806,6 +819,9 @@ function jieDaoShaRen(cardIdx, seatA, seatB){
     const A=g.players[seatA], B=g.players[seatB];
     if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
     if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
+    // 诸葛亮【空城】:借刀杀人的B同样是"被指定为这张杀的目标"(官方FAQ明确空城对借刀杀人的B
+    // 目标同样生效),不能因为这条路径不走 CARD_PLAYS['杀'].canTarget 就漏了这层保护。
+    if(hasCap(B,'kongcheng') && (B.hand||[]).length===0) return g;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 对 '+A.name+' 使用【借刀杀人】,目标 '+B.name);
@@ -927,6 +943,9 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     const tgt=g.players[targetSeat];
     if(targetSeat===mySeat||!tgt||!tgt.alive) return g;
     if(!canReachSha(g, mySeat, targetSeat)) return g;          // 攻击距离(丈八 range3)
+    // 诸葛亮【空城】:丈八蛇矛这条路径不走 CARD_PLAYS['杀'].canTarget,单独补上同一条限制
+    // ——这仍然是"使用杀"这件事,空城不区分杀是怎么凑出来的。
+    if(hasCap(tgt,'kongcheng') && (tgt.hand||[]).length===0) return g;
     // 两张牌进弃牌堆:先弹大下标再弹小下标,避免 splice 后错位
     const hi=Math.max(idx1,idx2), lo=Math.min(idx1,idx2);
     g.discard.push(me.hand.splice(hi,1)[0]);
@@ -960,6 +979,9 @@ function playShaFangtian(cardIdx, targets){
       seen.add(t);
       const tp=g.players[t];
       if(!tp || !tp.alive || t===mySeat || !canReachSha(g, mySeat, t)) return g;
+      // 诸葛亮【空城】:方天画戟这条路径同样不走 CARD_PLAYS['杀'].canTarget,逐个目标补上
+      // 同一条限制——多目标里任何一个是空城状态的诸葛亮都不能被列入。
+      if(hasCap(tp,'kongcheng') && (tp.hand||[]).length===0) return g;
     }
     // 按现有回合方向(nextAlive)从攻击者起重排,不用玩家提交的原始顺序
     const order=[]; let s=mySeat;

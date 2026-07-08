@@ -641,7 +641,11 @@ function render(g){
     // 顺手牵羊/兵粮寸断(直接使用场景,不是徐晃【断粮】那条路径)距离限制均为1,和服务端
     // canTarget 的口径一致;过河拆桥/乐不思蜀/闪电均无此限制,不在这个判断范围内。
     const distLimited = !!(selCard && (selCard.name==='顺手牵羊' || selCard.name==='兵粮寸断'));
-    const inRange = (!isShaSel || canReachSha(g, mySeat, i)) && (!distLimited || distance(g, mySeat, i) <= 1);
+    const duelSel = !!(selCard && selCard.name==='决斗'); // 决斗:无距离限制,但同样受空城限制
+    // 诸葛亮【空城】:若目标没有手牌,不能成为【杀】或【决斗】的目标,和服务端
+    // CARD_PLAYS['杀'/'决斗'].canTarget 的判断口径一致。
+    const kongchengBlocked = (isShaSel || duelSel) && hasCap(p,'kongcheng') && (p.hand||[]).length===0;
+    const inRange = (!isShaSel || canReachSha(g, mySeat, i)) && (!distLimited || distance(g, mySeat, i) <= 1) && !kongchengBlocked;
     // 默认不能选自己;是否放行自选要按这张延时锦囊自己的 onlySelf 判断(闪电 onlySelf:true 只能选自己,
     // 乐不思蜀/兵粮寸断 onlySelf:false 和普通牌一样不能选自己)。
     // 之前误用 CARD_PLAYS[name].allowSelf(delayTrickPlay 这个共享对象,所有延时锦囊都是 allowSelf:true,
@@ -666,6 +670,12 @@ function render(g){
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, c0, i), ()=>playCard(idx, actionId, i)); };
+      } else if((isShaSel||duelSel) && i!==mySeat && p.alive && kongchengBlocked){
+        // 诸葛亮【空城】:没有手牌,不能被选为杀/决斗的目标 —— 暗色点线 + 角标 + 悬浮说明,
+        // 不可点(同款视觉,避免玩家点了却被服务端 canTarget 拒绝)。
+        d.style.outline='2px dotted #6b5b4d';
+        d.title = '【空城】：该角色没有手牌,不能成为杀/决斗的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">空城</span>';
       } else if((isShaSel||distLimited) && i!==mySeat && p.alive && !inRange){
         // 够不着:选了杀但超出攻击距离,或选了顺手牵羊/兵粮寸断但超出距离1 —— 暗色点线 + 角标 +
         // 悬浮说明,不可点(和杀同款视觉,避免玩家点了却被服务端 canTarget 拒绝)。
@@ -685,12 +695,17 @@ function render(g){
     // 丈八蛇矛:已选满两张牌后,对手作为杀的目标(距离规则同普通杀,与 selectedCardIdx 路径互斥)
     if(zhangbaMode && zhangbaPicks.length===2 && g.phase==='play' && g.turn===mySeat){
       const reach = canReachSha(g, mySeat, i);
-      if(i!==mySeat && p.alive && reach){
+      const zhangbaKongcheng = hasCap(p,'kongcheng') && (p.hand||[]).length===0; // 【空城】同样限制丈八蛇矛这条杀的路径
+      if(i!==mySeat && p.alive && reach && !zhangbaKongcheng){
         // 同上:a/b 在挂载时冻结,不在点击时才读 zhangbaPicks(它会被 confirmAndPlay 的 cleanup 清空)
         const a=zhangbaPicks[0], b=zhangbaPicks[1];
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay('对 '+g.players[i].name+' 使用两张牌当【杀】？', ()=>playZhangbaSha(a, b, i)); };
+      } else if(i!==mySeat && p.alive && zhangbaKongcheng){
+        d.style.outline='2px dotted #6b5b4d';
+        d.title = '【空城】：该角色没有手牌,不能成为杀的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">空城</span>';
       } else if(i!==mySeat && p.alive && !reach){
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
@@ -701,8 +716,9 @@ function render(g){
     // 不强制选满(选够1个即可点"确认发动");距离限制是推断而非确证的官方规则(见 EQUIPS['方天画戟'].desc)。
     if(fangtianMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
       const reach = canReachSha(g, mySeat, i);
+      const fangtianKongcheng = hasCap(p,'kongcheng') && (p.hand||[]).length===0; // 【空城】同样限制方天画戟的额外目标
       const picked = fangtianPicks.includes(i);
-      const selectable = reach && (picked || fangtianPicks.length<3);
+      const selectable = reach && !fangtianKongcheng && (picked || fangtianPicks.length<3);
       if(selectable){
         d.style.cursor='pointer';
         if(picked) d.style.outline='3px solid var(--gold)';
@@ -712,6 +728,10 @@ function render(g){
           else if(fangtianPicks.length<3) fangtianPicks.push(i);
           render(g);
         };
+      } else if(fangtianKongcheng){
+        d.style.outline='2px dotted #6b5b4d';
+        d.title = '【空城】：该角色没有手牌,不能成为杀的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">空城</span>';
       } else if(!reach){
         d.style.outline='2px dotted #6b5b4d';
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
@@ -738,14 +758,16 @@ function render(g){
     // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
     if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
       if(jiedaoSeatA===null){
-        // 选 A:排除自己;要有武器;且场上要存在至少一个 A 攻击范围内的其他存活角色(否则选了也选不出 B)
-        const hasSomeB = g.players.some((B,bi)=> B && B.alive && bi!==i && canReachSha(g,i,bi));
+        // 选 A:排除自己;要有武器;且场上要存在至少一个 A 攻击范围内、不是空城状态的其他存活角色
+        // (否则选了也选不出合法的 B)。诸葛亮【空城】:B 不能是没有手牌的诸葛亮,和服务端
+        // jieDaoShaRen 的校验口径一致。
+        const hasSomeB = g.players.some((B,bi)=> B && B.alive && bi!==i && canReachSha(g,i,bi) && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0));
         if(i!==mySeat && p.alive && p.equips && p.equips.weapon && hasSomeB){
           d.style.cursor='pointer';
           d.style.outline='2px dashed var(--cinnabar-bright)';
           d.onclick=()=>{ jiedaoSeatA=i; render(g); };
         }
-      } else if(i!==jiedaoSeatA && p.alive && canReachSha(g, jiedaoSeatA, i)){
+      } else if(i!==jiedaoSeatA && p.alive && canReachSha(g, jiedaoSeatA, i) && !(hasCap(p,'kongcheng') && (p.hand||[]).length===0)){
         // 同上:idx/seatA 挂载时冻结,不在点击时才读 selectedCardIdx/jiedaoSeatA
         const idx=selectedCardIdx, seatA=jiedaoSeatA, seatB=i;
         d.style.cursor='pointer';
