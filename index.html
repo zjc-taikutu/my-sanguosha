@@ -189,7 +189,19 @@
       整体调大调小只改这一处;响应式断点只需要覆盖这一个变量,不用再分别调整多处硬编码
       尺寸(见 CLAUDE.md)。 */
   }
-  .card:hover{transform:translateY(-4px);}
+  /* 手牌悬停放大预览(参考炉石传说手牌交互,纯桌面端效果——触屏设备没有hover这个交互
+     状态,手机端天然不会触发,不是bug,不需要额外处理)。.card 这个 class 同时被判定区之外
+     的场景复用(如郭嘉【遗计】看牌分配弹窗,render.js 里 createElement 直接生成 .card),
+     那些场景不适合放大预览,所以只在手牌容器 .hand 内的 .card 上生效,不写成全局 .card:hover。
+     transform-origin:bottom center——从底部中心往上放大,而不是整体居中放大,这样卡片
+     左右两侧不会因为放大而把相邻手牌顶开位置;z-index 提升到最高,保证放大后盖在
+     其它手牌上方而不是被压在下面。 */
+  .hand .card{ transition:transform .15s ease, box-shadow .15s ease; transform-origin:bottom center; }
+  .hand .card:hover{
+    transform:translateY(-30px) scale(2.2);
+    z-index:50;
+    box-shadow:0 12px 24px rgba(0,0,0,.5);
+  }
   /* ===== 卡片分区版式(顶部标题栏+下方插画区域,更接近实体卡牌观感)=====
      曾经是"图片铺满全卡+.big牌名大字靠no-art控制显示/隐藏"这版,现在改成固定分区:
      .card-title 牌名文字始终由代码生成、始终显示,不再依赖有没有图片(见 CLAUDE.md)。
@@ -509,9 +521,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=67"></script>
-<script src="data.js?v=67"></script>
-<script src="game.js?v=67"></script>
-<script src="render.js?v=67"></script>
+<script src="config.js?v=68"></script>
+<script src="data.js?v=68"></script>
+<script src="game.js?v=68"></script>
+<script src="render.js?v=68"></script>
 </body>
 </html>
