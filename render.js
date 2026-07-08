@@ -1386,11 +1386,19 @@ function renderHand(g){
     const cornerText = cardFace(card)||'';
     // 标题栏字号用 fitFontSize 实测自适应(取代早期"按牌名字数分档手动猜大小"的做法,
     // 那套只覆盖了4字/5字两档,任何新长度组合都要回来手动调整)。cardMetricsForViewport
-    // 按当前视口宽度取这一档卡片的实际宽度/--badge值/标题栏最大字号,titleMaxWidth 的
-    // padding 公式(--badge*0.12*2)必须和 CSS 里 .card-title 的 padding:0 calc(var(--badge)*0.12)
-    // 保持一致,否则算出来的字号会和实际可用空间对不上。
+    // 按当前视口宽度取这一档卡片的实际宽度/--badge值/标题栏最大字号。
+    // 【曾经反复出现三次的真实bug,这次修正】titleMaxWidth 曾经按 CSS 的 .card-title
+    // padding 系数(--badge*0.12*2)算,那只是"给文字预留的装饰性呼吸空间"这个很小的
+    // 数值(badge=20px时只有4.8px)——但左右两个图标(.corner花色角标、.info-badge-hit
+    // 问号)是绝对定位悬浮在标题栏上层的完整 badge 宽度方块(20px/16px/14px),不受父
+    // 元素padding约束、z-index比文字高。maxWidth 算的是"CSS padding算出来的名义宽度"
+    // 而不是"两个图标之间真正的净空间"——这两者是完全不同的两个数字,只要文字宽度超出
+    // 图标间真正的净空间,末尾的字就会被图标不透明地压住挡掉,不管字号算法本身多精确都
+    // 没用(算法只能保证"塞进算出来的maxWidth",算错了maxWidth,结果必然还是被挡)。
+    // 现在改成:卡片宽度减去左右各一个完整badge的宽度(图标真正占用、文字必须避开的
+    // 空间),再留4px缓冲。
     const m = cardMetricsForViewport();
-    const titleMaxWidth = m.cardWidth - m.badge * 0.12 * 2;
+    const titleMaxWidth = m.cardWidth - m.badge * 2 - 4;
     const titleFontSize = fitFontSize(card.name, titleMaxWidth, m.maxTitleFont, 700, CARD_TITLE_FONT_FAMILY) + 'px';
     el.innerHTML =
       '<div class="card-title" style="font-size:'+titleFontSize+'">'+card.name+'</div>'
@@ -1469,6 +1477,17 @@ function renderHand(g){
 // 塞进 maxWidth 的字号(不超过 maxFontSize),取代早期"按字数分档手动猜大小"的做法——
 // 新增任何长度的牌名都不需要回来手动调整,算法自动算出刚好放得下的字号。
 // 用一个模块级复用的canvas(避免每次调用都新建一个,减少开销)。
+// 【曾经的下限保护,已移除,真实bug】原来 return Math.max(scaled, maxFontSize*0.4) 设了
+// 一个"不低于maxFontSize*0.4"的下限,初衷是"避免极端长文字缩到无法辨认"——但用 Playwright
+// 实测"青龙偃月刀"（5字,64px卡片,两个20px图标间真实净空间只有~22px）发现:这个下限会
+// 反过来违背 fitFontSize 本身"保证文字塞进maxWidth"的核心承诺——被下限强行拉高到
+// maxFontSize*0.4(=5.6px)后,实际渲染宽度是29.45px,超过了22px的真实间隙,文字依然
+// 被左右两个图标压住,和"按maxWidth精确计算字号"这个函数存在的意义直接矛盾。有下限时,
+// "文字会不会被遮挡"这件事不再由 maxWidth 决定,而是由"maxFontSize*0.4 算出来的宽度
+// 是否偶然小于间隙"这个和 maxWidth 无关的巧合决定——这不是这个函数应该承诺的行为。
+// 现在去掉下限,允许字号真正缩到能塞进 maxWidth 为止(哪怕极端情况下缩得很小、肉眼难以
+// 辨认单个字符也认了)——"字虽然小但没被图标挡住"好于"字号被强行拉大但被图标挡住看不清
+// 是哪张牌",这是这次改动权衡后的选择。
 let _fitCanvas = null;
 const CARD_TITLE_FONT_FAMILY = '"Songti SC","Noto Serif SC",ui-serif,"STSong",serif'; // 和 body 的 font-family 保持一致(见 index.html);canvas 不支持"inherit",必须传具体字体栈
 function fitFontSize(text, maxWidth, maxFontSize, fontWeight, fontFamily){
@@ -1478,7 +1497,7 @@ function fitFontSize(text, maxWidth, maxFontSize, fontWeight, fontFamily){
   const width = ctx.measureText(text).width;
   if(width<=maxWidth) return maxFontSize;
   const scaled = maxFontSize * (maxWidth/width) * 0.96; // 0.96留安全余量,避免刚好卡在边缘
-  return Math.max(scaled, maxFontSize*0.4); // 下限保护,避免极端长文字缩到无法辨认
+  return scaled; // 不设下限——保证塞进maxWidth是这个函数唯一的承诺,见上方注释
 }
 // cardMetricsForViewport: 手牌卡片在当前视口宽度下的尺寸(卡片宽度/--badge值/标题栏
 // 最大字号)——和 index.html 里 .card 基础规则+两个响应式断点(max-width:640px/480px)
