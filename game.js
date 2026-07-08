@@ -413,9 +413,15 @@ function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); retur
 // 或 'pick'(三选一)。两种模式都在真正开局前用不放回抽样从全部武将里锁定"这局会用到哪些
 // 武将",不需要处理"两人抢同一个武将"这类实时并发冲突——抽样这一步和后续所有分配都在同一次
 // tx 事务里原子完成。
+// 守卫条件必须同时检查 g.phase==='pickingGeneral',不能只查 g.started——pick 模式下选将阶段
+// g.started 仍是 false,如果几个玩家几乎同时点了不同的开始按钮(比如一人先点"三选一"已经建立
+// 好候选状态,另一人紧接着点"随机武将"),只查 g.started 会让后到的那次调用照样通过守卫、把
+// 刚建立好的选将状态覆盖掉。Firebase 的 tx() 事务保证这些调用严格按到达服务器的先后顺序依次
+// 执行(不会真正并发、不会数据损坏),补上这条守卫后"先到先得,后面的都是 no-op"就是完全正确
+// 的行为,不需要额外加锁或更复杂的仲裁逻辑。
 function startGame(mode){
   tx(g=>{
-    if(g.started || g.players.length<MIN_PLAYERS) return g;
+    if(g.started || g.phase==='pickingGeneral' || g.players.length<MIN_PLAYERS) return g;
     if(mode!=='random' && mode!=='pick') return g;
     g.generalMode = mode;
     const n = g.players.length;
