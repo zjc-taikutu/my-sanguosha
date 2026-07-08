@@ -1030,6 +1030,32 @@ function duanLiang(cardIdx, targetSeat){
     return g;
   });
 }
+// qiXi: 甘宁【奇袭】——将任意一张黑色手牌当【过河拆桥】使用。
+// 和徐晃【断粮】一样走独立技能动作:真实手牌先离手并进弃牌堆,再按过河拆桥开启无懈窗口。
+function qiXi(cardIdx, targetSeat){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!hasCap(me,'qixi')) return g;
+    const card=me.hand[cardIdx];
+    if(!card) return g;
+    const isBlack = card.suit==='♠' || card.suit==='♣';
+    if(!isBlack) return g;
+    const target=g.players[targetSeat];
+    if(targetSeat===mySeat || !target || !target.alive) return g;
+    const hasTargetCard = (target.hand||[]).length>0
+      || EQUIP_SLOTS.some(s=>target.equips && target.equips[s])
+      || (target.delays||[]).length>0;
+    if(!hasTargetCard) return g;
+    me.hand.splice(cardIdx,1);
+    g.discard.push(card);
+    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【过河拆桥】使用,发动【奇袭】,目标 '+target.name);
+    markSkillSound(g, '奇袭');
+    markCardSound(g, '过河拆桥');
+    startTrick(g, {trick:'过河拆桥', from:mySeat, to:targetSeat});
+    return g;
+  });
+}
 // ===== 张郃【巧变】完整版:回合开始时一次性决策"是否发动"+"跳过判定/摸牌/出牌/弃牌
 // 阶段之一"(一回合限一次),仅选"出牌阶段"才附带"移动一张装备/判定牌"这个后续效果
 // (官方原文:"你可以弃置一张手牌并跳过一个阶段(准备阶段和结束阶段除外),若为:摸牌阶段,
