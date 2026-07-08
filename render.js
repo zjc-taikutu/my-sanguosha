@@ -141,6 +141,15 @@ let qiaobianCardIdx = null;      // 已选中要弃置的手牌下标
 let qiaobianPhaseChoice = null;  // 已选中的阶段:'judge'|'draw'|'play'|'discard'
 let qiaobianSrc = null;          // 已选中的来源 {kind:'equip'|'delay', seat, slot|idx, name}
 function resetQiaobian(){ qiaobianMode=false; qiaobianCardIdx=null; qiaobianPhaseChoice=null; qiaobianSrc=null; }
+// 诸葛亮【观星】:纯客户端两个数组(不入库),分别存"放牌堆顶"/"放牌堆底"的牌下标(下标指向
+// g.pending.cards),点击顺序即最终顺序(不用拖拽库)。UI 里这两个数组按"自然阅读顺序"维护
+// (先点的排在前面、代表玩家想让它更早被摸到/判定到);提交给 respondGuanxing 前,top 数组要
+// 整体 reverse 一次——服务端约定"topOrder 最后一个元素=牌堆顶(最先翻到)",这是因为 g.deck
+// 数组尾部才是真正的"牌堆顶"(judge()/drawN() 都用 pop() 从尾部取牌),和这里"数组前面=先摸到"
+// 这套面向玩家的直觉顺序方向相反,必须翻转对齐,不能直接把UI数组传过去。
+let guanxingTop = [];
+let guanxingBottom = [];
+function resetGuanxing(){ guanxingTop=[]; guanxingBottom=[]; }
 // 借刀杀人:两步选目标(先选 A:有武器的角色,再选 B:A 攻击范围内的其他角色),与常规单目标出牌
 // 走的 selectedCardIdx 通用块互斥(见 render 里 isJiedaoSel 的排除条件)。jiedaoSeatA===null 时选 A,
 // 选中后 jiedaoSeatA 存座位号,再点一次选 B 才真正提交。
@@ -801,7 +810,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',pickingGeneral:'选将阶段',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -845,6 +854,63 @@ function render(g){
 // 布局:候选卡片纵向堆叠(不是横排3列)——desc完整说明文字通常有一两句话,比单纯技能名长
 // 不少,三张卡片横排会挤得每张都很窄导致文字换行挤压变形,纵向堆叠让每张卡片都能占满宽度、
 // 有足够空间完整展示说明文字。
+// renderGuanxing: g.phase==='guanxingReview' 阶段的UI。只有 g.pending.seat===mySeat 才把
+// g.pending.cards 的真实牌面画出来(隐藏信息,和郭嘉【遗计】看牌同一原则);其余客户端只显示
+// 不剧透的banner。每张牌两个按钮"放牌堆顶"/"放牌堆底",点一次就分到对应堆(按钮上显示这张牌
+// 在该堆里的序号,方便玩家确认顺序),已分配的牌可以点"移出"重新选择。两堆牌数之和等于总牌数
+// 时才出现"确认"按钮,点击后把 guanxingTop 整体 reverse(UI是"先点=更早摸到"的直觉顺序,
+// 服务端 respondGuanxing 约定"topOrder最后一个=最先摸到",两者方向相反,这里做一次转换)。
+function renderGuanxing(g, c){
+  const seat = g.pending.seat;
+  if(seat!==mySeat){
+    setBanner(escapeHtml(g.players[seat].name)+' 正在观星…');
+    return;
+  }
+  const cards = g.pending.cards || [];
+  setBanner('【观星】查看牌堆顶 '+cards.length+' 张牌,为每张牌选择放到牌堆顶还是牌堆底');
+  const list=document.createElement('div'); list.className='general-pick-list'; // 复用三选一那套纵向列表样式,不用重新写一套
+  cards.forEach((card,idx)=>{
+    const inTop = guanxingTop.includes(idx);
+    const inBottom = guanxingBottom.includes(idx);
+    const row=document.createElement('div'); row.className='general-pick-card';
+    row.style.cursor='default';
+    const topPos = inTop ? (guanxingTop.indexOf(idx)+1) : null;
+    const bottomPos = inBottom ? (guanxingBottom.indexOf(idx)+1) : null;
+    row.innerHTML =
+      '<div class="general-pick-info">'
+        +'<div class="general-pick-name">'+(cardFace(card)||'')+' '+escapeHtml(card.name)+'</div>'
+        +'<div class="general-pick-desc">'+(inTop?'已放牌堆顶（第'+topPos+'个摸到）':inBottom?'已放牌堆底（第'+bottomPos+'个）':'尚未分配')+'</div>'
+      +'</div>';
+    const btnBox=document.createElement('div'); btnBox.style.display='flex'; btnBox.style.gap='8px';
+    if(!inTop && !inBottom){
+      const bTop=document.createElement('button'); bTop.className='ghost'; bTop.textContent='放牌堆顶';
+      bTop.onclick=(e)=>{ e.stopPropagation(); guanxingTop.push(idx); render(g); };
+      const bBottom=document.createElement('button'); bBottom.className='ghost'; bBottom.textContent='放牌堆底';
+      bBottom.onclick=(e)=>{ e.stopPropagation(); guanxingBottom.push(idx); render(g); };
+      btnBox.appendChild(bTop); btnBox.appendChild(bBottom);
+    } else {
+      const bUndo=document.createElement('button'); bUndo.className='ghost'; bUndo.textContent='移出重选';
+      bUndo.onclick=(e)=>{ e.stopPropagation(); guanxingTop=guanxingTop.filter(x=>x!==idx); guanxingBottom=guanxingBottom.filter(x=>x!==idx); render(g); };
+      btnBox.appendChild(bUndo);
+    }
+    row.appendChild(btnBox);
+    list.appendChild(row);
+  });
+  c.appendChild(list);
+  if(guanxingTop.length + guanxingBottom.length === cards.length && cards.length>0){
+    const ok=document.createElement('button'); ok.className='primary';
+    ok.textContent='确认';
+    ok.onclick=()=>{
+      // topOrder 传给服务端前整体 reverse——UI是"先点=更早摸到"的直觉顺序,respondGuanxing
+      // 约定"数组最后一个元素=最先摸到"(和 g.deck 用 pop() 从尾部取牌的方向对齐),两者方向
+      // 相反,这里必须转换,不能直接把 guanxingTop 原样传过去。
+      const top=[...guanxingTop].reverse(), bottom=[...guanxingBottom];
+      resetGuanxing();
+      respondGuanxing(top, bottom);
+    };
+    c.appendChild(ok);
+  }
+}
 function renderPickGeneral(g, c){
   const me = g.players[mySeat];
   if(!me){ setBanner('选将阶段…'); return; }
@@ -1174,6 +1240,13 @@ function renderControls(g){
     } else {
       setBanner('【五谷丰登】等待 '+escapeHtml(g.players[picker].name)+' 挑选。公共池:'+poolDesc);
     }
+    return;
+  }
+  // ===== 诸葛亮【观星】:准备阶段,仅本人可见牌面(和郭嘉【遗计】看牌同一隐藏信息原则),
+  // 其余客户端只看到不剧透的banner。UI:每张牌两个按钮"放牌堆顶"/"放牌堆底",点击顺序即
+  // 排列顺序(不用拖拽库);两堆牌数之和等于总牌数时才出现"确认"。 =====
+  if(g.phase==='guanxingReview' && g.pending && g.pending.type==='guanxingReview'){
+    renderGuanxing(g, c);
     return;
   }
   if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen' && g.pending.seat===mySeat){

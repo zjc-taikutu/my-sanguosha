@@ -181,9 +181,9 @@ const GENERALS = {
   lvbu:          { id:'lvbu',          name:'吕布',   maxHp:4, skill:'无双(锁定技)',
     desc:'你使用【杀】指定目标后,该角色需要连续使用两张【闪】才能抵消。你或你的对手使用/成为【决斗】的目标时,每次响应需要连续打出两张【杀】。',
     caps:{ wushuang:true } },
-  zhuge:         { id:'zhuge',         name:'诸葛亮', maxHp:3, skill:'空城',
-    desc:'锁定技,若你没有手牌,你不能成为【杀】或【决斗】的目标。',
-    caps:{ kongcheng:true } },
+  zhuge:         { id:'zhuge',         name:'诸葛亮', maxHp:3, skill:'观星/空城',
+    desc:'观星:准备阶段,你可以观看牌堆顶的X张牌(X为存活角色数且最多为5),以任意顺序分配至牌堆顶或牌堆底。空城:锁定技,若你没有手牌,你不能成为【杀】或【决斗】的目标。',
+    caps:{ guanxing:true, kongcheng:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

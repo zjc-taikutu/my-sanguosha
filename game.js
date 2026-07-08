@@ -174,6 +174,13 @@ function normalize(g){
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
   }
+  // 观星阶段:seat 应是数字座位号且对应玩家存活,cards 应是数组;不满足整体判无效,防止卡死
+  if(g.pending && g.pending.type==='guanxingReview'){
+    const gp=g.pending.seat;
+    if(typeof gp!=='number' || !g.players[gp] || !g.players[gp].alive || !Array.isArray(g.pending.cards)){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   // 乐不思蜀:跳过出牌阶段的标志位,和 p.dying 同款防御
@@ -1033,6 +1040,51 @@ function duanLiang(cardIdx, targetSeat){
 // continueQiaobianCheck: startTurn 里紧接着"声明轮到谁"之后调用,必须在 resolveDelayTricks
 // (真正的判定阶段)之前问,因为"跳过判定阶段"这个选项要求判定阶段还没发生。没有这个能力
 // 或没有手牌(付不起弃牌的代价)则直接放行到原有链路,不放行的人完全不受这次改动影响。
+// continueGuanxingCheck: 诸葛亮【观星】,回合开始时紧跟着"声明轮到谁"之后调用,比
+// continueQiaobianCheck 更早——观星是"准备阶段"的交互,巧变是"回合开始时(判定阶段之前)"
+// 的交互,准备阶段本来就在判定阶段之前,所以观星要插在链路里更靠前的位置。没有这个能力
+// 或牌堆(含重洗弃牌堆)一张都没有则直接放行到原有链路(继续走巧变检查),不受这次改动影响。
+function continueGuanxingCheck(g, seat){
+  const p=g.players[seat];
+  if(hasCap(p,'guanxing')){
+    const aliveN = g.players.filter(pp=>pp&&pp.alive).length;
+    const n = Math.min(5, aliveN);
+    if(ensureDeck(g) && g.deck.length>0){
+      const actualN = Math.min(n, g.deck.length); // 牌堆不够X张时,有多少看多少,不报错不卡死
+      // g.deck 数组尾部代表"牌堆顶"(judge()/drawN() 都用 g.deck.pop() 取牌),这里从数组末尾
+      // 切出 actualN 张——cards 里下标越大的牌离"牌堆顶"越近,cards[actualN-1] 就是原本
+      // 会被最先翻到的那张。
+      const cards = g.deck.splice(g.deck.length-actualN, actualN);
+      g.pending = { type:'guanxingReview', seat, cards };
+      g.phase = 'guanxingReview';
+      g.log = pushLog(g.log, p.name+' 发动【观星】,正在查看牌堆顶…'); // 不写牌面,私密信息
+      return;
+    }
+  }
+  continueQiaobianCheck(g, seat);
+}
+// respondGuanxing: 观星发动者提交排序结果。topOrder/bottomOrder 是 g.pending.cards 的下标
+// 数组(两者合起来必须恰好覆盖每个下标一次)。约定:topOrder 数组的**最后一个元素**对应的
+// 那张牌,是"放回牌堆顶之后最先会被翻到的那张"(和 judge() 用 pop() 从数组末尾取牌的方向
+// 严格对齐——这是最容易弄反的地方,前端UI组装 topOrder 时必须遵守这个约定,不能想当然按
+// "数组第一个=最先翻到"来传)。bottomOrder 里的牌整体放到牌堆最底部(数组最前面),牌堆见底
+// 前基本不会被摸到/判定到,顺序本身影响很小。
+function respondGuanxing(topOrder, bottomOrder){
+  tx(g=>{
+    if(g.phase!=='guanxingReview'||!g.pending||g.pending.type!=='guanxingReview'||g.pending.seat!==mySeat) return g;
+    const cards = g.pending.cards;
+    const allIdx = [...(topOrder||[]), ...(bottomOrder||[])];
+    // 校验:两个数组合起来必须恰好是cards的每个下标各出现一次,不能多选/漏选/重复选
+    if(allIdx.length!==cards.length || new Set(allIdx).size!==cards.length || !allIdx.every(i=>Number.isInteger(i)&&i>=0&&i<cards.length)) return g;
+    const topCards = topOrder.map(i=>cards[i]);
+    const bottomCards = bottomOrder.map(i=>cards[i]);
+    g.deck = [...bottomCards, ...g.deck, ...topCards];
+    g.pending = null;
+    g.log = pushLog(g.log, g.players[mySeat].name+' 【观星】结束'); // 不写具体怎么排的,私密信息
+    continueQiaobianCheck(g, mySeat); // 继续走向巧变检查->判定阶段,原有链路不变
+    return g;
+  });
+}
 function continueQiaobianCheck(g, seat){
   const p=g.players[seat];
   if(hasCap(p,'qiaobian') && (p.hand||[]).length>0){
@@ -2113,7 +2165,7 @@ function startTurn(g, seat){
   }
   g.turn=seat; g.shaUsed=false; g.duanliangUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
-  continueQiaobianCheck(g, seat);
+  continueGuanxingCheck(g, seat);
 }
 // enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。
