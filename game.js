@@ -481,7 +481,10 @@ function respondPickGeneral(generalId){
     if(!me || me.general || !Array.isArray(me.generalChoices) || !me.generalChoices.includes(generalId)) return g;
     me.general = generalId;
     me.generalChoices = null;
-    g.log = pushLog(g.log, me.name+' 选择了武将【'+GENERALS[generalId].name+'】');
+    // 日志刻意不写具体武将名字——候选和最终选择在正式开局(finishGeneralAssign)前都是
+    // 隐藏信息,g.log 是所有玩家共享同步的字段(配合"新日志自动弹toast提醒所有人"机制),
+    // 写具体牌名会让所有人立刻收到暴露选择的弹窗提示。
+    g.log = pushLog(g.log, me.name+' 已选定武将,等待其他玩家…');
     if(g.players.every(p=>p && p.general)){
       finishGeneralAssign(g); // 全部选完,自动进入正式开局
     }

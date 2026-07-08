@@ -503,13 +503,19 @@ function render(g){
       : '<span class="empty">待开局</span>';
     const handBacks = '<div class="backs">'+'<div class="cardback"></div>'.repeat((p.hand||[]).length)+'</div>';
     const genLabel = g.started ? (gen?gen.name:'—') : '武将未定';
-    // 头像:只有真的选定了武将(gen 非空)才尝试加载图片,大厅/旧数据(gen为null)直接走占位块,
-    // 不发一次注定 404 的图片请求。占位块默认 style="display:none"(有 <img> 时靠 onerror 才会
-    // 显示),没有 <img> 时直接不带这行内联样式,保持默认可见。
-    const avatarImg = gen
+    // 头像:必须同时满足"真的选定了武将(gen 非空)"和"g.started"才显示真实头像——只查 gen
+    // 不够:三选一选将阶段(pickingGeneral)里,玩家选定后 p.general 就已经被设成真实武将id
+    // (respondPickGeneral 立即赋值,不等其他人选完),但正式开局(finishGeneralAssign)前
+    // 这仍然是隐藏信息,不能提前把头像露出来暴露身份。这是一个真实修过的信息泄露 bug——
+    // 早先这里只判断 gen,选将阶段一旦自己选完,这个座位的头像会立刻正确显示出来,而当时
+    // 别的玩家可能还没选完、整局甚至还没正式开始。和下面 skillLine 用的 g.started&&gen
+    // 这个条件必须保持一致,不能各写各的。占位块默认 style="display:none"(有 <img> 时靠
+    // onerror 才会显示),没有 <img> 时直接不带这行内联样式,保持默认可见。
+    const avatarReady = g.started && gen;
+    const avatarImg = avatarReady
       ? '<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
       : '';
-    const avatarPlaceholder = '<div class="avatar-placeholder"'+(gen?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
+    const avatarPlaceholder = '<div class="avatar-placeholder"'+(avatarReady?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
     // 装备区(公开信息,和武将一样人人可见)。逐行列表(图标/标签+牌名+射程)。**对手卡片
     // 只渲染有装备的槽位,空槽整行不显示**(和判定区"空的时候不留占位"同一原则),只有
     // .seat.me 保留完整4槽显示(含空槽),因为你会想知道自己缺什么装备——这条决策独立于
