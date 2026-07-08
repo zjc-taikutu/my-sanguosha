@@ -201,19 +201,33 @@
      也不会露出浏览器原生的"图裂了"破图标(<img>本身已被 cardImgError display:none)。 */
   .card.no-art .card-art-box{background:rgba(0,0,0,.08);}
   /* 角标现在是 .card-art-box 的子元素(不再是 .card 的直接子元素),相对插画区域本身
-     绝对定位,不是相对整张卡片——.card-art-box 有 position:relative,top:5px/left:7px
-     这些数值的含义天然就是"插画区域内部的5px/7px",准确贴在插画区域左上/右下角。
+     绝对定位,不是相对整张卡片——.card-art-box 有 position:relative,top/left 这些数值
+     的含义天然就是"插画区域内部的偏移量",准确贴在插画区域左上/右下角。
      【曾经踩过的坑】改版式引入标题栏(.card-title 占卡片顶部22%高度)时,.corner 一开始
      仍是 .card 的直接子元素、相对整张卡片定位,top:5px 因此落在标题栏那一行、和牌名文字
-     视觉重叠——当时用 top:calc(22%+5px) 顶开标题栏高度作为临时修复。这次把 .corner 挪进
-     .card-art-box 内部后,定位基准本身换成了插画区域,不再需要那个百分比换算,顺带把
-     calc(22%+5px) 改回朴素的 top:5px——同一个视觉效果,写法更直接、不依赖标题栏和插画
-     区域两者高度比例的耦合关系。深色半透明底+圆角保证插画背景再花哨,花色点数文字都
-     清晰可读——这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),不能被图片
-     替代或省略。 */
-  .card-art-box .corner{position:absolute;top:5px;left:7px;font-size:13px;font-weight:700;z-index:2;
-    background:rgba(0,0,0,.55);border-radius:4px;padding:1px 4px;}
-  .card-art-box .corner.br{top:auto;left:auto;bottom:5px;right:7px;transform:rotate(180deg);}
+     视觉重叠——当时用 top:calc(22%+5px) 顶开标题栏高度作为临时修复,随后又改成把 .corner
+     挪进 .card-art-box 内部、定位基准换成插画区域本身,才彻底解决(不再需要百分比换算)。
+     半透明圆形徽章(金色细边+米金色文字)而不是方形深底硬贴标签:圆形+径向渐变(边缘更透明、
+     中心稍深)、金色细边框呼应三国题材质感,比直角矩形更融入暗色写实风插画,不会显得像
+     "贴上去的标签"。圆形不需要像方形文字那样旋转180度区分左上/右下(旋转对纯圆形没有
+     视觉意义),.corner.br 直接去掉 transform,只改用 bottom/right 定位到右下角。
+     **文字颜色的红黑花色区分不受这次改动影响**:角标内容是 cardFace(card)(data.js)生成的
+     `<span style="color:...">`,红桃/方块显示红色数字、黑桃/梅花显示黑色数字,inline style
+     的优先级天然高于这里 .corner 的 color(#e8d5a8 只是没有具体花色信息时——理论上不会发生,
+     cardFace 总是返回带色 span——的兜底文字色),红黑区分逻辑完全保留、不受圆形徽章样式
+     影响。深色渐变底+金边保证插画背景再花哨,花色点数文字都清晰可读——这是每张牌实例的
+     真实游戏机制信息(如乐不思蜀判定看花色),不能被图片替代或省略。 */
+  .card-art-box .corner{
+    position:absolute; top:5px; left:5px; z-index:2;
+    width:26px; height:26px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; font-weight:700;
+    background:radial-gradient(circle, rgba(20,14,8,.75) 0%, rgba(20,14,8,.55) 70%, rgba(20,14,8,0) 100%);
+    border:1px solid rgba(212,175,110,.5);
+    color:#e8d5a8;
+    box-shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+  .card-art-box .corner.br{top:auto;left:auto;bottom:5px;right:5px;transform:none;}
   .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
   .card.tao .card-title{color:var(--jade);}
   .card.shan .card-title{color:#2f5b86;}
@@ -332,7 +346,8 @@
     .card{width:50px;height:74px;}
     .card-title{font-size:11px;}
     .card.trick .card-title,.card.steal .card-title{font-size:9px;}
-    .card-art-box .corner{font-size:11px;}
+    /* 圆形徽章角标按比例缩小:26px在缩小后的50x74卡片上比例偏大,容易遮挡插画。 */
+    .card-art-box .corner{width:20px;height:20px;font-size:9px;}
     /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
        视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
@@ -361,6 +376,8 @@
     /* 卡片更窄了,角标视觉+热区再收一档(极窄屏卡片更窄,热区若不跟着缩会重新顶到花色点数) */
     .card .info-badge-hit{width:18px;height:18px;}
     .card .info-badge-hit .info-badge{width:12px;height:12px;font-size:8px;}
+    /* 圆形徽章角标在这一档卡片(46x68)上再收紧一次。 */
+    .card-art-box .corner{width:17px;height:17px;font-size:8px;}
     #logToast{font-size:14px;padding:7px 14px;}
   }
 
@@ -465,9 +482,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=57"></script>
-<script src="data.js?v=57"></script>
-<script src="game.js?v=57"></script>
-<script src="render.js?v=57"></script>
+<script src="config.js?v=58"></script>
+<script src="data.js?v=58"></script>
+<script src="game.js?v=58"></script>
+<script src="render.js?v=58"></script>
 </body>
 </html>
