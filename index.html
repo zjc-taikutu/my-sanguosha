@@ -228,12 +228,19 @@
     color:#e8d5a8;
     box-shadow:0 1px 3px rgba(0,0,0,.4);
   }
+  /* 每种牌型都有和标题文字同色的2px inset描边(+原有2px投影),.sha(杀)不再是唯一带描边
+     的牌型——统一视觉风格,五种牌型(杀/桃/闪/普通锦囊/顺手拆桥类)一眼就能通过卡片边框
+     颜色分辨类别,不需要盯着标题文字看。 */
   .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
+  .card.tao{box-shadow:0 0 0 2px var(--jade) inset,0 2px 0 rgba(0,0,0,.3);}
   .card.tao .card-title{color:var(--jade);}
+  .card.shan{box-shadow:0 0 0 2px #2f5b86 inset,0 2px 0 rgba(0,0,0,.3);}
   .card.shan .card-title{color:#2f5b86;}
+  .card.trick{box-shadow:0 0 0 2px #7a5fa0 inset,0 2px 0 rgba(0,0,0,.3);}
   /* 锦囊/顺手类牌名普遍更长(如"南蛮入侵"/"顺手牵羊"),标题栏字号比基础字号小一档,
      避免4字牌名在较窄的标题栏里挤压变形或溢出。 */
   .card.trick .card-title{color:#7a5fa0;font-size:12px;letter-spacing:-.02em;padding:0 3px;}
+  .card.steal{box-shadow:0 0 0 2px #1f7a6e inset,0 2px 0 rgba(0,0,0,.3);}
   .card.steal .card-title{color:#1f7a6e;font-size:12px;letter-spacing:-.02em;padding:0 3px;}
   .card.selected{outline:3px solid var(--gold);transform:translateY(-6px);}
   .card.disabled{opacity:.4;pointer-events:none;}
@@ -482,9 +489,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=59"></script>
-<script src="data.js?v=59"></script>
-<script src="game.js?v=59"></script>
-<script src="render.js?v=59"></script>
+<script src="config.js?v=60"></script>
+<script src="data.js?v=60"></script>
+<script src="game.js?v=60"></script>
+<script src="render.js?v=60"></script>
 </body>
 </html>
