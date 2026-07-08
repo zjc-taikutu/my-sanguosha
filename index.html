@@ -460,6 +460,20 @@
      日志默认收起,只留这一个入口,和第4步"banner常驻焦点 + 完整历史收进可展开面板"的设计一致。 */
   #logBtn{position:fixed;top:12px;right:64px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  /* 常驻"关闭房间"入口(cleanupRoom):不管游戏处于什么阶段都可见,固定挂在页面角落、不随
+     render(g)重绘变化。放左上角(而不是和 #helpBtn/#logBtn 同一个右上角)——避开已有的圆形
+     图标按钮堆叠,同时这个按钮本身是"危险操作"入口,和"帮助/日志"这类常规查看类按钮分开
+     放置,视觉上不容易被误认成同一组功能、也不容易被手误连续点错。
+     【真机踩过的坑】最初做成文字按钮("关闭房间"四个字,自适应宽度),在375px这类窄屏下
+     实测(Playwright量bounding box,不是只凭肉眼截图判断)发现文字按钮宽达74px,右边缘
+     (x=83.8)确实穿进了标题里"杀"字印章图标(h1 .seal,x从63.15起)的范围,是真实的视觉
+     重叠,不是误报。改成和 #helpBtn/#logBtn 同款的44x44圆形图标按钮(用🚪表示"离开/关闭
+     房间"这个语义,title属性保留完整文字说明给屏幕阅读器/鼠标悬停提示),右边缘固定在
+     x=56,比标题印章图标的起始位置(x=63.15)更靠左,不会有任何重叠——图标按钮的固定尺寸
+     比文字按钮的"按内容自适应宽度"更容易通过量出来的具体数值保证不越界。 */
+  #closeRoomBtn{position:fixed;top:12px;left:12px;z-index:100;width:44px;height:44px;
+    border:1px solid var(--cinnabar-bright);background:#1a1410;color:var(--cinnabar-bright);
+    font-size:20px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   .log-modal div:last-child{color:var(--paper);}
@@ -489,6 +503,7 @@
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
 <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
+<button id="closeRoomBtn" class="icon-btn" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
 <div id="logToast"></div>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
@@ -549,9 +564,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=70"></script>
-<script src="data.js?v=70"></script>
-<script src="game.js?v=70"></script>
-<script src="render.js?v=70"></script>
+<script src="config.js?v=71"></script>
+<script src="data.js?v=71"></script>
+<script src="game.js?v=71"></script>
+<script src="render.js?v=71"></script>
 </body>
 </html>

@@ -2212,7 +2212,10 @@ function newGame(){
 }
 
 function cleanupRoom(){
-  if(!confirm('确定要删除本房间数据吗?所有人会回到大厅。')) return;
+  // 常驻按钮任何阶段都能点到(见 render.js #closeRoomBtn),游戏进行中点击等于强制中断
+  // 所有人的对局且不可恢复——提示文案明确说清楚这一点,不区分"进行中"/"已结束"两套逻辑,
+  // 行为本身(删除房间数据+所有人回大厅)完全一致,只是让玩家点之前多一层警示。
+  if(!confirm('确定要关闭本房间吗?这会删除本房间数据,所有人会立即回到大厅——如果游戏正在进行中,会直接中断当前对局且无法恢复。')) return;
   if(gameRef) gameRef.off();
   gameRef.remove().then(backToLobby).catch(err=>{
     alert('清理失败: '+err.message);

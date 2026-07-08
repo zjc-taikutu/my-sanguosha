@@ -255,6 +255,11 @@ function unlockAudioOnce(){
 document.addEventListener('touchstart', unlockAudioOnce, {once:true, passive:true});
 document.addEventListener('click', unlockAudioOnce, {once:true, passive:true});
 
+// 常驻"关闭房间"按钮(cleanupRoom):只需要绑定一次,不放进render(g)里——这是一个固定
+// 挂在页面角落、不随游戏状态变化的元素,和 #helpBtn/#logBtn 同一类"页面初始化时绑一次"
+// 的静态入口,不需要每次重绘都重新赋值 onclick(重复赋值同一个函数本身无害,但没必要)。
+document.getElementById('closeRoomBtn').onclick = cleanupRoom;
+
 // ===== 打出手牌语音:所有在场玩家(不只是出牌的人自己)都应该听到,靠共享状态
 // g.lastCardSound(game.js 的 markCardSound 在每个"真正打出/使用一张牌"的关键节点写入)
 // 同步触发,和 lastAnnouncedTurnKey 同一套去重模式(哨兵值+序号比较,不是比较牌名文本——
@@ -769,9 +774,9 @@ function renderControls(g){
   if(g.phase==='over'){
     const btn=document.createElement('button'); btn.className='primary';
     btn.textContent='再来一局'; btn.onclick=newGame; c.appendChild(btn);
-    const clean=document.createElement('button'); clean.className='ghost';
-    clean.textContent='结束并清理房间'; clean.onclick=cleanupRoom; c.appendChild(clean);
-    setBanner('🏆 胜者：'+escapeHtml(g.winner||'')+' · 大家看完结果后,点「结束并清理房间」可删除本房间数据。', 'border-color:var(--gold);color:var(--gold)');
+    // "结束并清理房间"这个按钮已经统一到页面左上角常驻的 #closeRoomBtn(cleanupRoom),
+    // 不再在这里重复渲染同一个功能,避免游戏结束时同时出现两个功能一样的按钮让玩家困惑。
+    setBanner('🏆 胜者：'+escapeHtml(g.winner||'')+' · 大家看完结果后,可点左上角「关闭房间」删除本房间数据。', 'border-color:var(--gold);color:var(--gold)');
     return;
   }
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi' && g.pending.from===mySeat){
