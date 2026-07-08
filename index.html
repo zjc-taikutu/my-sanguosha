@@ -192,52 +192,58 @@
   .card:hover{transform:translateY(-4px);}
   /* ===== 卡片分区版式(顶部标题栏+下方插画区域,更接近实体卡牌观感)=====
      曾经是"图片铺满全卡+.big牌名大字靠no-art控制显示/隐藏"这版,现在改成固定分区:
-     .card-title 牌名文字始终由代码生成、始终显示,不再依赖有没有图片(见 CLAUDE.md)。 */
+     .card-title 牌名文字始终由代码生成、始终显示,不再依赖有没有图片(见 CLAUDE.md)。
+     font-size 默认14px是给3字及以下牌名用的基准值,4/5字牌名由 render.js 按字数动态
+     用 inline style 覆盖(见 renderHand,替代了曾经按 .trick/.steal 类别写死字号的旧
+     规则——那套是"按牌型类别"判断,这套是"按名字实际字数"判断,两套同时存在会互相覆盖、
+     效果不可预期,所以旧规则已删除)。
+     padding 给标题栏两侧留安全边距(--badge尺寸的0.3倍,不是完整让开一整个badge宽度,
+     只是让文字不贴着最边缘开始、给视觉留白,避免和角标/问号图标贴得太紧)。
+     white-space:nowrap+text-overflow:ellipsis:配合动态字号缩小尽量单行不换行;字号
+     缩到最小仍放不下时(极端情况,如未来出现6字以上的牌名)用省略号截断而不是硬换行,
+     保持单行——省略号降级好于"换行后首字被角标压住"这种更差的视觉效果。 */
   .card-title{
     flex:0 0 22%;display:flex;align-items:center;justify-content:center;
     font-size:14px;font-weight:700;background:rgba(0,0,0,.15);
     border-bottom:1px solid rgba(0,0,0,.15);
+    padding:0 calc(var(--badge) * 0.3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .card-art-box{flex:1 1 auto;position:relative;overflow:hidden;}
   .card-art-box .card-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
   /* 没图时(映射表缺失、或全部候选格式都加载失败)插画区域留一块占位底色,不完全空白,
      也不会露出浏览器原生的"图裂了"破图标(<img>本身已被 cardImgError display:none)。 */
   .card.no-art .card-art-box{background:rgba(0,0,0,.08);}
-  /* 角标定位基准/尺寸几经调整,这是最新版本。
+  /* 角标定位基准/尺寸/视觉样式几经调整,这是最新版本。
      【定位基准的历史】①最初是 .card 的直接子元素、相对整张卡片定位,但没有顶开标题栏
      高度,top:5px 落在标题栏那一行、和牌名文字视觉重叠;②随后挪进 .card-art-box 内部
      改成相对插画区域定位,避开了标题栏,但视觉上角标位置变成跟着插画区域的尺寸走;
-     ③改回 .card 的直接子元素、用 top:calc(22%+5px) 顶开标题栏高度;④尝试过把 top 也
-     改成 0(和右上角"?"图标严格对齐同一水平线),但当时角标固定 26px、和标题栏空间
-     争夺严重,4字牌名会被挤到换行,尝试失败后退回③。
-     【这次的改动:角标改用统一尺寸变量 --badge(声明在 .card 上,见上方),并配合把
-     --badge 从 26px 调小到 20px(桌面端)——角标变小之后,和 .card-title 标题栏
-     不再需要"顶开标题栏高度"这道额外的空间隔离,可以放心地重新采用 top:0;left:0,
-     和 .info-badge-hit(同样 top:0;right:0)严格对齐在同一条水平线,形成真正的左右
-     对角】。宽高从写死的 26px 改成 var(--badge),字号从写死的 11px 改成
-     calc(var(--badge) * 0.42)(按比例跟随角标尺寸缩放,不再是独立维护的一个数字)——
-     响应式断点只需要覆盖 .card 的 --badge 这一个变量,.corner 和 .info-badge-hit 的
-     尺寸/字号会通过 calc() 公式自动重新算出,不用再逐处手动对齐多套硬编码数值。
+     ③改回 .card 的直接子元素、用 top:calc(22%+5px) 顶开标题栏高度;④角标尺寸收敛到
+     --badge 变量并调小到 20px 后,重新采用 top:0;left:0,和 .info-badge-hit(同样
+     top:0;right:0)严格对齐在同一条水平线,形成真正的左右对角(见下方"尺寸"小节)。
      只保留左上角一个角标,右下角(.corner.br)已删除——单个角标已经能完整传达花色点数
      信息,不需要两处重复;render.js 的 renderHand 也不再生成 .corner.br 这个 div。
-     半透明圆形徽章(金色细边+米金色文字)而不是方形深底硬贴标签:圆形+径向渐变(边缘更透明、
-     中心稍深)、金色细边框呼应三国题材质感,比直角矩形更融入暗色写实风插画,不会显得像
-     "贴上去的标签"。
+     【尺寸】宽高用 var(--badge),字号用 calc(var(--badge) * 0.42)(按比例跟随角标
+     尺寸缩放,不再是独立维护的一个数字)——响应式断点只需要覆盖 .card 的 --badge 这
+     一个变量,.corner 和 .info-badge-hit 的尺寸/字号会通过 calc() 公式自动重新算出。
+     【视觉样式,这次改动】曾经是半透明圆形徽章(深色径向渐变底+金色细边),更融入插画
+     但视觉上仍是一块"贴上去"的色块;这次去掉背景色/边框/圆角,改成纯文字+
+     text-shadow(黑色双层描边阴影,近处3px实一点、远处6px更弥散),不靠色块打底、靠
+     阴影对比度保证在任意插画背景(亮/暗/花哨)上依然可读,视觉上更轻量、更像"印在牌面
+     上的文字"而不是"盖在牌面上的标签"。
      **文字颜色的红黑花色区分不受这次改动影响**:角标内容是 cardFace(card)(data.js)生成的
      `<span style="color:...">`,红桃/方块显示红色数字、黑桃/梅花显示黑色数字,inline style
      的优先级天然高于这里 .corner 的 color(#e8d5a8 只是没有具体花色信息时——理论上不会发生,
-     cardFace 总是返回带色 span——的兜底文字色),红黑区分逻辑完全保留、不受圆形徽章样式
-     影响。深色渐变底+金边保证插画背景再花哨,花色点数文字都清晰可读——这是每张牌实例的
-     真实游戏机制信息(如乐不思蜀判定看花色),不能被图片替代或省略。 */
+     cardFace 总是返回带色 span——的兜底文字色),红黑区分逻辑完全保留、不受背景样式改动
+     影响。text-shadow 是叠加在文字本身上的效果,红色/黑色文字都能应用同一层阴影,不会
+     互相冲突——这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),不能被图片
+     替代或省略。 */
   .corner{
     position:absolute; top:0; left:0; z-index:2;
-    width:var(--badge); height:var(--badge); border-radius:50%;
+    width:var(--badge); height:var(--badge);
     display:flex; align-items:center; justify-content:center;
     font-size:calc(var(--badge) * 0.42); font-weight:700;
-    background:radial-gradient(circle, rgba(20,14,8,.75) 0%, rgba(20,14,8,.55) 70%, rgba(20,14,8,0) 100%);
-    border:1px solid rgba(212,175,110,.5);
+    text-shadow:0 0 3px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.7);
     color:#e8d5a8;
-    box-shadow:0 1px 3px rgba(0,0,0,.4);
   }
   /* 每种牌型都有和标题文字同色的2px inset描边(+原有2px投影),.sha(杀)不再是唯一带描边
      的牌型——统一视觉风格,五种牌型(杀/桃/闪/普通锦囊/顺手拆桥类)一眼就能通过卡片边框
@@ -248,11 +254,15 @@
   .card.shan{box-shadow:0 0 0 2px #2f5b86 inset,0 2px 0 rgba(0,0,0,.3);}
   .card.shan .card-title{color:#2f5b86;}
   .card.trick{box-shadow:0 0 0 2px #7a5fa0 inset,0 2px 0 rgba(0,0,0,.3);}
-  /* 锦囊/顺手类牌名普遍更长(如"南蛮入侵"/"顺手牵羊"),标题栏字号比基础字号小一档,
-     避免4字牌名在较窄的标题栏里挤压变形或溢出。 */
-  .card.trick .card-title{color:#7a5fa0;font-size:12px;letter-spacing:-.02em;padding:0 3px;}
+  /* 锦囊/顺手类牌名普遍更长(如"南蛮入侵"/"顺手牵羊"),曾经在这里按 class 写死字号
+     小一档来避免4字牌名挤压变形——现在改用 renderHand 按牌名实际字数动态设置 inline
+     style font-size(见 render.js),覆盖范围更通用(不止 trick/steal 两类,任何超长
+     牌名都适用),这两条旧的 font-size/padding 规则已删除(padding 也删掉,不然会用
+     更高优先级覆盖掉 .card-title 基础规则里新增的安全边距 padding),只保留按牌型
+     区分的文字颜色 + letter-spacing(轻微收紧字距,辅助长牌名排布,不冲突)。 */
+  .card.trick .card-title{color:#7a5fa0;letter-spacing:-.02em;}
   .card.steal{box-shadow:0 0 0 2px #1f7a6e inset,0 2px 0 rgba(0,0,0,.3);}
-  .card.steal .card-title{color:#1f7a6e;font-size:12px;letter-spacing:-.02em;padding:0 3px;}
+  .card.steal .card-title{color:#1f7a6e;letter-spacing:-.02em;}
   .card.selected{outline:3px solid var(--gold);transform:translateY(-6px);}
   .card.disabled{opacity:.4;pointer-events:none;}
   .cardback{
@@ -367,8 +377,8 @@
     .hand{gap:6px;}
     .card{width:50px;height:74px;--badge:16px;} /* 角标/问号图标统一收窄到16px,.corner
       和 .info-badge-hit 的尺寸/字号靠 calc() 公式自动跟着算,不用再分别写死两套数值。 */
-    .card-title{font-size:11px;}
-    .card.trick .card-title,.card.steal .card-title{font-size:9px;}
+    .card-title{font-size:11px;} /* 3字及以下牌名用这个;4/5字牌名由 render.js 按字数
+      设置 inline style font-size(基于--badge动态计算),这里的断点值不会覆盖到它们。 */
     /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
        视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。这个 .info-badge
        是座位卡专用的、和手牌卡片的 .card .info-badge-hit .info-badge 是两个不同的东西,
@@ -388,8 +398,7 @@
     }
     .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
       跟着 --badge 自动缩小,不用逐处对齐。 */
-    .card-title{font-size:10px;}
-    .card.trick .card-title,.card.steal .card-title{font-size:8px;}
+    .card-title{font-size:10px;} /* 同上,3字及以下用这个,4/5字牌名走inline style。 */
     /* 480px是这次风险最大的场景(3人局同屏挤最紧):头像框再收一档,仍严格保持3:4比例。 */
     .avatar-box{width:60px;height:80px;}
     .seat.me .avatar-box{width:72px;height:96px;}
@@ -497,9 +506,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=61"></script>
-<script src="data.js?v=61"></script>
-<script src="game.js?v=61"></script>
-<script src="render.js?v=61"></script>
+<script src="config.js?v=62"></script>
+<script src="data.js?v=62"></script>
+<script src="game.js?v=62"></script>
+<script src="render.js?v=62"></script>
 </body>
 </html>

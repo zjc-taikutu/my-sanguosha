@@ -1377,17 +1377,23 @@ function renderHand(g){
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
-    // 【定位基准几经调整,这是最新版本】.corner 曾经是 .card-title/.card-art-box 的同级
-    // 兄弟节点、相对整张卡片(.card)定位,后来为了避开标题栏改成挪进 .card-art-box 内部、
-    // 相对插画区域本身定位——现在再次改回相对整张卡片定位(视觉上角标位置应该按整张卡片
-    // 的尺寸来算,不是跟着插画区域走),用 CSS 的 top:calc(22%+5px) 顶开标题栏高度,不用
-    // 挪动 DOM 结构来"借用"插画区域的定位上下文。只保留左上角一个角标,右下角(.corner.br)
-    // 已删除——单个角标已经能完整传达花色点数信息,不需要两处重复。
+    // .corner 相对整张卡片(.card)定位,top:0;left:0,和右上角"?"图标(.info-badge-hit)
+    // 对角对齐;尺寸由 CSS 的 --badge 变量统一控制,不在这里处理(见 index.html)。
+    // 只保留左上角一个角标,右下角(.corner.br)已删除——单个角标已经能完整传达花色点数
+    // 信息,不需要两处重复。
     const imgSrc = cardImageSrc(card.name);
     const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
     const cornerText = cardFace(card)||'';
+    // 标题栏字号按牌名实际字数动态缩小(不再是按 trick/steal 这两个牌型类别写死字号的
+    // 旧规则,那套只覆盖了顺手牵羊/过河拆桥,青龙偃月刀/方天画戟这类长武器名不受益)——
+    // 4字/5字逐级缩小,3字及以下用CSS基础规则的字号(不设inline style,让它继续走
+    // .card-title 在各响应式断点下已有的字号规则,不会被这里的动态逻辑覆盖掉、导致短
+    // 牌名在小屏上反而变不回小字号这种倒退)。
+    const nameLen = card.name.length;
+    const titleStyle = nameLen>=5 ? ' style="font-size:calc(var(--badge) * 0.5)"'
+      : nameLen===4 ? ' style="font-size:calc(var(--badge) * 0.55)"' : '';
     el.innerHTML =
-      '<div class="card-title">'+card.name+'</div>'
+      '<div class="card-title"'+titleStyle+'>'+card.name+'</div>'
       +'<div class="card-art-box">'+imgTag+'</div>'
       +'<div class="corner">'+cornerText+'</div>';
     el.classList.toggle('no-art', !imgSrc); // no-art 现在只控制插画区域的占位底色,不再控制牌名文字的显示/隐藏
