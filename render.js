@@ -1384,16 +1384,16 @@ function renderHand(g){
     const imgSrc = cardImageSrc(card.name);
     const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
     const cornerText = cardFace(card)||'';
-    // 标题栏字号按牌名实际字数动态缩小(不再是按 trick/steal 这两个牌型类别写死字号的
-    // 旧规则,那套只覆盖了顺手牵羊/过河拆桥,青龙偃月刀/方天画戟这类长武器名不受益)——
-    // 4字/5字逐级缩小,3字及以下用CSS基础规则的字号(不设inline style,让它继续走
-    // .card-title 在各响应式断点下已有的字号规则,不会被这里的动态逻辑覆盖掉、导致短
-    // 牌名在小屏上反而变不回小字号这种倒退)。
-    const nameLen = card.name.length;
-    const titleStyle = nameLen>=5 ? ' style="font-size:calc(var(--badge) * 0.5)"'
-      : nameLen===4 ? ' style="font-size:calc(var(--badge) * 0.55)"' : '';
+    // 标题栏字号用 fitFontSize 实测自适应(取代早期"按牌名字数分档手动猜大小"的做法,
+    // 那套只覆盖了4字/5字两档,任何新长度组合都要回来手动调整)。cardMetricsForViewport
+    // 按当前视口宽度取这一档卡片的实际宽度/--badge值/标题栏最大字号,titleMaxWidth 的
+    // padding 公式(--badge*0.12*2)必须和 CSS 里 .card-title 的 padding:0 calc(var(--badge)*0.12)
+    // 保持一致,否则算出来的字号会和实际可用空间对不上。
+    const m = cardMetricsForViewport();
+    const titleMaxWidth = m.cardWidth - m.badge * 0.12 * 2;
+    const titleFontSize = fitFontSize(card.name, titleMaxWidth, m.maxTitleFont, 700, CARD_TITLE_FONT_FAMILY) + 'px';
     el.innerHTML =
-      '<div class="card-title"'+titleStyle+'>'+card.name+'</div>'
+      '<div class="card-title" style="font-size:'+titleFontSize+'">'+card.name+'</div>'
       +'<div class="card-art-box">'+imgTag+'</div>'
       +'<div class="corner">'+cornerText+'</div>';
     el.classList.toggle('no-art', !imgSrc); // no-art 现在只控制插画区域的占位底色,不再控制牌名文字的显示/隐藏
@@ -1463,6 +1463,33 @@ function renderHand(g){
     h.appendChild(el);
   });
   if((me.hand||[]).length===0) h.innerHTML='<span style="color:var(--paper-dim);font-size:13px">（暂无手牌）</span>';
+}
+
+// fitFontSize: 用canvas measureText测量文字在给定字号下的实际宽度,反推出能让文字刚好
+// 塞进 maxWidth 的字号(不超过 maxFontSize),取代早期"按字数分档手动猜大小"的做法——
+// 新增任何长度的牌名都不需要回来手动调整,算法自动算出刚好放得下的字号。
+// 用一个模块级复用的canvas(避免每次调用都新建一个,减少开销)。
+let _fitCanvas = null;
+const CARD_TITLE_FONT_FAMILY = '"Songti SC","Noto Serif SC",ui-serif,"STSong",serif'; // 和 body 的 font-family 保持一致(见 index.html);canvas 不支持"inherit",必须传具体字体栈
+function fitFontSize(text, maxWidth, maxFontSize, fontWeight, fontFamily){
+  if(!_fitCanvas) _fitCanvas = document.createElement('canvas');
+  const ctx = _fitCanvas.getContext('2d');
+  ctx.font = (fontWeight||700)+' '+maxFontSize+'px '+fontFamily;
+  const width = ctx.measureText(text).width;
+  if(width<=maxWidth) return maxFontSize;
+  const scaled = maxFontSize * (maxWidth/width) * 0.96; // 0.96留安全余量,避免刚好卡在边缘
+  return Math.max(scaled, maxFontSize*0.4); // 下限保护,避免极端长文字缩到无法辨认
+}
+// cardMetricsForViewport: 手牌卡片在当前视口宽度下的尺寸(卡片宽度/--badge值/标题栏
+// 最大字号)——和 index.html 里 .card 基础规则+两个响应式断点(max-width:640px/480px)
+// 的实际数值保持同步(方案B:不动态读DOM,直接按视口宽度分档传入固定值,更简单,足以
+// 达成"不用再按牌名字数手动调整"这个核心目标;如果以后改动了那三个断点的卡片宽度或
+// --badge/标题栏字号,这里要跟着改)。
+function cardMetricsForViewport(){
+  const w = window.innerWidth;
+  if(w<=480) return { cardWidth:46, badge:14, maxTitleFont:10 };
+  if(w<=640) return { cardWidth:50, badge:16, maxTitleFont:11 };
+  return { cardWidth:64, badge:20, maxTitleFont:14 };
 }
 
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
