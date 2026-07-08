@@ -217,6 +217,19 @@
       transition:transform .15s ease, box-shadow .15s ease;
     }
   }
+  /* 手机端(触屏设备)长按放大预览:和上面桌面端 hover:hover/pointer:fine 是两条独立的
+     交互路径——桌面端靠CSS伪类响应真实悬停,这里靠 render.js 的 attachLongPressPreview
+     手动长按500ms后切换这个class来触发同一套视觉效果(数值故意和上面.hover规则完全一致,
+     保持两种输入方式看到的放大效果一致)。这条规则不写在上面的 @media 里——它本来就只会
+     被touch事件手动触发,不依赖hover/pointer媒体特性,写在媒体查询外面才能在触屏设备上
+     生效(如果误放进 hover:hover and pointer:fine 里,反而会在触屏设备上被媒体查询整体
+     排除,长按功能会完全失效)。 */
+  .card.long-press-preview{
+    transform:translateY(-30px) scale(2.2);
+    z-index:50;
+    box-shadow:0 12px 24px rgba(0,0,0,.5);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
   /* ===== 卡片分区版式(顶部标题栏+下方插画区域,更接近实体卡牌观感)=====
      曾经是"图片铺满全卡+.big牌名大字靠no-art控制显示/隐藏"这版,现在改成固定分区:
      .card-title 牌名文字始终由代码生成、始终显示,不再依赖有没有图片(见 CLAUDE.md)。
@@ -536,9 +549,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=69"></script>
-<script src="data.js?v=69"></script>
-<script src="game.js?v=69"></script>
-<script src="render.js?v=69"></script>
+<script src="config.js?v=70"></script>
+<script src="data.js?v=70"></script>
+<script src="game.js?v=70"></script>
+<script src="render.js?v=70"></script>
 </body>
 </html>

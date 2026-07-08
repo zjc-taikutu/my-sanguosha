@@ -1425,6 +1425,48 @@ function renderControls(g){
   }
 }
 
+// attachLongPressPreview: 手机端(触屏设备)长按放大预览,和桌面端鼠标悬停(index.html里
+// @media (hover:hover) and (pointer:fine) 限定的 .card:hover)是两条独立的交互路径——桌面端
+// 靠CSS伪类自动响应真实的悬停状态,手机端没有"悬停"这个交互状态,靠这里手动监听touch事件、
+// 长按500ms后手动切换一个class(.long-press-preview)来复用同一套放大视觉效果(scale+
+// translateY+box-shadow,见index.html的.card.long-press-preview规则)。两者互不干扰:桌面端
+// 触屏模拟不出真悬停(见CLAUDE.md的hover:hover/pointer:fine限定),这里的touch监听器也不会
+// 在桌面鼠标操作下触发(桌面浏览器点击不会派发touchstart)。
+// 长按只是纯视觉预览,不进入任何游戏操作流程——不调用render(g)、不设置selectedCardIdx等
+// 任何游戏状态,松手时如果触发过长按预览,阻止这次touchend继续变成click(不会误触发打牌);
+// 如果手指按下后不到500ms就松开(正常点击),不做任何拦截,原有的点击打牌逻辑照常执行。
+// renderHand每次游戏状态更新都会把整排手牌DOM销毁重建(h.innerHTML=''重新生成),旧的
+// touch监听器随着旧DOM节点一起被丢弃,所以这个函数必须在每次renderHand为每张新生成的
+// 卡片元素各自调用一次,不能只在页面加载时绑定一次。
+function attachLongPressPreview(el, card){
+  let pressTimer = null;
+  let longPressTriggered = false;
+
+  const start = (e)=>{
+    longPressTriggered = false;
+    pressTimer = setTimeout(()=>{
+      longPressTriggered = true;
+      el.classList.add('long-press-preview');
+    }, 500);
+  };
+  const cancel = ()=>{
+    clearTimeout(pressTimer);
+    el.classList.remove('long-press-preview');
+  };
+  const end = (e)=>{
+    clearTimeout(pressTimer);
+    if(longPressTriggered){
+      el.classList.remove('long-press-preview');
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  el.addEventListener('touchstart', start, {passive:true});
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', cancel);
+  el.addEventListener('touchmove', cancel);
+}
 function renderHand(g){
   const h=document.getElementById('hand'); h.innerHTML='';
   if(mySeat===null) return;
@@ -1538,6 +1580,7 @@ function renderHand(g){
     const badge=document.createElement('span'); badge.className='info-badge'; badge.textContent='?';
     hit.appendChild(badge);
     el.appendChild(hit);
+    attachLongPressPreview(el, card); // 手机端长按放大预览,和桌面端hover是独立的两条路径
     h.appendChild(el);
   });
   if((me.hand||[]).length===0) h.innerHTML='<span style="color:var(--paper-dim);font-size:13px">（暂无手牌）</span>';
