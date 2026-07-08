@@ -223,6 +223,26 @@ function showMyTurnBanner(){
   clearTimeout(el._hideTimer);
   el._hideTimer = setTimeout(()=>{ el.classList.remove('show'); }, 1800);
 }
+
+// ===== 打出手牌语音:所有在场玩家(不只是出牌的人自己)都应该听到,靠共享状态
+// g.lastCardSound(game.js 的 markCardSound 在每个"真正打出/使用一张牌"的关键节点写入)
+// 同步触发,和 lastAnnouncedTurnKey 同一套去重模式(哨兵值+序号比较,不是比较牌名文本——
+// 连续两次打出同一张牌名,如果只比较文本会被误判成同一个事件而漏播,详见 markCardSound
+// 的 seq 自增设计)。 =====
+let lastPlayedCardSeq = undefined;
+function maybePlayCardSound(g){
+  if(!g.lastCardSound) return;
+  if(lastPlayedCardSeq===undefined){ lastPlayedCardSeq=g.lastCardSound.seq; return; } // 首次进入房间/刷新页面,不补放历史
+  if(g.lastCardSound.seq===lastPlayedCardSeq) return;
+  lastPlayedCardSeq = g.lastCardSound.seq;
+  const py = CARD_PINYIN[g.lastCardSound.name];
+  if(!py) return; // 没有对应语音文件的牌,静默跳过,不报错
+  try{
+    const audio = new Audio('assets/audio/'+py+'.mp3');
+    audio.play().catch(()=>{}); // 浏览器可能因为还没有用户交互而拒绝播放,静默忽略,不影响游戏运行
+  }catch(e){}
+}
+
 // queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
 // 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
 // 上限 5 条:无懈连锁反应这种极端场景可能一次性新增十几条日志,全部排队展示会等很久、
@@ -386,6 +406,7 @@ function render(g){
   } else if(g.turn!==mySeat){
     lastAnnouncedTurnKey = undefined;
   }
+  maybePlayCardSound(g); // 打出手牌语音:和上面announceMyTurn同一批"每次状态更新都检测一次"的位置
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
