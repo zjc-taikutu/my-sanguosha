@@ -134,6 +134,20 @@
   /* 图裂了不会显示浏览器原生的破图标——onerror 触发的是隐藏 <img>、显示这个占位块,不是加载失败的图裂图标 */
   .avatar-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;padding:6px;font-size:11px;color:var(--paper-dim);background:#241f1b;}
+  /* 三选一选将阶段:候选卡片纵向堆叠(不是横排3列)——desc完整技能说明文字通常比单纯的
+     "技能名"长不少,横排3列会挤得每张卡片都很窄导致文字换行挤压变形,纵向堆叠让每张卡片
+     都能占满宽度、有足够空间完整展示说明文字。复用 .avatar-box/.avatar/.avatar-placeholder
+     (和座位卡片同一套头像展示逻辑),不重新发明一套。 */
+  .general-pick-list{display:flex;flex-direction:column;gap:10px;width:100%;}
+  .general-pick-card{display:flex;gap:12px;align-items:flex-start;cursor:pointer;
+    background:#1d1916;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    transition:border-color .15s ease, background .15s ease;}
+  .general-pick-card:hover{border-color:var(--gold);background:#241f1b;}
+  .general-pick-info{flex:1;min-width:0;}
+  .general-pick-name{font-size:15px;font-weight:700;margin-bottom:4px;}
+  .general-pick-desc{font-size:13px;color:var(--paper-dim);line-height:1.6;}
+  .pick-progress{display:flex;flex-direction:column;gap:4px;font-size:13px;margin-top:6px;}
+  .pick-progress-row{padding:2px 0;}
   .info-col{flex:1;min-width:0;} /* min-width:0 让 flex 子项允许收缩/换行,不被内容撑破布局 */
   .top-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
   .nm{font-size:15px;font-weight:700;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
@@ -564,9 +578,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=71"></script>
-<script src="data.js?v=71"></script>
-<script src="game.js?v=71"></script>
-<script src="render.js?v=71"></script>
+<script src="config.js?v=72"></script>
+<script src="data.js?v=72"></script>
+<script src="game.js?v=72"></script>
+<script src="render.js?v=72"></script>
 </body>
 </html>

@@ -718,7 +718,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',pickingGeneral:'选将阶段',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -754,19 +754,80 @@ function render(g){
   }
 }
 
+// renderPickGeneral: g.phase==='pickingGeneral' 阶段的UI。两种状态——①自己的
+// generalChoices 还有值(还没选):展示3个候选武将卡片(头像+武将名·技能名+完整desc说明
+// 文字),点击提交respondPickGeneral;②自己已经选定(generalChoices已清空、general有值):
+// 展示banner"你已选择:XX,等待其他玩家…"+其他玩家的选择进度(只显示已选/未选状态,不暴露
+// 别人的候选内容——候选本身也是隐藏信息,武将确定前不该被别人看到)。
+// 布局:候选卡片纵向堆叠(不是横排3列)——desc完整说明文字通常有一两句话,比单纯技能名长
+// 不少,三张卡片横排会挤得每张都很窄导致文字换行挤压变形,纵向堆叠让每张卡片都能占满宽度、
+// 有足够空间完整展示说明文字。
+function renderPickGeneral(g, c){
+  const me = g.players[mySeat];
+  if(!me){ setBanner('选将阶段…'); return; }
+  if(Array.isArray(me.generalChoices) && me.generalChoices.length>0){
+    setBanner('选将阶段:请从下面3名候选武将中选择一名');
+    const list=document.createElement('div'); list.className='general-pick-list';
+    me.generalChoices.forEach(id=>{
+      const gen=getGeneral(id); if(!gen) return;
+      const card=document.createElement('div'); card.className='general-pick-card';
+      card.innerHTML =
+        '<div class="avatar-box">'
+          +'<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
+          +'<div class="avatar-placeholder" style="display:none">'+escapeHtml(gen.name)+'</div>'
+        +'</div>'
+        +'<div class="general-pick-info">'
+          +'<div class="general-pick-name">'+escapeHtml(gen.name)+' · '+escapeHtml(gen.skill)+'</div>'
+          +'<div class="general-pick-desc">'+escapeHtml(gen.desc||'(暂无说明)')+'</div>'
+        +'</div>';
+      card.onclick=()=>respondPickGeneral(id);
+      list.appendChild(card);
+    });
+    c.appendChild(list);
+    return;
+  }
+  // 自己已经选完,等待其他玩家
+  const myGen = getGeneral(me.general);
+  setBanner('你已选择：'+escapeHtml(myGen?myGen.name:'')+'，等待其他玩家选择…');
+  const prog=document.createElement('div'); prog.className='pick-progress';
+  g.players.forEach(p=>{
+    if(!p) return;
+    const done = !!p.general;
+    const row=document.createElement('div'); row.className='pick-progress-row';
+    row.innerHTML = escapeHtml(p.name)+'：'+(done?'<span style="color:var(--jade)">已选择</span>':'<span style="color:var(--paper-dim)">等待中…</span>');
+    prog.appendChild(row);
+  });
+  c.appendChild(prog);
+}
 function renderControls(g){
   const c=document.getElementById('controls'); c.innerHTML='';
   setBanner(''); // 唯一重置点:每次重渲染先清空,下面每个分支各写各的一句
   const me=g.players[mySeat];
   const myTurn = g.turn===mySeat;
 
+  // pickingGeneral 阶段发生在 g.started 真正置 true(finishGeneralAssign)之前,必须在
+  // "!g.started" 这个判断之前先检查,否则会被下面那个分支提前拦截、永远进不到这里。
+  if(g.phase==='pickingGeneral'){
+    renderPickGeneral(g, c);
+    return;
+  }
   if(!g.started){
     const cnt=(g.players||[]).filter(Boolean).length;
-    const btn=document.createElement('button');
-    btn.className='primary'; btn.textContent='开始游戏（'+cnt+'/'+SEATS+'）';
-    btn.disabled = cnt<MIN_PLAYERS;
-    btn.onclick=startGame;
-    c.appendChild(btn);
+    // 两种开局模式的按钮并列:随机武将(原有行为,直接分配)/三选一(进入 pickingGeneral
+    // 阶段各自选择)。不管哪种模式,startGame(mode) 内部都靠"开局前不放回抽样锁定这局武将池"
+    // 保证同局武将互不重复,这里的按钮只负责传参、不做任何重复性判断。
+    const btnRandom=document.createElement('button');
+    btnRandom.className='primary'; btnRandom.textContent='开始游戏(随机武将)（'+cnt+'/'+SEATS+'）';
+    btnRandom.disabled = cnt<MIN_PLAYERS;
+    btnRandom.onclick=()=>startGame('random');
+    c.appendChild(btnRandom);
+
+    const btnPick=document.createElement('button');
+    btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)';
+    btnPick.disabled = cnt<MIN_PLAYERS;
+    btnPick.onclick=()=>startGame('pick');
+    c.appendChild(btnPick);
+
     if(cnt<MIN_PLAYERS) setBanner('至少 '+MIN_PLAYERS+' 人即可开始,还差 '+(MIN_PLAYERS-cnt)+' 人…');
     else if(cnt<SEATS) setBanner('已可开始（'+cnt+' 人),也可等满 '+SEATS+' 人。');
     return;

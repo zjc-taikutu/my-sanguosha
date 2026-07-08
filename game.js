@@ -84,7 +84,11 @@ function normalize(g){
   if(g.lastCardSound===undefined) g.lastCardSound=null;
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
+  // 开局选将模式:'random'/'pick',开局前是 null,旧存档缺失同样回退 null
+  if(g.generalMode===undefined) g.generalMode=null;
   g.players.forEach(p=>{ if(p){ p.hand = p.hand || []; if(typeof p.alive!=='boolean') p.alive=true;
+    // 三选一候选:pending 期间是数组,其余时候应为 null;Firebase 吞空数组,缺失回退 null
+    if(p.generalChoices===undefined) p.generalChoices=null;
     // 体力上限防御:旧数据/异常路径缺失时回退,避免血条/桃回血读到 undefined
     if(typeof p.maxHp!=='number') p.maxHp = MAX_HP;
     // 装备区防御:Firebase 吞 null 值/空对象,读回来容器会缺失或缺键;补容器 + 补齐四槽(缺的回退 null)
@@ -405,22 +409,76 @@ function stripUndefined(obj){
 }
 function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); return stripUndefined(fn(g) || g); }); }
 
-function startGame(){
+// startGame(mode): 'random'(随机分配,允许原来的重复逻辑被"不放回抽样"取代,天然不重复)
+// 或 'pick'(三选一)。两种模式都在真正开局前用不放回抽样从全部武将里锁定"这局会用到哪些
+// 武将",不需要处理"两人抢同一个武将"这类实时并发冲突——抽样这一步和后续所有分配都在同一次
+// tx 事务里原子完成。
+function startGame(mode){
   tx(g=>{
     if(g.started || g.players.length<MIN_PLAYERS) return g;
-    g.deck = buildDeck(); g.discard=[];
-    g.players.forEach((p,i)=>{
-      p.general = randomGeneralId();           // 随机分配武将(允许重复)
-      p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.delays=[];
-      p.equips = emptyEquips();                // 装备区:开局四槽全空
-      drawN(g,i,START_HAND);
-    });
-    g.started=true; g.pending=null;
-    g.log = pushLog(g.log, '游戏开始！');
-    // 第一回合也要走 startTurn(不能手写 g.turn/g.phase),否则会跳过判定区处理和洛神触发链路
-    // ——这正是"开局第一回合甄姬洛神不触发"这个 bug 的根因,第二回合起走 endTurn→startTurn 就正常。
-    startTurn(g, 0);
+    if(mode!=='random' && mode!=='pick') return g;
+    g.generalMode = mode;
+    const n = g.players.length;
+    const allIds = Object.keys(GENERALS);
+    const shuffled = [...allIds].sort(()=>Math.random()-0.5); // 不放回抽样,保证不重复
+
+    if(mode==='pick'){
+      const perPlayer = 3;
+      const needed = n*perPlayer;
+      if(shuffled.length < needed){
+        // 武将数不够撑起三选一(每人3个候选且互不重复),安全退化为直接随机分配,不报错不卡死
+        g.players.forEach((p,i)=>{ p.general = shuffled[i % shuffled.length]; });
+        finishGeneralAssign(g);
+        return g;
+      }
+      const pool = shuffled.slice(0, needed);
+      g.players.forEach((p,i)=>{
+        p.generalChoices = pool.slice(i*perPlayer, (i+1)*perPlayer);
+        p.general = null;
+      });
+      g.phase = 'pickingGeneral';
+      g.log = pushLog(g.log, '选将阶段:请各位玩家从候选中选择一名武将');
+      return g;
+    }
+
+    // random 模式:直接不重复分配,走原有开局收尾
+    g.players.forEach((p,i)=>{ p.general = shuffled[i]; });
+    finishGeneralAssign(g);
+    return g;
+  });
+}
+// finishGeneralAssign: 武将确定之后的开局收尾。原样对照迁移自原 startGame 函数体"分配完武将
+// 之后"的全部逻辑(buildDeck/每人发牌堆状态/drawN初始手牌/g.started/g.pending/开局日志/
+// startTurn(g,0)),一步不少。注意:原函数从未手写 g.phase(完全交给 startTurn 内部的
+// continueQiaobianCheck 链路决定该进入哪个阶段),这里同样不手写 g.phase,维持原有行为
+// ——这正是"开局第一回合甄姬洛神不触发"那个bug当年的教训(见下面 startTurn 调用处的注释),
+// 不能因为这次改动顺手引入新的手写 g.phase。
+function finishGeneralAssign(g){
+  g.deck = buildDeck(); g.discard=[];
+  g.players.forEach((p,i)=>{
+    p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
+    p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.delays=[];
+    p.equips = emptyEquips();                // 装备区:开局四槽全空
+    drawN(g,i,START_HAND);
+  });
+  g.started=true; g.pending=null;
+  g.log = pushLog(g.log, '游戏开始！');
+  // 第一回合也要走 startTurn(不能手写 g.turn/g.phase),否则会跳过判定区处理和洛神触发链路
+  // ——这正是"开局第一回合甄姬洛神不触发"这个 bug 的根因,第二回合起走 endTurn→startTurn 就正常。
+  startTurn(g, 0);
+}
+// respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
+function respondPickGeneral(generalId){
+  tx(g=>{
+    if(g.phase!=='pickingGeneral') return g;
+    const me=g.players[mySeat];
+    if(!me || me.general || !Array.isArray(me.generalChoices) || !me.generalChoices.includes(generalId)) return g;
+    me.general = generalId;
+    me.generalChoices = null;
+    g.log = pushLog(g.log, me.name+' 选择了武将【'+GENERALS[generalId].name+'】');
+    if(g.players.every(p=>p && p.general)){
+      finishGeneralAssign(g); // 全部选完,自动进入正式开局
+    }
     return g;
   });
 }
