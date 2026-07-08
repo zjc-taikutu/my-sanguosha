@@ -183,33 +183,40 @@
   .card{
     width:64px;height:92px;border-radius:10px;background:#f1ead9;color:#1a1410;
     border:1px solid #00000022;position:relative;cursor:pointer;overflow:hidden;
-    display:flex;align-items:center;justify-content:center;
+    display:flex;flex-direction:column;
     box-shadow:0 2px 0 rgba(0,0,0,.3);transition:transform .08s;user-select:none;
   }
   .card:hover{transform:translateY(-4px);}
-  /* 完整卡面图(assets/cards/,见 render.js 的 CARD_PINYIN/cardImageSrc):铺满卡片、
-     叠在最底层(z-index:0),.corner/.big 都要盖在它上面。 */
-  .card .card-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;}
-  /* .big 默认隐藏——有图片时不需要文字牌名;只有 .no-art(映射表缺失、或全部候选格式都
-     加载失败)时才显示出来兜底,保证"没图的牌"依然能看出是什么牌,不会退化成只有花色
-     角标的半吊子状态。display:block 和原来的默认行为一致(块级元素在 flex 父级下自动
-     blockify,视觉效果不变)。 */
-  .card .big{font-size:30px;font-weight:800;display:none;position:relative;z-index:1;}
-  .card.no-art .big{display:block;}
-  /* 角标叠加在图片上层:深色半透明底+圆角,保证图片背景再花哨,花色点数文字都清晰可读——
-     这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),不能被图片替代或省略。 */
-  .card .corner{position:absolute;top:5px;left:7px;font-size:13px;font-weight:700;z-index:1;
+  /* ===== 卡片分区版式(顶部标题栏+下方插画区域,更接近实体卡牌观感)=====
+     曾经是"图片铺满全卡+.big牌名大字靠no-art控制显示/隐藏"这版,现在改成固定分区:
+     .card-title 牌名文字始终由代码生成、始终显示,不再依赖有没有图片(见 CLAUDE.md)。 */
+  .card-title{
+    flex:0 0 22%;display:flex;align-items:center;justify-content:center;
+    font-size:14px;font-weight:700;background:rgba(0,0,0,.15);
+    border-bottom:1px solid rgba(0,0,0,.15);
+  }
+  .card-art-box{flex:1 1 auto;position:relative;overflow:hidden;}
+  .card-art-box .card-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  /* 没图时(映射表缺失、或全部候选格式都加载失败)插画区域留一块占位底色,不完全空白,
+     也不会露出浏览器原生的"图裂了"破图标(<img>本身已被 cardImgError display:none)。 */
+  .card.no-art .card-art-box{background:rgba(0,0,0,.08);}
+  /* 角标叠加在插画区域(.card-art-box)左上/右下角,不是整张卡片的左上/右下角——
+     标题栏(.card-title)固定占卡片顶部22%高度,若角标继续用相对整张卡片的 top:5px 定位,
+     会正好落在标题栏文字所在的那一行,和牌名文字视觉重叠、糊成一团(真实截图验证时
+     发现的问题,不是凭空预防)。top 用 calc(22%+5px) 顶开标题栏的高度,让角标准确落在
+     插画区域内的左上角,不再和标题栏冲突;深色半透明底+圆角保证插画背景再花哨,花色
+     点数文字都清晰可读——这是每张牌实例的真实游戏机制信息(如乐不思蜀判定看花色),
+     不能被图片替代或省略。 */
+  .card .corner{position:absolute;top:calc(22% + 5px);left:7px;font-size:13px;font-weight:700;z-index:2;
     background:rgba(0,0,0,.55);border-radius:4px;padding:1px 4px;}
   .card .corner.br{top:auto;left:auto;bottom:5px;right:7px;transform:rotate(180deg);}
   .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
-  .card.tao .big,.card.tao .corner{color:var(--jade);}
-  .card.shan .big,.card.shan .corner{color:#2f5b86;}
-  .card.trick .big{font-size:14px;line-height:1.15;text-align:center;padding:0 4px;}
-  .card.trick .big,.card.trick .corner{color:#7a5fa0;}
-  .card.trick .corner{font-size:10px;letter-spacing:-.04em;}
-  .card.steal .big{font-size:14px;line-height:1.15;text-align:center;padding:0 4px;}
-  .card.steal .big,.card.steal .corner{color:#1f7a6e;}
-  .card.steal .corner{font-size:10px;letter-spacing:-.04em;}
+  .card.tao .card-title{color:var(--jade);}
+  .card.shan .card-title{color:#2f5b86;}
+  /* 锦囊/顺手类牌名普遍更长(如"南蛮入侵"/"顺手牵羊"),标题栏字号比基础字号小一档,
+     避免4字牌名在较窄的标题栏里挤压变形或溢出。 */
+  .card.trick .card-title{color:#7a5fa0;font-size:12px;letter-spacing:-.02em;padding:0 3px;}
+  .card.steal .card-title{color:#1f7a6e;font-size:12px;letter-spacing:-.02em;padding:0 3px;}
   .card.selected{outline:3px solid var(--gold);transform:translateY(-6px);}
   .card.disabled{opacity:.4;pointer-events:none;}
   .cardback{
@@ -319,9 +326,9 @@
        不是靠它来防溢出(防溢出这件事从一开始就是 flex-wrap 的职责,缩小前后都不会溢出)。 */
     .hand{gap:6px;}
     .card{width:50px;height:74px;}
-    .card .big{font-size:22px;}
+    .card-title{font-size:11px;}
+    .card.trick .card-title,.card.steal .card-title{font-size:9px;}
     .card .corner{font-size:11px;}
-    .card.trick .big,.card.steal .big{font-size:11px;}
     /* 座位卡上的角标(武将技能/装备说明,内联文字流,不覆盖其它内容):适度缩小,不需要热区/
        视觉分离那一套(不是绝对定位盖在别的内容上面,不存在遮挡问题)。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
@@ -342,7 +349,8 @@
       grid-template-areas:"tl" "tr" "me";
     }
     .card{width:46px;height:68px;}
-    .card .big{font-size:19px;}
+    .card-title{font-size:10px;}
+    .card.trick .card-title,.card.steal .card-title{font-size:8px;}
     /* 480px是这次风险最大的场景(3人局同屏挤最紧):头像框再收一档,仍严格保持3:4比例。 */
     .avatar-box{width:60px;height:80px;}
     .seat.me .avatar-box{width:72px;height:96px;}
@@ -453,9 +461,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=55"></script>
-<script src="data.js?v=55"></script>
-<script src="game.js?v=55"></script>
-<script src="render.js?v=55"></script>
+<script src="config.js?v=56"></script>
+<script src="data.js?v=56"></script>
+<script src="game.js?v=56"></script>
+<script src="render.js?v=56"></script>
 </body>
 </html>

@@ -47,7 +47,8 @@ const CARD_PINYIN = {
   '赤兔':'chitu', '紫骍':'zixing', '大宛':'dawan', '骕骦':'sushuang'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
-// null 处理成"没有图片可用",直接退化回纯文字(和 no-art 场景走同一条路径,不需要区分)。
+// null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
+// 判断影响,和早期"图片铺满全卡、靠no-art控制牌名文字显示/隐藏"那版不同(见 CLAUDE.md)。
 function cardImageSrc(name){
   const py = CARD_PINYIN[name];
   return py ? ('assets/cards/'+py+'.jpg') : null;
@@ -56,9 +57,8 @@ function cardImageSrc(name){
 // 直接返回 .jpg),这里只需要列出"jpg失败之后"还要依次重试的格式,不需要再包含jpg本身。
 const CARD_FALLBACK_EXTS = ['jpeg','png','webp','gif'];
 // cardImgError: <img onerror> 挂载。全部格式都试完仍失败(比如这张牌暂时还没准备图片素材)
-// 才真正隐藏 <img>、给 .card 加上 no-art 标记——让 CSS 把 .big 牌名大字显示出来兜底,
-// 不能让玩家看到"只有花色角标、看不出是什么牌"的半吊子状态(和 avatarError 的占位块是
-// 同一个"不能放着不管、必须真正切换成看得懂的兜底显示"的原则)。
+// 才真正隐藏 <img>、给 .card 加上 no-art 标记——让 CSS 给插画区域(.card-art-box)显示一块
+// 占位底色,不留完全空白/破图标。牌名文字(.card-title)不受这个标记影响,本来就始终显示。
 function cardImgError(imgEl){
   const tried = imgEl.dataset.cardTry ? parseInt(imgEl.dataset.cardTry, 10) : 0;
   if(tried >= CARD_FALLBACK_EXTS.length){
@@ -1374,11 +1374,18 @@ function renderHand(g){
     const duanliangPicked = duanliangMode && duanliangCardIdx===idx;
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
     el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qiaobianPicked)?' selected':'');
+    // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
+    // 有则铺满、没有则留一块占位底色)+ 四角花色点数角标——更接近实体卡牌的分区观感,
+    // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
     const imgSrc = cardImageSrc(card.name);
     const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
     const cornerText = cardFace(card)||'';
-    el.innerHTML = imgTag+'<div class="corner">'+cornerText+'</div><div class="big">'+card.name+'</div><div class="corner br">'+cornerText+'</div>';
-    el.classList.toggle('no-art', !imgSrc); // 映射表里根本没有这张牌时,标记一下,让.big立刻可见(不用等onerror触发)
+    el.innerHTML =
+      '<div class="card-title">'+card.name+'</div>'
+      +'<div class="card-art-box">'+imgTag+'</div>'
+      +'<div class="corner">'+cornerText+'</div>'
+      +'<div class="corner br">'+cornerText+'</div>';
+    el.classList.toggle('no-art', !imgSrc); // no-art 现在只控制插画区域的占位底色,不再控制牌名文字的显示/隐藏
 
     let usable=false, onClick=null;
     if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.asking===mySeat){
