@@ -228,6 +228,33 @@ function showMyTurnBanner(){
   el._hideTimer = setTimeout(()=>{ el.classList.remove('show'); }, 1800);
 }
 
+// ===== 音频引擎解锁(手机浏览器,尤其 iOS Safari,自动播放策略要求) =====
+// 移动端浏览器(尤其 iOS Safari)的自动播放策略:音频播放必须紧跟一次真实的用户手势
+// (点击/触摸)才会被允许,由 Firebase 异步事件(别人操作后同步过来的状态变化)触发的
+// render()→play() 完全不在用户手势的调用栈里,会被静默拒绝(Promise reject,不抛同步异常)。
+// 这解释了真实反馈的现象:自己主动点击出牌/出闪之类的操作,点击本身就是用户手势,播放能
+// 通过;别人操作后异步推送过来触发的语音,没有这层手势,在手机上被拦截——桌面浏览器的自动
+// 播放策略普遍宽松得多,两端表现不一致。
+// 标准解法:页面第一次收到任意点击/触摸时,主动播放一次(不需要真的发出声音,play()后立刻
+// pause()即可)来"解锁"这个页面生命周期内浏览器的音频引擎,之后同一页面里由异步事件触发的
+// 播放就不再被当成"和用户手势无关"而拦截。只需全局解锁一次,不需要每次播放前都重新解锁。
+let audioUnlocked = false;
+function unlockAudioOnce(){
+  if(audioUnlocked) return;
+  audioUnlocked = true;
+  try{
+    const silent = new Audio();
+    silent.src = 'data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA';
+    const p = silent.play();
+    if(p && p.catch) p.catch(()=>{}); // 解锁本身失败也不影响后续逻辑,只是"多一次机会没抓住"
+    silent.pause();
+  }catch(e){}
+}
+// 监听器要在页面加载后尽早注册(不等进入房间),玩家第一次点"加入房间"或任何按钮时就顺带解锁,
+// 不需要额外引导玩家做什么特殊操作。{once:true} 保证只解锁一次,不重复播放这个静音音频。
+document.addEventListener('touchstart', unlockAudioOnce, {once:true, passive:true});
+document.addEventListener('click', unlockAudioOnce, {once:true, passive:true});
+
 // ===== 打出手牌语音:所有在场玩家(不只是出牌的人自己)都应该听到,靠共享状态
 // g.lastCardSound(game.js 的 markCardSound 在每个"真正打出/使用一张牌"的关键节点写入)
 // 同步触发,和 lastAnnouncedTurnKey 同一套去重模式(哨兵值+序号比较,不是比较牌名文本——
@@ -243,7 +270,10 @@ function maybePlayCardSound(g){
   if(!py) return; // 没有对应语音文件的牌,静默跳过,不报错
   try{
     const audio = new Audio('assets/audio/'+py+'.mp3');
-    audio.play().catch(()=>{}); // 浏览器可能因为还没有用户交互而拒绝播放,静默忽略,不影响游戏运行
+    // 播放失败原因打进console.warn(不是静默吞掉),方便真机排查——重点看err.name是不是
+    // 'NotAllowedError'(浏览器自动播放策略拦截,标准解法见上面的unlockAudioOnce)还是别的
+    // 原因(如404文件不存在)。这不影响游戏运行,失败与否都不会抛出未捕获异常。
+    audio.play().catch(err=>console.warn('卡牌语音播放失败:', py, err && err.name, err));
   }catch(e){}
 }
 // maybePlaySkillSound: 和 maybePlayCardSound 同一模式,独立字段(lastSkillSound)+独立哨兵变量。
@@ -257,7 +287,7 @@ function maybePlaySkillSound(g){
   if(!py) return;
   try{
     const audio = new Audio('assets/audio/'+py+'.mp3');
-    audio.play().catch(()=>{});
+    audio.play().catch(err=>console.warn('技能语音播放失败:', py, err && err.name, err));
   }catch(e){}
 }
 
