@@ -49,7 +49,12 @@ const CARD_PINYIN = {
 const SKILL_PINYIN = {
   '天妒':'tiandu', '遗计':'yiji', '枭姬':'xiaoji', '反馈':'fankui',
   '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi',
-  '苦肉':'kurou', '集智':'jizhi', '制衡':'zhiheng'
+  '苦肉':'kurou', '集智':'jizhi', '制衡':'zhiheng', '奸雄':'jianxiong',
+  '仁德':'rende', '激昂':'jiang', '青囊':'qingnang', '急救':'jijiu',
+  '刚烈':'ganglie', '裸衣':'luoyi', '驱虎':'quhu', '节命':'jieming',
+  '国色':'guose', '流离':'liuli', '天香':'tianxiang', '红颜':'hongyan',
+  '连环':'lianhuan', '涅槃':'niepan', '离间':'lijian', '闭月':'biyue',
+  '礼让':'lirang', '争义':'zhengyi'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
@@ -108,6 +113,15 @@ function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 let qixiMode = false;
 let qixiCardIdx = null;
 function resetQixi(){ qixiMode=false; qixiCardIdx=null; }
+let guoseMode = false;
+let guoseCardIdx = null;
+function resetGuose(){ guoseMode=false; guoseCardIdx=null; }
+let lianhuanMode = false;
+let lianhuanCardIdx = null;
+function resetLianhuan(){ lianhuanMode=false; lianhuanCardIdx=null; }
+let qingnangMode = false;
+let qingnangCardIdx = null;
+function resetQingnang(){ qingnangMode=false; qingnangCardIdx=null; }
 let zhihengMode = false;
 let zhihengPicks = [];
 function resetZhiheng(){ zhihengMode=false; zhihengPicks=[]; }
@@ -128,6 +142,18 @@ function resetGuanshi(){ guanshiPicks=[]; }
 // 每次点一个座位号就 push 进去(允许重复,如都给自己/都给同一人),攒够 cards.length 张就提交。
 let yijiPicks = [];
 function resetYiji(){ yijiPicks=[]; }
+// 夏侯惇【刚烈】惩罚选择:伤害来源可点选两张手牌弃置,纯客户端暂存下标。
+let gangliePicks = [];
+function resetGanglie(){ gangliePicks=[]; }
+let quhuMode = false;
+let quhuCardIdx = null;
+function resetQuhu(){ quhuMode=false; quhuCardIdx=null; }
+let lijianMode = false;
+let lijianCardIdx = null;
+let lijianFromSeat = null;
+function resetLijian(){ lijianMode=false; lijianCardIdx=null; lijianFromSeat=null; }
+let lirangPicks = [];
+function resetLirang(){ lirangPicks=[]; }
 // guanshifuOptions: 攻击者自己当前可弃的项(手牌逐张 + 非空装备槽逐件,武器槽排除——那就是
 // 贯石斧本身)。返回 {key,label} 列表,供 UI 渲染 toggle 按钮。
 function guanshifuOptions(p){
@@ -399,7 +425,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetLirang(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
@@ -493,6 +519,12 @@ function qiaobianTargets(g, src){
     return !(o.p.delays||[]).some(c=>c.name===src.name);
   }).map(o=>({seat:o.i, label:o.p.name}));
 }
+function jijiuChoices(p){
+  const out=[];
+  (p.hand||[]).forEach((card,idx)=>{ if(isRed(card)) out.push({kind:'hand', idx, label:'手牌【'+card.name+'】'}); });
+  EQUIP_SLOTS.forEach(slot=>{ const card=p.equips&&p.equips[slot]; if(card&&isRed(card)) out.push({kind:'equip', slot, label:slotLabel[slot]+'【'+card.name+'】'}); });
+  return out;
+}
 
 // ---------- render ----------
 function render(g){
@@ -536,7 +568,13 @@ function render(g){
   // 同款兜底:只要不在「自己的出牌阶段」,就退出断粮选牌+选目标模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetDuanliang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQixi();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetGuose();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLianhuan();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhiheng();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQingnang();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQuhu();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLijian();
+  if(!(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat)) resetLirang();
   // 同款兜底:一旦不在"轮到自己响应骁果"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
   // 同款兜底:一旦不在"轮到自己(攻击者)响应青龙偃月刀"的状态,退出选牌模式,不留残留。
@@ -545,6 +583,8 @@ function render(g){
   if(!(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat)) resetGuanshi();
   // 同款兜底:一旦不在"轮到自己分配遗计牌"的状态,清空已选的分配项,不留残留。
   if(!(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign' && g.pending.seat===mySeat)) resetYiji();
+  // 同款兜底:一旦不在"刚烈惩罚由自己选择"的状态,清空已选弃牌。
+  if(!(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===mySeat)) resetGanglie();
   // 同款兜底:只要不在"轮到自己的巧变回合开始询问"或"轮到自己的巧变移动询问"这两个状态,
   // 就退出巧变选牌/选阶段/选源/选目标模式——巧变完整版横跨两个不同的服务端阶段。
   if(!(g.phase==='qiaobianTurnStart' && g.pending && g.pending.type==='qiaobianTurnStart' && g.pending.seat===mySeat) &&
@@ -620,6 +660,7 @@ function render(g){
       '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
+        (p.chained?'<span class="tag">横置</span>':'')+
         (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'')+
       '</div>';
     // 武将名+技能名拼一行(如"关羽 · 武圣"),贴合旧版"武将 X · 技能"的习惯——去掉"武将"
@@ -673,7 +714,8 @@ function render(g){
     // (按 DELAY_TRICKS[card.name].onlySelf 分别限制)不一致:闪电点别人在服务端被正确拒绝,但UI没跟着限制,
     // 表现为"点了没反应"。这里直接查 DELAY_TRICKS 复刻服务端同一条判断,不再经 allowSelf 这层间接。
     const selDT = selCard && DELAY_TRICKS[selCard.name];
-    const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat);
+    const selSpec = selCard ? CARD_PLAYS[resolveActionId(g, g.players[mySeat], selCard)] : null;
+    const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat || !!(selSpec && selSpec.allowSelf));
     // 官方规则:同一判定区不能有两张同名的延时类锦囊牌,和服务端 canTarget 的 hasDup 判断口径一致。
     const hasDupDelay = !!(selDT && (p.delays||[]).some(c=>c && c.name===selCard.name));
     const targetable = selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange && !hasDupDelay;
@@ -787,6 +829,74 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">无牌</span>';
       }
     }
+    // 大乔【国色】选目标:已选中一张方块牌后,点一名判定区没有【乐不思蜀】的其他存活玩家提交。
+    if(guoseMode && guoseCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
+      const hasLe = (p.delays||[]).some(c=>c && c.name==='乐不思蜀');
+      if(!hasLe){
+        const idx=guoseCardIdx;
+        d.style.cursor='pointer';
+        d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.onclick=()=>{ confirmAndPlay('将这张牌当【乐不思蜀】使用,对 '+g.players[i].name+' 发动【国色】？', ()=>guoSe(idx, i)); };
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色判定区已有【乐不思蜀】';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">已有乐</span>';
+      }
+    }
+    if(lianhuanMode && lianhuanCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
+      const idx=lianhuanCardIdx;
+      d.style.outline='2px solid var(--accent)';
+      d.title='对该角色使用【铁索连环】';
+      d.onclick=()=>{ confirmAndPlay('将这张梅花牌当【铁索连环】使用,目标 '+g.players[i].name+'？', ()=>lianHuan(idx, i)); };
+    }
+    if(lijianMode && lijianCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
+      if(isMale(p)){
+        if(lijianFromSeat===null){
+          d.style.cursor='pointer';
+          d.style.outline='2px dashed var(--cinnabar-bright)';
+          d.title='选择视为使用【决斗】的男性角色';
+          d.onclick=()=>{ lijianFromSeat=i; render(g); };
+        } else if(i!==lijianFromSeat){
+          const idx=lijianCardIdx, from=lijianFromSeat, to=i;
+          d.style.cursor='pointer';
+          d.style.outline='2px solid var(--accent)';
+          d.title='选择【决斗】目标';
+          d.onclick=()=>{ confirmAndPlay('发动【离间】:令 '+g.players[from].name+' 视为对 '+g.players[to].name+' 使用【决斗】？', ()=>liJian(idx, from, to)); };
+        } else {
+          d.style.outline='3px solid var(--gold)';
+          d.title='已选择为【决斗】使用者';
+        }
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='女性角色不能成为【离间】目标';
+      }
+    }
+    // 华佗【青囊】:已选一张手牌后,点任意已受伤角色回复1点体力(可以选自己)。
+    if(qingnangMode && qingnangCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
+      if(p.hp<p.maxHp){
+        const idx=qingnangCardIdx, targetSeat=i;
+        d.style.cursor='pointer';
+        d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.onclick=()=>{ confirmAndPlay('弃置这张手牌,发动【青囊】令 '+g.players[targetSeat].name+' 回复1点体力？', ()=>qingNang(idx, targetSeat)); };
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色未受伤,不能成为【青囊】目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">未受伤</span>';
+      }
+    }
+    // 刘备【仁德】:出牌阶段选中任意一张手牌后,可直接交给一名其他存活角色。
+    // 这里不覆盖座位本身原有的"使用这张牌"onclick,而是在座位卡上追加一个小按钮,
+    // 让"正常出牌"和"仁德给牌"作为两个明确选项并存。
+    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && hasCap(meP,'rende') && i!==mySeat && p.alive){
+      const idx=selectedCardIdx;
+      const targetSeat=i;
+      const rb=document.createElement('button');
+      rb.className='ghost';
+      rb.textContent='仁德:交给此人';
+      rb.style.margin='6px 14px 0';
+      rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
+      d.appendChild(rb);
+    }
     // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
     if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
       if(jiedaoSeatA===null){
@@ -833,7 +943,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -1154,6 +1264,253 @@ function renderControls(g){
   if(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign'){
     const p=g.players[g.pending.seat].name;
     setBanner(escapeHtml(p)+' 正在分配【遗计】看到的牌…'); // 不渲染牌面,严格保密
+    return;
+  }
+  if(g.phase==='ganglieAsk' && g.pending && g.pending.type==='ganglieAsk' && g.pending.seat===mySeat){
+    const source=g.players[g.pending.sourceSeat];
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【刚烈】'; b1.onclick=()=>respondGanglieAsk(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondGanglieAsk(false);
+    c.appendChild(b2);
+    setBanner('你受到伤害,是否对 '+escapeHtml(source?source.name:'伤害来源')+' 发动【刚烈】进行判定?');
+    return;
+  }
+  if(g.phase==='ganglieAsk' && g.pending && g.pending.type==='ganglieAsk'){
+    const p=g.players[g.pending.seat].name;
+    setBanner('等待 '+escapeHtml(p)+' 决定是否发动【刚烈】…');
+    return;
+  }
+  if(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===mySeat){
+    const victim=g.players[g.pending.seat];
+    const hand=me.hand||[];
+    if(hand.length>=2){
+      hand.forEach((card, idx)=>{
+        const picked=gangliePicks.includes(idx);
+        const b=document.createElement('button');
+        if(picked) b.className='primary';
+        b.textContent=(picked?'✓ ':'')+'弃【'+card.name+'】';
+        b.onclick=()=>{
+          if(picked) gangliePicks=gangliePicks.filter(x=>x!==idx);
+          else if(gangliePicks.length<2) gangliePicks=[...gangliePicks, idx];
+          render(g);
+        };
+        c.appendChild(b);
+      });
+      if(gangliePicks.length===2){
+        const ok=document.createElement('button'); ok.className='primary';
+        ok.textContent='确认弃置2张';
+        ok.onclick=()=>{ const picks=gangliePicks.slice(); resetGanglie(); respondGanglieChoice('discard', picks); };
+        c.appendChild(ok);
+      }
+    }
+    const hurt=document.createElement('button');
+    hurt.textContent='受到1点伤害';
+    hurt.onclick=()=>{ resetGanglie(); respondGanglieChoice('damage'); };
+    c.appendChild(hurt);
+    const discardText=hand.length>=2 ? '可弃置2张手牌或' : '手牌不足2张,只能';
+    setBanner('【刚烈】判定不为红桃,'+discardText+'受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害。已选 '+gangliePicks.length+'/2');
+    return;
+  }
+  if(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice'){
+    const source=g.players[g.pending.sourceSeat], victim=g.players[g.pending.seat];
+    setBanner('【刚烈】判定不为红桃,等待 '+escapeHtml(source?source.name:'伤害来源')+' 选择弃牌或受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害…');
+    return;
+  }
+  if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【裸衣】'; b1.onclick=()=>respondLuoyi(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondLuoyi(false);
+    c.appendChild(b2);
+    setBanner('摸牌阶段,是否发动【裸衣】少摸1张牌? 若如此做,本回合你使用【杀】或【决斗】造成的伤害+1。');
+    return;
+  }
+  if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk'){
+    const p=g.players[g.pending.seat];
+    setBanner('等待 '+escapeHtml(p?p.name:'许褚')+' 决定是否发动【裸衣】…');
+    return;
+  }
+  if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat){
+    const to=g.players[g.pending.to];
+    if(lirangPicks.length===2){
+      const ok=document.createElement('button'); ok.className='primary';
+      ok.textContent='发动【礼让】';
+      const picks=lirangPicks.slice();
+      ok.onclick=()=>{ confirmAndPlay('将选中的两张牌交给 '+(to?to.name:'目标')+' 发动【礼让】？', ()=>respondLiRang(true, picks)); };
+      c.appendChild(ok);
+    }
+    const nb=document.createElement('button'); nb.className='ghost';
+    nb.textContent='不发动';
+    nb.onclick=()=>respondLiRang(false, []);
+    c.appendChild(nb);
+    setBanner('是否发动【礼让】,交给 '+escapeHtml(to?to.name:'目标')+' 两张手牌? 已选 '+lirangPicks.length+'/2。');
+    return;
+  }
+  if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk'){
+    const from=g.players[g.pending.from], to=g.players[g.pending.to];
+    setBanner(escapeHtml(to?to.name:'目标')+' 的摸牌阶段开始,等待 '+escapeHtml(from?from.name:'孔融')+' 决定是否发动【礼让】…');
+    return;
+  }
+  if(g.phase==='lirangRecover' && g.pending && g.pending.type==='lirangRecover' && g.pending.from===mySeat){
+    const target=g.players[g.pending.to];
+    const count=(g.pending.cards||[]).length;
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='获得弃牌';
+    b1.onclick=()=>respondLiRangRecover(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不获得';
+    b2.onclick=()=>respondLiRangRecover(false);
+    c.appendChild(b2);
+    setBanner('是否发动【礼让】,获得 '+escapeHtml(target?target.name:'目标')+' 本弃牌阶段弃置的 '+count+' 张牌?');
+    return;
+  }
+  if(g.phase==='lirangRecover' && g.pending && g.pending.type==='lirangRecover'){
+    const from=g.players[g.pending.from];
+    setBanner('等待 '+escapeHtml(from?from.name:'孔融')+' 决定是否回收【礼让】弃牌…');
+    return;
+  }
+  if(g.phase==='zhengyi' && g.pending && g.pending.type==='zhengyi' && g.pending.asking===mySeat){
+    const kong=g.players[g.pending.seat];
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【争义】';
+    b1.onclick=()=>respondZhengyi(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动';
+    b2.onclick=()=>respondZhengyi(false);
+    c.appendChild(b2);
+    setBanner(escapeHtml(kong?kong.name:'孔融')+' 即将受到'+g.pending.amount+'点伤害,是否发动【争义】替其承受?');
+    return;
+  }
+  if(g.phase==='zhengyi' && g.pending && g.pending.type==='zhengyi'){
+    const asking=g.players[g.pending.asking], kong=g.players[g.pending.seat];
+    setBanner('等待 '+escapeHtml(asking?asking.name:'礼让对象')+' 决定是否发动【争义】替 '+escapeHtml(kong?kong.name:'孔融')+' 承伤…');
+    return;
+  }
+  if(g.phase==='quhuRespond' && g.pending && g.pending.type==='quhuRespond' && g.pending.targetSeat===mySeat){
+    (me.hand||[]).forEach((card, idx)=>{
+      const b=document.createElement('button');
+      b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
+      b.onclick=()=>respondQuhu(idx);
+      c.appendChild(b);
+    });
+    const xun=g.players[g.pending.seat];
+    setBanner(escapeHtml(xun?xun.name:'荀彧')+' 对你发动【驱虎】,选择一张手牌拼点。');
+    return;
+  }
+  if(g.phase==='quhuRespond' && g.pending && g.pending.type==='quhuRespond'){
+    const xun=g.players[g.pending.seat], target=g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(xun?xun.name:'荀彧')+' 发动【驱虎】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
+    return;
+  }
+  if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat){
+    const source=g.players[g.pending.targetSeat];
+    (g.pending.targets||[]).forEach(seat=>{
+      const target=g.players[seat];
+      if(!target || !target.alive) return;
+      const b=document.createElement('button');
+      b.textContent='令 '+source.name+' 对 '+target.name+' 造成1点伤害';
+      b.onclick=()=>respondQuhuDamage(seat);
+      c.appendChild(b);
+    });
+    setBanner('【驱虎】拼点赢,选择 '+escapeHtml(source?source.name:'目标')+' 攻击范围内一名角色受到1点伤害。');
+    return;
+  }
+  if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice'){
+    const xun=g.players[g.pending.seat], source=g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(xun?xun.name:'荀彧')+' 【驱虎】拼点赢,正在选择 '+escapeHtml(source?source.name:'目标')+' 造成伤害的对象…');
+    return;
+  }
+  if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk' && g.pending.seat===mySeat){
+    g.players.forEach((p,i)=>{
+      if(!p || !p.alive) return;
+      const limit=Math.min(p.maxHp,5);
+      const need=Math.max(0, limit-(p.hand||[]).length);
+      const b=document.createElement('button');
+      b.textContent='节命: '+p.name+(need>0?' 摸'+need+'张':' 不摸牌');
+      b.onclick=()=>respondJieming(i);
+      c.appendChild(b);
+    });
+    const nb=document.createElement('button'); nb.className='ghost';
+    nb.textContent='不发动'; nb.onclick=()=>respondJieming(null);
+    c.appendChild(nb);
+    setBanner('你受到伤害,是否发动【节命】令一名角色摸牌? 剩余 '+g.pending.remaining+' 次。');
+    return;
+  }
+  if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk'){
+    const p=g.players[g.pending.seat];
+    setBanner('等待 '+escapeHtml(p?p.name:'荀彧')+' 决定是否发动【节命】…');
+    return;
+  }
+  if(g.phase==='liuli' && g.pending && g.pending.type==='liuli' && g.pending.to===mySeat){
+    const opts=liuliDiscardOptions(me);
+    const targets=g.pending.targets||[];
+    opts.forEach(opt=>{
+      targets.forEach(t=>{
+        const target=g.players[t];
+        if(!target || !target.alive) return;
+        const b=document.createElement('button');
+        b.textContent='弃'+opt.label+' → '+target.name;
+        b.onclick=()=>respondLiuli(opt, t);
+        c.appendChild(b);
+      });
+    });
+    const nb=document.createElement('button'); nb.className='ghost';
+    nb.textContent='不发动'; nb.onclick=()=>respondLiuli(null, null);
+    c.appendChild(nb);
+    const from=g.players[g.pending.from];
+    setBanner(escapeHtml(from?from.name:'对方')+' 对你使用【杀】,是否发动【流离】弃一张牌转移目标?');
+    return;
+  }
+  if(g.phase==='liuli' && g.pending && g.pending.type==='liuli'){
+    const p=g.players[g.pending.to];
+    setBanner('等待 '+escapeHtml(p?p.name:'大乔')+' 决定是否发动【流离】…');
+    return;
+  }
+  if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang' && g.pending.seat===mySeat){
+    const opts=tianxiangHeartOptions(me);
+    const targets=g.pending.targets||[];
+    opts.forEach(opt=>{
+      targets.forEach(t=>{
+        const target=g.players[t];
+        if(!target || !target.alive) return;
+        const b=document.createElement('button');
+        b.className='ghost';
+        b.textContent='弃【'+opt.card.name+'】 → '+target.name;
+        b.onclick=()=>respondTianxiang({idx:opt.idx}, t);
+        c.appendChild(b);
+      });
+    });
+    const nb=document.createElement('button'); nb.className='ghost';
+    nb.textContent='不发动'; nb.onclick=()=>respondTianxiang(null, null);
+    c.appendChild(nb);
+    setBanner('你即将受到'+g.pending.amount+'点伤害,是否发动【天香】转移给其他角色?');
+    return;
+  }
+  if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang'){
+    const p=g.players[g.pending.seat];
+    setBanner('等待 '+escapeHtml(p?p.name:'小乔')+' 决定是否发动【天香】…');
+    return;
+  }
+  if(g.phase==='biyue' && g.pending && g.pending.type==='biyue' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【闭月】';
+    b1.onclick=()=>respondBiyue(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动';
+    b2.onclick=()=>respondBiyue(false);
+    c.appendChild(b2);
+    setBanner('结束阶段,是否发动【闭月】摸1张牌?');
+    return;
+  }
+  if(g.phase==='biyue' && g.pending && g.pending.type==='biyue'){
+    const p=g.players[g.pending.seat];
+    setBanner('等待 '+escapeHtml(p?p.name:'貂蝉')+' 决定是否发动【闭月】…');
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
@@ -1480,18 +1837,33 @@ function renderControls(g){
     const dyingP=g.players[g.pending.seat];
     const isSelf = g.pending.seat===mySeat;
     const hasTao = me.hand.some(card=>canUseAs(me,card,'桃'));
+    const canJijiu = hasCap(me,'jijiu') && g.turn!==mySeat;
+    const jijiuOpts = canJijiu ? jijiuChoices(me) : [];
     if(hasTao){
       const b1=document.createElement('button'); b1.className='primary';
       b1.textContent = isSelf ? '打出【桃】自救' : '打出【桃】救 '+dyingP.name;
       b1.onclick=()=>respondDying(true);
       c.appendChild(b1);
     }
+    jijiuOpts.forEach(opt=>{
+      const b=document.createElement('button'); b.className='ghost';
+      b.textContent='急救:'+opt.label+'当【桃】';
+      b.onclick=()=>respondDying(true, opt);
+      c.appendChild(b);
+    });
+    if(isSelf && hasCap(me,'niepan') && !me.nirvanaUsed){
+      const nb=document.createElement('button'); nb.className='primary';
+      nb.textContent='发动【涅槃】';
+      nb.onclick=()=>{ confirmAndPlay('发动限定技【涅槃】:弃置所有牌,摸3张牌并回复至3点体力？', ()=>useNiepan()); };
+      c.appendChild(nb);
+    }
     const b2=document.createElement('button');
     b2.textContent='不救'; b2.onclick=()=>respondDying(false);
     c.appendChild(b2);
-    setBanner(hasTao
-      ? (isSelf ? dyingP.name+' 濒死,你是否打出【桃】自救?' : dyingP.name+' 濒死,是否对其打出【桃】救援?')
-      : escapeHtml(dyingP.name)+' 濒死,你没有【桃】,只能选择不救。');
+    const canSave = hasTao || jijiuOpts.length>0;
+    setBanner(canSave
+      ? (isSelf ? dyingP.name+' 濒死,你是否使用【桃】自救?' : dyingP.name+' 濒死,是否对其使用【桃】救援?')
+      : escapeHtml(dyingP.name)+' 濒死,你没有可用的【桃】,只能选择不救。');
     return;
   }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying'){
@@ -1597,7 +1969,30 @@ function renderControls(g){
     if(duanliangMode && g.duanliangUsed) resetDuanliang(); // 选牌途中变得不可用(理论上不会,双重保险)
     // 方天画戟触发条件(手牌恰好剩1张+能当杀+还能出杀)在选目标途中变得不满足 → 安全退出,不卡在选牌模式
     if(fangtianMode && (!canSha || me.hand.length!==1 || !hasCap(me,'fangtian') || !canUseAs(me,(me.hand||[])[0],'杀'))) resetFangtian();
-    if(fangtianMode){
+    if(quhuMode){
+      setBanner(quhuCardIdx===null
+        ? '【驱虎】选择一张手牌用于拼点。'
+        : '已选中拼点牌,选择一名当前体力值大于你的角色拼点。');
+      (me.hand||[]).forEach((card, idx)=>{
+        const picked=quhuCardIdx===idx;
+        const b=document.createElement('button');
+        if(picked) b.className='primary';
+        b.textContent=(picked?'✓ ':'')+'拼【'+card.name+'】'+card.suit+rankText(card.rank);
+        b.onclick=()=>{ quhuCardIdx = picked ? null : idx; render(g); };
+        c.appendChild(b);
+      });
+      if(quhuCardIdx!==null){
+        g.players.forEach((p,i)=>{
+          if(!p || !p.alive || i===mySeat || p.hp<=me.hp || (p.hand||[]).length===0) return;
+          const b=document.createElement('button');
+          b.textContent='与 '+p.name+' 拼点';
+          b.onclick=()=>{ const idx=quhuCardIdx; resetQuhu(); quHu(idx, i); };
+          c.appendChild(b);
+        });
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetQuhu(); render(g); }; c.appendChild(cb);
+    } else if(fangtianMode){
       // 方天画戟选目标模式:点上方存活+范围内的其他玩家(见 seat 循环里的分支),不强制选满,选够1个即可确认。
       setBanner('【方天画戟】选择至多3个目标(已选 '+fangtianPicks.length+'/3，攻击距离 '+attackRange(g,mySeat)+')。');
       if(fangtianPicks.length>=1){
@@ -1621,6 +2016,31 @@ function renderControls(g){
         : '已选中,点上方一名有手牌、装备或判定区牌的其他玩家,当【过河拆桥】对其使用(或点牌取消选中)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetQixi(); render(g); }; c.appendChild(cb);
+    } else if(guoseMode){
+      setBanner(guoseCardIdx===null
+        ? '【国色】选择一张方块牌当【乐不思蜀】使用。'
+        : '已选中,点上方一名判定区没有【乐不思蜀】的其他角色。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetGuose(); render(g); }; c.appendChild(cb);
+    } else if(lianhuanMode){
+      setBanner(lianhuanCardIdx===null
+        ? '【连环】选择一张梅花手牌当【铁索连环】使用。'
+        : '已选中,点上方一名角色横置或解除横置。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetLianhuan(); render(g); }; c.appendChild(cb);
+    } else if(lijianMode){
+      const text = lijianCardIdx===null
+        ? '【离间】选择一张要弃置的手牌。'
+        : (lijianFromSeat===null ? '已选牌,点上方第一名男性角色作为【决斗】使用者。' : '已选择 '+escapeHtml(g.players[lijianFromSeat].name)+',再点另一名男性角色作为【决斗】目标。');
+      setBanner(text);
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetLijian(); render(g); }; c.appendChild(cb);
+    } else if(qingnangMode){
+      setBanner(qingnangCardIdx===null
+        ? '【青囊】选择一张要弃置的手牌。'
+        : '已选中,点上方一名已受伤角色令其回复1点体力(或点牌取消选中)。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetQingnang(); render(g); }; c.appendChild(cb);
     } else if(zhihengMode){
       setBanner('【制衡】选择任意张手牌弃置,然后摸等量牌(已选 '+zhihengPicks.length+' 张)。');
       if(zhihengPicks.length>=1){
@@ -1646,27 +2066,45 @@ function renderControls(g){
       const selCard=(me.hand||[])[selectedCardIdx]||{};
       const nm=selCard.name;
       const actionId=resolveActionId(g,me,selCard);
+      const spec=CARD_PLAYS[actionId];
       // 只有真的会按"杀"结算才显示"当【杀】"/攻击距离提示(见 resolveActionId:红/黑牌若自己有
       // 独立效果,默认不会被判成杀,不该显示这段容易让人误以为要当杀打的文案)
       const label = (actionId==='杀' && nm!=='杀') ? '【'+nm+'】当【杀】' : '【'+nm+'】';
       const rangeNote = (actionId==='杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
-      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标(或点牌取消)。');
+      const rendeNote = hasCap(me,'rende') ? '；也可点目标座位上的“仁德”按钮交给别人' : '';
+      const recastNote = hasCap(me,'lianhuan') && selCard.suit==='♣' ? '；也可重铸发动【连环】' : '';
+      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+recastNote+'(或点牌取消)。');
+      if(spec && !spec.target && spec.canPlay(g,me,selCard)){
+        const ub=document.createElement('button'); ub.className='primary';
+        ub.textContent='使用'+label;
+        const idx=selectedCardIdx;
+        ub.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, selCard), ()=>playCard(idx, actionId)); };
+        c.appendChild(ub);
+      }
+      if(hasCap(me,'lianhuan') && selCard.suit==='♣'){
+        const rb=document.createElement('button'); rb.className='ghost';
+        const idx=selectedCardIdx;
+        rb.textContent='重铸【连环】';
+        rb.onclick=()=>{ confirmAndPlay('重铸这张梅花牌发动【连环】,弃置后摸一张牌？', ()=>recastLianHuan(idx)); };
+        c.appendChild(rb);
+      }
     } else {
       const shaInfo = hasCap(me,'unlimitedSha') ? '可出任意张杀' : (g.shaUsed?'已用过杀':'可出1张杀');
       setBanner('点手牌出牌:【杀】/【决斗】/【顺手牵羊】/【过河拆桥】选目标 ·【桃】回血 ·【无中生有】摸两张 ·【南蛮入侵】/【万箭齐发】群体 · 装备牌点击直接装备。本回合'+shaInfo+'。');
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'kurou')){
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode;
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
       c.appendChild(kb);
     }
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'zhiheng') && !g.zhihengUsed && (me.hand||[]).length>=1){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'zhiheng') && !g.zhihengUsed && (me.hand||[]).length>=1){
       const sb=document.createElement('button'); sb.className='ghost';
       sb.textContent='发动【制衡】'; sb.onclick=()=>{ selectedCardIdx=null; zhihengMode=true; zhihengPicks=[]; render(g); }; c.appendChild(sb);
     }
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'twoAsSha') && (me.hand||[]).length>=2 && canSha){
       const zb=document.createElement('button'); zb.className='ghost';
       zb.textContent='丈八蛇矛:两张牌当杀'; zb.onclick=()=>{ selectedCardIdx=null; zhangbaMode=true; zhangbaPicks=[]; render(g); }; c.appendChild(zb);
     }
@@ -1674,24 +2112,50 @@ function renderControls(g){
     // (没有符合条件的牌就跟没有技能一样不渲染,不能只看"手牌非空"——那样会出现点进去
     // 一张能选的牌都没有的死胡同界面)。
     const hasDuanliangCard = (me.hand||[]).some(c=>(c.suit==='♠'||c.suit==='♣') && (BASIC_CARDS.includes(c.name)||!!getEquip(c.name)));
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && hasDuanliangCard){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'duanliang') && !g.duanliangUsed && hasDuanliangCard){
       const db=document.createElement('button'); db.className='ghost';
       db.textContent='发动【断粮】'; db.onclick=()=>{ selectedCardIdx=null; duanliangMode=true; duanliangCardIdx=null; render(g); }; c.appendChild(db);
     }
     const hasQixiCard = (me.hand||[]).some(c=>c && (c.suit==='♠'||c.suit==='♣'));
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'qixi') && hasQixiCard){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'qixi') && hasQixiCard){
       const qb=document.createElement('button'); qb.className='ghost';
       qb.textContent='发动【奇袭】'; qb.onclick=()=>{ selectedCardIdx=null; qixiMode=true; qixiCardIdx=null; render(g); }; c.appendChild(qb);
     }
+    const hasGuoseCard = (me.hand||[]).some(c=>c && c.suit==='♦');
+    const hasGuoseTarget = g.players.some((p,i)=>p && p.alive && i!==mySeat && !(p.delays||[]).some(c=>c && c.name==='乐不思蜀'));
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'guose') && hasGuoseCard && hasGuoseTarget){
+      const gb=document.createElement('button'); gb.className='ghost';
+      gb.textContent='发动【国色】'; gb.onclick=()=>{ selectedCardIdx=null; guoseMode=true; guoseCardIdx=null; render(g); }; c.appendChild(gb);
+    }
+    const hasLianhuanCard = (me.hand||[]).some(c=>c && c.suit==='♣');
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'lianhuan') && hasLianhuanCard){
+      const lb=document.createElement('button'); lb.className='ghost';
+      lb.textContent='发动【连环】'; lb.onclick=()=>{ selectedCardIdx=null; lianhuanMode=true; lianhuanCardIdx=null; render(g); }; c.appendChild(lb);
+    }
+    const maleCount = g.players.filter(p=>p && p.alive && isMale(p)).length;
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'lijian') && !g.liJianUsed && (me.hand||[]).length>=1 && maleCount>=2){
+      const lb=document.createElement('button'); lb.className='ghost';
+      lb.textContent='发动【离间】'; lb.onclick=()=>{ selectedCardIdx=null; lijianMode=true; lijianCardIdx=null; lijianFromSeat=null; render(g); }; c.appendChild(lb);
+    }
     // 方天画戟入口:锁定技,仅当手牌恰好只剩这最后一张、且这张牌能当杀、且本回合还能出杀时才出现——
     // 不满足条件(手里还有别的牌)时和没有这把武器一样,普通单目标出杀流程完全不受影响。
-    if(!zhangbaMode && !duanliangMode && !qixiMode && !zhihengMode && !fangtianMode && selectedCardIdx===null && hasCap(me,'fangtian') && canSha
+    const hasQingnangTarget = g.players.some(p=>p && p.alive && p.hp<p.maxHp);
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'qingnang') && !g.qingNangUsed && (me.hand||[]).length>=1 && hasQingnangTarget){
+      const hb=document.createElement('button'); hb.className='ghost';
+      hb.textContent='发动【青囊】'; hb.onclick=()=>{ selectedCardIdx=null; qingnangMode=true; qingnangCardIdx=null; render(g); }; c.appendChild(hb);
+    }
+    const hasQuhuTarget = g.players.some((p,i)=>p && p.alive && i!==mySeat && p.hp>me.hp && (p.hand||[]).length>0);
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'quhu') && !g.quHuUsed && (me.hand||[]).length>=1 && hasQuhuTarget){
+      const qb=document.createElement('button'); qb.className='ghost';
+      qb.textContent='发动【驱虎】'; qb.onclick=()=>{ selectedCardIdx=null; quhuMode=true; quhuCardIdx=null; render(g); }; c.appendChild(qb);
+    }
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'fangtian') && canSha
        && (me.hand||[]).length===1 && canUseAs(me,(me.hand||[])[0],'杀')){
       const fb=document.createElement('button'); fb.className='ghost';
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetLijian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -1764,9 +2228,14 @@ function renderHand(g){
     const picked = zhangbaMode && zhangbaPicks.includes(idx);
     const duanliangPicked = duanliangMode && duanliangCardIdx===idx;
     const qixiPicked = qixiMode && qixiCardIdx===idx;
+    const guosePicked = guoseMode && guoseCardIdx===idx;
+    const lianhuanPicked = lianhuanMode && lianhuanCardIdx===idx;
+    const lijianPicked = lijianMode && lijianCardIdx===idx;
+    const lirangPicked = lirangPicks.includes(idx);
+    const qingnangPicked = qingnangMode && qingnangCardIdx===idx;
     const zhihengPicked = zhihengMode && zhihengPicks.includes(idx);
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
-    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||zhihengPicked||qiaobianPicked)?' selected':'');
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked)?' selected':'');
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
@@ -1817,6 +2286,13 @@ function renderHand(g){
       // 还要另外选一个阶段(四个按钮在 renderControls 里),两者都选好才出现"确认"。
       usable=true;
       onClick=()=>{ qiaobianCardIdx = (qiaobianCardIdx===idx?null:idx); render(g); };
+    } else if(g.phase==='lirangAsk'&&g.pending&&g.pending.type==='lirangAsk'&&g.pending.from===mySeat){
+      usable=true;
+      onClick=()=>{
+        if(lirangPicks.includes(idx)) lirangPicks = lirangPicks.filter(x=>x!==idx);
+        else if(lirangPicks.length<2) lirangPicks.push(idx);
+        render(g);
+      };
     } else if(g.phase==='play'&&myTurn&&duanliangMode){
       // 断粮选牌模式:官方规则只能选黑色基本牌或黑色装备牌(不是任意牌),不满足条件的牌
       // 照常灰显不可点。点=切换选中(单选,再点别的合法牌会换选中)。
@@ -1828,6 +2304,19 @@ function renderHand(g){
       // 奇袭选牌模式:任意黑色手牌都能当【过河拆桥】使用。
       usable = card.suit==='♠' || card.suit==='♣';
       if(usable) onClick=()=>{ qixiCardIdx = (qixiCardIdx===idx?null:idx); render(g); };
+    } else if(g.phase==='play'&&myTurn&&guoseMode){
+      usable = card.suit==='♦';
+      if(usable) onClick=()=>{ guoseCardIdx = (guoseCardIdx===idx?null:idx); render(g); };
+    } else if(g.phase==='play'&&myTurn&&lianhuanMode){
+      usable = card.suit==='♣';
+      if(usable) onClick=()=>{ lianhuanCardIdx = (lianhuanCardIdx===idx?null:idx); render(g); };
+    } else if(g.phase==='play'&&myTurn&&lijianMode){
+      usable = true;
+      if(usable) onClick=()=>{ lijianCardIdx = (lijianCardIdx===idx?null:idx); lijianFromSeat=null; render(g); };
+    } else if(g.phase==='play'&&myTurn&&qingnangMode){
+      // 青囊选牌模式:任意一张手牌都可弃置作为发动成本。
+      usable = true;
+      onClick=()=>{ qingnangCardIdx = (qingnangCardIdx===idx?null:idx); render(g); };
     } else if(g.phase==='play'&&myTurn&&zhihengMode){
       // 制衡选牌模式:任意手牌都可弃置,点牌 toggle 多选,最后由按钮一次性提交。
       usable = true;
@@ -1851,10 +2340,15 @@ function renderHand(g){
       // actionId:优先这张牌自己的效果,没有独立入口(如闪)才转化为杀;查 CARD_PLAYS 决定可用性与点击行为
       const actionId = resolveActionId(g, me, card);
       const spec = CARD_PLAYS[actionId];
+      const canRende = hasCap(me,'rende');
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
-        if(spec.target){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g);} ; } // 目标牌:点=选中
+        if(spec.target || canRende){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g);} ; } // 目标牌/刘备仁德:点=选中
         else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
+      } else if(canRende){
+        // 刘备【仁德】可交出任意手牌,包括当前出牌阶段不能直接使用的【闪】等。
+        usable=true;
+        onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g); };
       }
     } else if(g.phase==='discard'&&myTurn&&me.hand.length>me.hp){
       usable=true; onClick=()=>discardCard(idx);
