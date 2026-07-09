@@ -502,6 +502,12 @@ function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COL
 function setBanner(html, style){
   document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
 }
+// waitAskBanner: 旁观者视角"等待 XX 决定是否发动【技能】…"这句在 renderControls 里重复十余处、
+// 形状完全一致的提示,集中成一个函数,避免每处手拼、措辞漂移。name 由调用点算好后传入(兼容各分支
+// 原有的 p / (p?p.name:'默认名') 兜底写法),skill 传技能名(不含书名号,函数内部补【】)。
+function waitAskBanner(name, skill){
+  setBanner('等待 '+escapeHtml(name||'')+' 决定是否发动【'+skill+'】…');
+}
 // fangtianSuffix: 方天画戟排队中的目标提示后缀(如"(方天画戟 目标2/3)"),没有排队则返回空串。
 // 附加在响应阶段(respond/tieqi/liegong)的 banner 末尾,帮旁观者看懂"这是第几个目标"。
 function fangtianSuffix(g){
@@ -1280,7 +1286,7 @@ function renderControls(g){
   }
   if(g.phase==='yijiAsk' && g.pending && g.pending.type==='yijiAsk'){
     const p=g.players[g.pending.seat].name;
-    setBanner('等待 '+escapeHtml(p)+' 决定是否发动【遗计】…'); // 不剧透是否受伤/发动详情之外的任何牌面信息
+    waitAskBanner(p, '遗计'); // 不剧透是否受伤/发动详情之外的任何牌面信息
     return;
   }
   // 郭嘉【遗计】分配阶段:g.pending.cards 是共享状态里的真实牌面,理论上任何客户端都能读到——
@@ -1332,7 +1338,7 @@ function renderControls(g){
   }
   if(g.phase==='ganglieAsk' && g.pending && g.pending.type==='ganglieAsk'){
     const p=g.players[g.pending.seat].name;
-    setBanner('等待 '+escapeHtml(p)+' 决定是否发动【刚烈】…');
+    waitAskBanner(p, '刚烈');
     return;
   }
   if(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===mySeat){
@@ -1383,7 +1389,7 @@ function renderControls(g){
   }
   if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'许褚')+' 决定是否发动【裸衣】…');
+    waitAskBanner(p?p.name:'许褚', '裸衣');
     return;
   }
   if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat){
@@ -1496,7 +1502,7 @@ function renderControls(g){
   }
   if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'荀彧')+' 决定是否发动【节命】…');
+    waitAskBanner(p?p.name:'荀彧', '节命');
     return;
   }
   if(g.phase==='liuli' && g.pending && g.pending.type==='liuli' && g.pending.to===mySeat){
@@ -1521,7 +1527,7 @@ function renderControls(g){
   }
   if(g.phase==='liuli' && g.pending && g.pending.type==='liuli'){
     const p=g.players[g.pending.to];
-    setBanner('等待 '+escapeHtml(p?p.name:'大乔')+' 决定是否发动【流离】…');
+    waitAskBanner(p?p.name:'大乔', '流离');
     return;
   }
   if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang' && g.pending.seat===mySeat){
@@ -1546,7 +1552,7 @@ function renderControls(g){
   }
   if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'小乔')+' 决定是否发动【天香】…');
+    waitAskBanner(p?p.name:'小乔', '天香');
     return;
   }
   if(g.phase==='biyue' && g.pending && g.pending.type==='biyue' && g.pending.seat===mySeat){
@@ -1563,7 +1569,7 @@ function renderControls(g){
   }
   if(g.phase==='biyue' && g.pending && g.pending.type==='biyue'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'貂蝉')+' 决定是否发动【闭月】…');
+    waitAskBanner(p?p.name:'貂蝉', '闭月');
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
