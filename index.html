@@ -382,6 +382,10 @@
     z-index:60;pointer-events:none;opacity:0;box-shadow:0 2px 6px rgba(0,0,0,.4);
   }
   #logToast span{font-weight:700;} /* 染色的玩家名字额外加粗,配合颜色更好辨认,和座位卡片姓名的粗体呼应 */
+  /* 按事件类型(kind)给 toast 强调色:仅改边框/非姓名文字色,姓名仍保留座位色(inline color 优先级更高)。
+     未打标签或未定义样式的 kind 保持默认金色。以后新增可弹 kind 时在这里补对应配色即可。 */
+  #logToast.toast-damage{border-color:#c0392b;color:#e57368;}
+  #logToast.toast-sha{border-color:#d98a3d;color:#e6a664;}
   #logToast.show{animation:logToastFade 2.5s ease forwards;}
   @keyframes logToastFade{
     0%{opacity:0;transform:translate(-50%,calc(-50% + 8px));}
@@ -583,9 +587,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=92"></script>
-<script src="data.js?v=92"></script>
-<script src="game.js?v=92"></script>
-<script src="render.js?v=92"></script>
+<script src="config.js?v=93"></script>
+<script src="data.js?v=93"></script>
+<script src="game.js?v=93"></script>
+<script src="render.js?v=93"></script>
 </body>
 </html>

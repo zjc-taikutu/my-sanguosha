@@ -75,16 +75,25 @@ function normalize(g){
   if(!g) return g;
   g.deck = g.deck || [];
   g.discard = g.discard || [];
-  // 日志:元素统一成 {seq,text}。老房间/开局初始条目(createRoom 的 log:['房间已创建…'])可能是裸字符串,
-  // 在这里一次性补 seq——保留已有合法 seq、绝不重新编号(seq 必须跨读取稳定,渲染端靠它判断哪些是新日志),
-  // 只给缺 seq 的项接在当前最大值之后编号。normalize 在读(render→normalize)和写(tx→normalize)两条路径都跑,
-  // 所以到达渲染端时 g.log 一定已是 {seq,text};此修正只在客户端内存进行、不写回 Firebase(同既有空数组防御)。
+  // 日志:元素统一成 {seq,text[,kind,actor,targets]}。老房间/开局初始条目(createRoom 的
+  // log:['房间已创建…'])可能是裸字符串,在这里一次性补 seq——保留已有合法 seq、绝不重新编号
+  // (seq 必须跨读取稳定,渲染端靠它判断哪些是新日志),只给缺 seq 的项接在当前最大值之后编号。
+  // kind/actor/targets 是第二步新增的结构字段(logEvent 产出),原样透传+轻量类型防御——
+  // Firebase 吞空 targets 数组、读回来是 undefined,消费端按"无目标"处理即可,不强求恢复空数组。
+  // normalize 在读(render→normalize)和写(tx→normalize)两条路径都跑,所以到达渲染端时 g.log
+  // 一定已是这套结构;此修正只在客户端内存进行、不写回 Firebase(同既有空数组防御)。
   {
     let maxSeq = 0;
+    const keepMeta = (src, dst)=>{
+      if(src && typeof src.kind==='string') dst.kind = src.kind;
+      if(src && Number.isInteger(src.actor)) dst.actor = src.actor;
+      if(src && Array.isArray(src.targets)) dst.targets = src.targets.filter(Number.isInteger);
+      return dst;
+    };
     g.log = (g.log || []).map(e=>{
       if(e && typeof e==='object' && Number.isInteger(e.seq)){
         if(e.seq>maxSeq) maxSeq=e.seq;
-        return { seq:e.seq, text: typeof e.text==='string' ? e.text : String(e.text==null?'':e.text) };
+        return keepMeta(e, { seq:e.seq, text: typeof e.text==='string' ? e.text : String(e.text==null?'':e.text) });
       }
       return { seq: ++maxSeq, text: typeof e==='string' ? e : String(e==null?'':e) };
     });
@@ -279,15 +288,30 @@ function normalize(g){
   }
   return g;
 }
-function pushLog(log, msg){
-  // 每条日志是 {seq,text}:text 给日志面板显示,seq 全局单调递增、是唯一的去重/"哪些是新日志"判定依据。
-  // seq 从上一条派生自增(与 markCardSound 同款),刻意不依赖数组长度——slice(-40) 丢老条目后最新条目的
-  // seq 仍持续递增,这正是渲染端改用 seq、不用 length 的原因(旧 length 方案满 40 条后会封顶失效)。
+// logEvent: 追加一条结构化日志事件。ev = {text, kind?, actor?, targets?}:
+//   text   —— 给日志面板/toast 显示的文本(本步仍由各调用点手写,措辞不变)
+//   kind   —— 事件类型标签('damage'/'sha'/…),渲染端据此判定该不该弹 toast、以及 toast 的强调色,
+//             取代原来"从文本里嗅探子串"的脆弱写法。未带 kind 的条目走旧子串判定,行为不变。
+//   actor  —— 事件发起者座位号(可空);targets —— 目标座位号数组(可空)。本步只存不读,供第三步取用。
+// seq 逻辑与原来一致:从上一条派生自增,跨读取稳定、不受 slice(-40) 长度封顶影响。
+function logEvent(log, ev){
   log = (log||[]).slice(-40);
   const last = log.length ? log[log.length-1] : null;
   const lastSeq = (last && typeof last==='object' && Number.isInteger(last.seq)) ? last.seq : 0;
-  log.push({ seq: lastSeq+1, text: (typeof msg==='string' ? msg : String(msg==null?'':msg)) });
+  const text = (ev && typeof ev.text==='string') ? ev.text : String(ev && ev.text!=null ? ev.text : '');
+  const entry = { seq: lastSeq+1, text };
+  if(ev){
+    if(typeof ev.kind==='string') entry.kind = ev.kind;
+    if(Number.isInteger(ev.actor)) entry.actor = ev.actor;
+    if(Array.isArray(ev.targets)) entry.targets = ev.targets.filter(Number.isInteger);
+  }
+  log.push(entry);
   return log;
+}
+// pushLog: 纯文本日志便捷入口,内部就是只带 text 的 logEvent——那 177 个 g.log=pushLog(g.log,'…')
+// 调用点一律不动,产出条目没有 kind,渲染端自动回退到"文本子串判定 toast"的旧路径,行为完全不变。
+function pushLog(log, msg){
+  return logEvent(log, { text: (typeof msg==='string' ? msg : String(msg==null?'':msg)) });
 }
 // markCardSound: 记录"这次打出/使用了哪张牌"这个语音播放事件,供 render.js 的
 // maybePlayCardSound 检测并播放对应语音(assets/audio/{CARD_PINYIN拼音}.mp3)。
@@ -1019,11 +1043,11 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard){
   // undefined 时都安全跳过这个判断,只有精确等于 'black' 才命中。
   if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
-    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效');
+    g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
     finishSingleShaTarget(g);
     return;
   }
-  g.log=pushLog(g.log, me.name+' 对 '+target.name+' '+usedAs);
+  g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' '+usedAs });
   if(hasCap(me,'tieqi')){
     g.pending={type:'tieqi', from:fromSeat, to:targetSeat};
     if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
@@ -1659,7 +1683,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   if(!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   if(!skipTianxiang && maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   p.hp = Math.max(0, p.hp - amount);
-  g.log=pushLog(g.log, p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点伤害（体力'+p.hp+'）');
+  g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点伤害（体力'+p.hp+'）' });
   if(p.hp<=0){
     startDying(g, seat, srcType);
     return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解决时统一处理)

@@ -265,10 +265,16 @@ function colorizeLogLine(g, text){
   result += escapeHtml(text.slice(cursor));
   return result;
 }
-function showLogToast(g, text){
+function showLogToast(g, entry){
   const el = document.getElementById('logToast');
+  const text = (entry && typeof entry==='object') ? entry.text : entry; // 兼容极端情况下传进来的是字符串
+  const kind = (entry && typeof entry==='object') ? entry.kind : null;
   el.innerHTML = colorizeLogLine(g, text);
-  // 重新触发 CSS 动画:先摘掉 .show(可能还在播放上一条的动画),强制回流,再加回去。
+  // 先清空 class(#logToast 基础样式来自 id 选择器,清 class 不影响基础外观),再按本条 kind 上强调色。
+  // 无 kind 则保持默认金色样式;染色的玩家名字有 inline color、不受强调色影响,只影响其余文字。
+  el.className = '';
+  if(kind) el.classList.add('toast-'+kind);
+  // 重新触发 CSS 动画:强制回流后加回 .show(和原来一致)。
   el.classList.remove('show');
   void el.offsetWidth;
   el.classList.add('show');
@@ -377,6 +383,11 @@ function maybePlaySkillSound(g){
 // 判定命中的"【闪电】发动")、伤害结算("受到",dealDamage 统一走"受到N点伤害"这个固定文案,
 // 覆盖所有伤害来源)、以及部分技能发动提示("发动")。不是每条新增日志都弹——摸牌/回合切换
 // 这类高频但信息量低的日志不触发,避免刷屏。
+// 【结构化事件层接入后的定位】这套"从文本嗅探子串"的判定本身很脆弱——改一处措辞或撞上无关词
+// 就可能误伤/误弹。日志条目现在可以携带 kind 标签(见 game.js 的 logEvent),打了标签的条目
+// 改走下面 isToastworthyEntry 的 kind 白名单判定,不再嗅探文本;这个函数只作为"未打标签的旧
+// 条目"的 fallback 继续存在(目前只有 damage/sha 两个漏斗打了标签,其余日志仍然全部落到这里,
+// 行为和结构化事件层接入之前完全一致)。
 function isToastworthyLog(text){
   return text.includes('使用【')
     || text.includes('打出【')
@@ -387,6 +398,19 @@ function isToastworthyLog(text){
     || text.includes('发动');     // 闪电等判定生效的措辞变体,以及部分技能发动提示
 }
 
+// TOAST_KINDS: 会弹 toast 的事件类型白名单(取代"从文本嗅探子串")。设成较全的一组,方便以后新 tag 的
+// 同类事件自动纳入;当前只有 damage/sha 被真正打了标签,其余靠 fallback。
+const TOAST_KINDS = new Set(['damage','sha','useCard','playCard','convertCard','judge','skill']);
+// isToastworthyEntry: 打了结构标签(有 kind)的条目只看 kind 白名单,不再嗅探文本;未打标签的旧条目
+// (占绝大多数)回退到 isToastworthyLog 的文本子串判定,行为与第二步之前完全一致。
+function isToastworthyEntry(entry){
+  if(entry && typeof entry==='object' && entry.kind){
+    return TOAST_KINDS.has(entry.kind);
+  }
+  const text = (entry && typeof entry==='object') ? entry.text : entry;
+  return isToastworthyLog(text);
+}
+
 // queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
 // 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
 // 上限 5 条:无懈连锁反应这种极端场景可能一次性新增十几条日志,全部排队展示会等很久、
@@ -395,18 +419,18 @@ function isToastworthyLog(text){
 const LOG_TOAST_QUEUE_CAP = 5;
 let toastQueue = [];
 let toastQueueRunning = false;
-function queueLogToasts(g, lines){
-  // 先按 isToastworthyLog 过滤掉不值得弹的日志(摸牌/回合切换等),上限只针对过滤后剩下的
-  // 这些"真正会弹"的日志计数,不该把无关日志也算进这5条名额里。
-  const worthy = lines.filter(isToastworthyLog);
+function queueLogToasts(g, entries){
+  // 用 isToastworthyEntry 过滤(有 kind 看白名单、无 kind 回退子串)。队列里存整条目对象,
+  // 供 showLogToast 取 text 显示、取 kind 决定强调色。上限只针对过滤后"真正会弹"的这些条目计数。
+  const worthy = entries.filter(isToastworthyEntry);
   const capped = worthy.length > LOG_TOAST_QUEUE_CAP ? worthy.slice(-LOG_TOAST_QUEUE_CAP) : worthy;
   toastQueue.push(...capped);
   if(toastQueueRunning) return;
   toastQueueRunning = true;
   const step=()=>{
     if(toastQueue.length===0){ toastQueueRunning=false; return; }
-    const text = toastQueue.shift();
-    showLogToast(g, text);
+    const entry = toastQueue.shift();
+    showLogToast(g, entry);
     // 间隔要略大于动画总时长(2.5s),否则下一条会在上一条淡入-停留-淡出还没播完时就提前打断它。
     setTimeout(step, 2600);
   };
@@ -977,7 +1001,7 @@ function render(g){
   } else if(log.length){
     const newEntries = log.filter(e => e && Number.isInteger(e.seq) && e.seq > lastToastedSeq);
     if(newEntries.length){
-      queueLogToasts(g, newEntries.map(e=>e.text)); // toast 管线仍吃字符串:只投影 text,colorize/isToastworthy/queueLogToasts 都不动
+      queueLogToasts(g, newEntries); // 直接传整条目(含 kind),由 queueLogToasts/showLogToast 内部取 text 与 kind
       lastToastedSeq = log[log.length-1].seq;
     }
   }
