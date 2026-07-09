@@ -2082,7 +2082,7 @@ function quHu(cardIdx, targetSeat){
     g.quHuUsed=true;
     g.pending={type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card};
     g.phase='quhuRespond';
-    g.log=pushLog(g.log, me.name+' 发动【驱虎】,用 '+pointText(card)+' 与 '+target.name+' 拼点');
+    g.log=pushLog(g.log, me.name+' 发动【驱虎】,与 '+target.name+' 拼点');
     markSkillSound(g, '驱虎');
     return g;
   });
@@ -2097,20 +2097,21 @@ function respondQuhu(cardIdx){
     if(!card) return g;
     target.hand.splice(cardIdx,1);
     g.discard.push(card);
-    g.log=pushLog(g.log, target.name+' 打出 '+pointText(card)+' 拼点');
-    if((selfCard.rank||0) > (card.rank||0)){
+    const quhuWin = (selfCard.rank||0) > (card.rank||0);
+    g.log=pushLog(g.log, xun.name+' 出 '+pointText(selfCard)+',对方 '+target.name+' 出 '+pointText(card)+',拼点'+(quhuWin?'荀彧赢':'荀彧没赢'));
+    if(quhuWin){
       const targets=quhuDamageTargets(g, targetSeat);
       if(targets.length===0){
-        g.log=pushLog(g.log, xun.name+' 【驱虎】拼点赢,但 '+target.name+' 攻击范围内没有可伤害目标');
+        g.log=pushLog(g.log, '但 '+target.name+' 攻击范围内没有可伤害目标');
         finishQuhu(g);
         return g;
       }
       g.pending={type:'quhuDamageChoice', seat, targetSeat, targets};
       g.phase='quhuDamageChoice';
-      g.log=pushLog(g.log, xun.name+' 【驱虎】拼点赢,选择 '+target.name+' 攻击范围内一名角色受到1点伤害');
+      g.log=pushLog(g.log, '选择 '+target.name+' 攻击范围内一名角色受到1点伤害');
       return g;
     }
-    g.log=pushLog(g.log, xun.name+' 【驱虎】拼点没赢,'+target.name+' 对其造成1点伤害');
+    g.log=pushLog(g.log, target.name+' 对其造成1点伤害');
     g.pending=null;
     const interrupted=dealDamage(g, seat, 1, targetSeat, '【驱虎】', 'quhu');
     if(interrupted){
