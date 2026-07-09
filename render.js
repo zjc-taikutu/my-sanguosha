@@ -233,11 +233,14 @@ let lastToastedSeq = undefined;
 // 于生成出的HTML字符串内部,轮到处理"AA"时又在已生成的HTML里重新匹配到、再包一层嵌套span,
 // 内层颜色覆盖外层,导致同一个名字在一句话里被拆成两种颜色。这次改成先在纯文本坐标系里
 // 用 claimed 数组标记哪些字符位置已经被占用,长名字优先占坑,从根本上避免嵌套/重叠染色。
-// getPlayerDisplayLabel: 日志里玩家的显示文本——已选定武将则"武将名(玩家名)",未选武将/武将id
-// 查不到则退回只显示玩家名。只用于展示层,不影响 g.log 存储的原始文本。
-function getPlayerDisplayLabel(p){
+// getPlayerDisplayLabel: 日志里玩家的显示文本。**可见性规则必须和座位卡一致**——座位卡用
+// avatarReady = g.started && gen 判断"能不能亮出具体武将"(见 renderSeats 附近注释:选将阶段
+// p.general 选完就已经写进共享状态,但正式开局前仍是隐藏信息,只判断 gen 非空会在选将阶段
+// 提前剧透,是真实修过的信息泄露 bug)。这里同样以 g.started 为准，不只看 p.general 有没有值：
+// 未开局(含选将阶段)一律只显示玩家名，开局后才显示"武将名(玩家名)"。
+function getPlayerDisplayLabel(g, p){
   if(!p) return '';
-  const gen = (p.general!=null) ? getGeneral(p.general) : null;
+  const gen = (g && g.started && p.general!=null) ? getGeneral(p.general) : null;
   return gen ? (gen.name+'('+p.name+')') : p.name;
 }
 // SUIT_COLOR: 红桃/方块用醒目的朱红色(呼应主题色 --cinnabar-bright),黑桃/梅花不特意变色,
@@ -262,7 +265,7 @@ function colorizeSuits(segment){
 function formatLogEntry(g, text){
   const entries = (g.players||[]).map((p,i)=>({i,p}))
     .filter(o=>o.p && o.p.name)
-    .map(o=>Object.assign(o, {label:getPlayerDisplayLabel(o.p)}))
+    .map(o=>Object.assign(o, {label:getPlayerDisplayLabel(g, o.p)}))
     .sort((a,b)=>b.p.name.length-a.p.name.length); // 长名字优先占坑,避免被短名字子串抢先匹配
 
   const claimed = new Array(text.length).fill(false);

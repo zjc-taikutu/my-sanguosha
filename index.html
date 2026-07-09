@@ -508,6 +508,15 @@
     border-radius:10px;padding:8px 10px;margin-top:10px;}
   .log-panel div{padding:2px 0;}
   .log-panel div:last-child{color:var(--paper);}
+  /* 宽屏(>=900px,手机断点之外)下把常驻日志面板切到右侧,不再挤在 controls 下方——
+     窄屏没有侧边空间，保持原来嵌入 controls 下方的位置不变，只在这里加宽屏覆盖。
+     top:64px 避开顶部 44px 高的 helpBtn/logBtn/closeRoomBtn(它们在 top:12px，
+     底边约在 56px)，留出安全间距；宽度/最大高度按侧栏尺寸给，允许自行微调数值，
+     但必须保持 position:fixed 只出现在这条宽屏媒体查询内、不影响窄屏默认布局。 */
+  @media (min-width:900px){
+    .log-panel{position:fixed;top:64px;right:12px;width:260px;
+      max-height:calc(100vh - 90px);margin-top:0;z-index:40;}
+  }
   #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
   #infoModal.hidden{display:none;}
   .info-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:560px;width:100%;
@@ -596,9 +605,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=95"></script>
-<script src="data.js?v=95"></script>
-<script src="game.js?v=95"></script>
-<script src="render.js?v=95"></script>
+<script src="config.js?v=96"></script>
+<script src="data.js?v=96"></script>
+<script src="game.js?v=96"></script>
+<script src="render.js?v=96"></script>
 </body>
 </html>
