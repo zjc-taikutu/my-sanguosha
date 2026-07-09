@@ -75,7 +75,20 @@ function normalize(g){
   if(!g) return g;
   g.deck = g.deck || [];
   g.discard = g.discard || [];
-  g.log = g.log || [];
+  // 日志:元素统一成 {seq,text}。老房间/开局初始条目(createRoom 的 log:['房间已创建…'])可能是裸字符串,
+  // 在这里一次性补 seq——保留已有合法 seq、绝不重新编号(seq 必须跨读取稳定,渲染端靠它判断哪些是新日志),
+  // 只给缺 seq 的项接在当前最大值之后编号。normalize 在读(render→normalize)和写(tx→normalize)两条路径都跑,
+  // 所以到达渲染端时 g.log 一定已是 {seq,text};此修正只在客户端内存进行、不写回 Firebase(同既有空数组防御)。
+  {
+    let maxSeq = 0;
+    g.log = (g.log || []).map(e=>{
+      if(e && typeof e==='object' && Number.isInteger(e.seq)){
+        if(e.seq>maxSeq) maxSeq=e.seq;
+        return { seq:e.seq, text: typeof e.text==='string' ? e.text : String(e.text==null?'':e.text) };
+      }
+      return { seq: ++maxSeq, text: typeof e==='string' ? e : String(e==null?'':e) };
+    });
+  }
   g.players = g.players || [];
   // 轮次计数:数字/数组防御,Firebase 吞空数组、旧存档可能没有这两个字段
   if(!Number.isInteger(g.roundNum)) g.roundNum=1;
@@ -267,7 +280,14 @@ function normalize(g){
   return g;
 }
 function pushLog(log, msg){
-  log = (log||[]).slice(-40); log.push(msg); return log;
+  // 每条日志是 {seq,text}:text 给日志面板显示,seq 全局单调递增、是唯一的去重/"哪些是新日志"判定依据。
+  // seq 从上一条派生自增(与 markCardSound 同款),刻意不依赖数组长度——slice(-40) 丢老条目后最新条目的
+  // seq 仍持续递增,这正是渲染端改用 seq、不用 length 的原因(旧 length 方案满 40 条后会封顶失效)。
+  log = (log||[]).slice(-40);
+  const last = log.length ? log[log.length-1] : null;
+  const lastSeq = (last && typeof last==='object' && Number.isInteger(last.seq)) ? last.seq : 0;
+  log.push({ seq: lastSeq+1, text: (typeof msg==='string' ? msg : String(msg==null?'':msg)) });
+  return log;
 }
 // markCardSound: 记录"这次打出/使用了哪张牌"这个语音播放事件,供 render.js 的
 // maybePlayCardSound 检测并播放对应语音(assets/audio/{CARD_PINYIN拼音}.mp3)。

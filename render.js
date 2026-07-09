@@ -199,24 +199,23 @@ let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时
 let logModalOpen = false;
 // 日志 toast:"刚刚发生了什么"的瞬时提示,和 banner("当前该谁做什么")信息类型不同,不复用。
 // undefined 是哨兵值,只在"页面/模块刚加载后的第一次 render()"这一刻生效一次——把它设成当时
-// 最新一条日志的文本、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史
-// 最后一条日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的文本"比较,
+// 最新一条日志的 seq、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史
+// 最后一条日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的 seq"比较,
 // 包括 Firebase 断线重连后的自动重新推送——不会重置回 undefined,所以重连瞬间不会被误判成
 // "有新日志"。
-// **这里存的是"最后一条日志的文本"而不是"g.log.length"**——曾经是按长度比较(`logLen >
-// lastToastedLogLen`),真实 bug:`pushLog`(game.js)`slice(-40)` 只保留最近 40 条,一旦总
-// 条数超过 40,`g.log.length` 会永远封顶在 41(第一次触顶那一刻变成 41,之后每次都是"切掉
-// 最老一条再 push 一条",长度维持 41 不变)——长度封顶之后 `logLen > lastToastedLogLen`
-// 永远算不出"有新增",toast 从触顶那一刻起永久失效,直到刷新页面重置这个变量。按"最新一条
-// 日志的文本是否变化"判断不受数组长度封顶影响,数组内容依然在滚动、最新一条文本一直在变。
-// 已知的小代价:如果连续两条日志文本恰好完全相同(比如两人先后都摸了两张牌,文案巧合一致),
-// 这里会漏弹一次——这个概率很低的边界情况不值得为它引入递增序号之类的额外机制
-// (那需要改 pushLog 签名和所有调用点)。
+// **这里存的是 g.log 每条元素自带的 seq(全局单调递增,见 game.js 的 pushLog/normalize),
+// 不是"最后一条日志的文本"也不是"g.log.length"**——这套方案专门消掉了旧文本比较方案踩过的
+// 两个真实 bug:①`pushLog`(game.js)`slice(-40)` 只保留最近 40 条,若按 length 比较,总条数
+// 超过 40 后 `g.log.length` 会永远封顶在 41,长度判断从此再也算不出"有新增",toast 永久失效
+// 直到刷新页面;②若按"最后一条文本是否变化"比较,连续两条日志文本恰好完全相同(比如两人先后
+// 都摸了两张牌,文案巧合一致)会被误判成"没有新日志"而漏弹一次。seq 由 pushLog 从上一条派生
+// 自增,不依赖数组长度也不比较文本内容,slice(-40) 丢老条目不影响它持续递增,两条文本相同也
+// 各自有独立的 seq,天然规避这两个问题。
 // 【排队展示,不再只弹最后一条】曾经这里"多条连续新日志只弹最后一条",导致延时锦囊判定
 // (乐不思蜀/兵粮寸断的"判定为XX,生效/无效"这条中间结果)被同一次事务里紧跟着的下一条日志
 // 淹没、玩家完全看不到判定过程发生了什么——已改成把本次新增的全部日志交给 queueLogToasts
 // 排队依次展示(见该函数),上限5条防止无懈连锁反应这类极端场景排队太久。
-let lastToastedLogText = undefined;
+let lastToastedSeq = undefined;
 // colorizeLogLine: 只在 toast 这一处渲染路径把日志行里出现的玩家名字染上座位色(呼应座位卡片
 // 的 seatColor),不碰 g.log 本身的存储(依然是纯字符串,日志面板 renderLogModal 不受影响)。
 // 先转义整行,再用转义后的名字做字面 split/join 替换(不用正则,不用处理名字里的正则特殊字符);
@@ -969,22 +968,17 @@ function render(g){
   // 日志 toast:有新日志才弹,把本次新增的日志(可能不止一条,比如延时锦囊判定这类一次事务
   // 里连续 pushLog 好几次)排队依次展示——早期版本"只弹最新一条"会把中间结果(比如判定牌本身
   // 生效/无效那条)淹没掉,只看到判定后紧跟着的下一条日志,看不出判定过程发生了什么。
-  // 定位新增日志的起点:不能按数组长度(会被 pushLog 的 slice(-40) 封顶,详见上面
-  // lastToastedLogText 声明处的说明),而是从数组末尾往前找"上次已展示的那条文本"出现的位置——
-  // 找不到(日志被封顶顶掉、或全新房间)就只展示这次拿到的全部(newLines,由下面的上限兜底)。
+  // 定位新增日志:直接用每条元素自带的 seq 过滤(> 上次已弹的 seq)即可,不用再"从数组末尾
+  // 回溯匹配文本"——seq 单调递增且跨读取稳定,不受 slice(-40) 长度封顶影响,详见上面
+  // lastToastedSeq 声明处的说明。
   const log = g.log||[];
-  if(lastToastedLogText===undefined){
-    lastToastedLogText = log.length ? log[log.length-1] : null; // 第一次render,只记文本,不弹历史
+  if(lastToastedSeq===undefined){
+    lastToastedSeq = log.length ? log[log.length-1].seq : 0; // 第一次 render:只记当前最新 seq,不弹历史
   } else if(log.length){
-    let startIdx = log.length; // 默认:没有新增
-    for(let i=log.length-1; i>=0; i--){
-      if(log[i]===lastToastedLogText){ startIdx=i+1; break; }
-      if(i===0) startIdx=0; // 没找到,说明这段时间新增了不止能追溯的量,从头展示这次拿到的全部
-    }
-    const newLines = log.slice(startIdx);
-    if(newLines.length){
-      queueLogToasts(g, newLines);
-      lastToastedLogText = log[log.length-1];
+    const newEntries = log.filter(e => e && Number.isInteger(e.seq) && e.seq > lastToastedSeq);
+    if(newEntries.length){
+      queueLogToasts(g, newEntries.map(e=>e.text)); // toast 管线仍吃字符串:只投影 text,colorize/isToastworthy/queueLogToasts 都不动
+      lastToastedSeq = log[log.length-1].seq;
     }
   }
 }
@@ -2488,7 +2482,7 @@ function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.a
 function showLog(){ logModalOpen=true; renderLogModal(currentG); }
 function renderLogModal(g){
   if(!logModalOpen || !g) return;
-  const html=(g.log||[]).map(l=>'<div>'+escapeHtml(l)+'</div>').join('');
+  const html=(g.log||[]).map(l=>'<div>'+escapeHtml(l && typeof l==='object' ? l.text : l)+'</div>').join('');
   showInfo('日志', '<div class="log-modal">'+html+'</div>');
   const body=document.querySelector('#infoModal .log-modal');
   if(body) body.scrollTop=body.scrollHeight; // 每次刷新都跟到最新一条,和以前常驻日志的行为一致
