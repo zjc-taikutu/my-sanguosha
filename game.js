@@ -618,6 +618,27 @@ function respondPickGeneral(generalId){
     return g;
   });
 }
+// debugPickGeneral: 仅供测试用的调试入口——不受 p.generalChoices(三选一候选池)限制,可以
+// 直接指定任意已实现的武将。**刻意不检查"武将是否已被其他玩家选择过"这条唯一性限制**——
+// 正式对局(respondPickGeneral)靠开局前不放回抽样天然保证同局武将互不重复,但测试场景下
+// 经常需要让多人都选到同一个武将来单独反复验证某个技能,不应该受人数/候选池随机性影响,
+// 所以这里放宽这条规则,允许重复选择同一个武将。这不代表正式对局允许重复,只是测试专用的
+// 例外通道,和 render.js 里明显标注"仅供调试测试使用"的 UI 入口配套。
+function debugPickGeneral(generalId){
+  tx(g=>{
+    if(g.phase!=='pickingGeneral') return g;
+    const me=g.players[mySeat];
+    if(!me || me.general) return g; // 已经选过了不能重复选,和正式respondPickGeneral保持同样的基本约束
+    if(!GENERALS[generalId]) return g; // 必须是真实存在的武将id
+    me.general = generalId;
+    me.generalChoices = null;
+    g.log = pushLog(g.log, me.name+' (调试模式)选择了武将【'+GENERALS[generalId].name+'】');
+    if(g.players.every(p=>p && p.general)){
+      finishGeneralAssign(g);
+    }
+    return g;
+  });
+}
 function doDraw(){
   tx(g=>{
     if(g.phase!=='draw'||g.turn!==mySeat) return g;

@@ -1066,6 +1066,31 @@ function renderPickGeneral(g, c){
       list.appendChild(card);
     });
     c.appendChild(list);
+    // ===== 调试选将入口:仅供测试用,不是正式游戏机制 =====
+    // 不受三选一候选池(me.generalChoices)限制,可以直接指定任意已实现的武将,方便测试某个
+    // 具体武将不用靠随机等它出现在候选池里。视觉上刻意和上面正式的候选卡片区分开(警示色
+    // 虚线边框+⚠️字样),避免正常玩家误触把它当成正式流程的一部分。
+    const debugBox=document.createElement('div');
+    debugBox.style.cssText='margin-top:16px;padding:12px;border:2px dashed #d4a017;border-radius:10px;background:rgba(212,160,23,.08);';
+    const warn=document.createElement('div');
+    warn.style.cssText='color:#d4a017;font-weight:700;margin-bottom:8px;font-size:13px;';
+    warn.textContent='⚠️ 仅供调试测试使用：自由选择任意武将（不受候选池限制，不是正式游戏功能）';
+    debugBox.appendChild(warn);
+    const sel=document.createElement('select');
+    sel.style.cssText='width:100%;margin-bottom:8px;background:#15120f;color:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px;';
+    GENERAL_IDS.forEach(id=>{
+      const gen=getGeneral(id); if(!gen) return;
+      const opt=document.createElement('option');
+      opt.value=id; opt.textContent=gen.name+' · '+gen.skill;
+      sel.appendChild(opt);
+    });
+    debugBox.appendChild(sel);
+    const debugBtn=document.createElement('button');
+    debugBtn.style.cssText='border:1px solid #d4a017;color:#d4a017;background:transparent;';
+    debugBtn.textContent='【测试】确认选择';
+    debugBtn.onclick=()=>debugPickGeneral(sel.value);
+    debugBox.appendChild(debugBtn);
+    c.appendChild(debugBox);
     return;
   }
   // 自己已经选完,等待其他玩家
