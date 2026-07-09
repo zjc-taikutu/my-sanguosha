@@ -84,6 +84,10 @@ function cardImgError(imgEl){
 
 // ---------- targeting UI state ----------
 let selectedCardIdx = null;
+// 弃牌阶段:已勾选待弃置的手牌下标集合,纯客户端状态,不提交服务端直到点"确认弃牌"
+// (多选后统一确认,和之前"点一张立即弃一张"的旧交互不同,见discardCards)。
+let discardSelectedSet = new Set();
+function resetDiscardSelected(){ discardSelectedSet = new Set(); }
 // 丈八蛇矛「两张牌当杀」的纯客户端选牌状态(和 selectedCardIdx 互斥,从不入库)。
 let zhangbaMode = false;
 // 鬼才改判:点"发动"进入选牌模式(纯客户端,不入库),再点一张手牌确认替换;与 zhangbaMode 同款但各自独立。
@@ -198,24 +202,23 @@ let currentG = null; // 最近一次 render 收到的 g,供确认弹窗取消时
 let logModalOpen = false;
 // 日志 toast:"刚刚发生了什么"的瞬时提示,和 banner("当前该谁做什么")信息类型不同,不复用。
 // undefined 是哨兵值,只在"页面/模块刚加载后的第一次 render()"这一刻生效一次——把它设成当时
-// 最新一条日志的文本、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史
-// 最后一条日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的文本"比较,
+// 最新一条日志的 seq、不弹任何 toast(否则中途加入/刷新页面进入一局进行中的对局,会把历史
+// 最后一条日志误当"新发生的事"弹出来)。之后每次 render() 都是和"上一次真实记过的 seq"比较,
 // 包括 Firebase 断线重连后的自动重新推送——不会重置回 undefined,所以重连瞬间不会被误判成
 // "有新日志"。
-// **这里存的是"最后一条日志的文本"而不是"g.log.length"**——曾经是按长度比较(`logLen >
-// lastToastedLogLen`),真实 bug:`pushLog`(game.js)`slice(-40)` 只保留最近 40 条,一旦总
-// 条数超过 40,`g.log.length` 会永远封顶在 41(第一次触顶那一刻变成 41,之后每次都是"切掉
-// 最老一条再 push 一条",长度维持 41 不变)——长度封顶之后 `logLen > lastToastedLogLen`
-// 永远算不出"有新增",toast 从触顶那一刻起永久失效,直到刷新页面重置这个变量。按"最新一条
-// 日志的文本是否变化"判断不受数组长度封顶影响,数组内容依然在滚动、最新一条文本一直在变。
-// 已知的小代价:如果连续两条日志文本恰好完全相同(比如两人先后都摸了两张牌,文案巧合一致),
-// 这里会漏弹一次——这个概率很低的边界情况不值得为它引入递增序号之类的额外机制
-// (那需要改 pushLog 签名和所有调用点)。
+// **这里存的是 g.log 每条元素自带的 seq(全局单调递增,见 game.js 的 pushLog/normalize),
+// 不是"最后一条日志的文本"也不是"g.log.length"**——这套方案专门消掉了旧文本比较方案踩过的
+// 两个真实 bug:①`pushLog`(game.js)`slice(-40)` 只保留最近 40 条,若按 length 比较,总条数
+// 超过 40 后 `g.log.length` 会永远封顶在 41,长度判断从此再也算不出"有新增",toast 永久失效
+// 直到刷新页面;②若按"最后一条文本是否变化"比较,连续两条日志文本恰好完全相同(比如两人先后
+// 都摸了两张牌,文案巧合一致)会被误判成"没有新日志"而漏弹一次。seq 由 pushLog 从上一条派生
+// 自增,不依赖数组长度也不比较文本内容,slice(-40) 丢老条目不影响它持续递增,两条文本相同也
+// 各自有独立的 seq,天然规避这两个问题。
 // 【排队展示,不再只弹最后一条】曾经这里"多条连续新日志只弹最后一条",导致延时锦囊判定
 // (乐不思蜀/兵粮寸断的"判定为XX,生效/无效"这条中间结果)被同一次事务里紧跟着的下一条日志
 // 淹没、玩家完全看不到判定过程发生了什么——已改成把本次新增的全部日志交给 queueLogToasts
 // 排队依次展示(见该函数),上限5条防止无懈连锁反应这类极端场景排队太久。
-let lastToastedLogText = undefined;
+let lastToastedSeq = undefined;
 // colorizeLogLine: 只在 toast 这一处渲染路径把日志行里出现的玩家名字染上座位色(呼应座位卡片
 // 的 seatColor),不碰 g.log 本身的存储(依然是纯字符串,日志面板 renderLogModal 不受影响)。
 // 先转义整行,再用转义后的名字做字面 split/join 替换(不用正则,不用处理名字里的正则特殊字符);
@@ -265,10 +268,16 @@ function colorizeLogLine(g, text){
   result += escapeHtml(text.slice(cursor));
   return result;
 }
-function showLogToast(g, text){
+function showLogToast(g, entry){
   const el = document.getElementById('logToast');
+  const text = (entry && typeof entry==='object') ? entry.text : entry; // 兼容极端情况下传进来的是字符串
+  const kind = (entry && typeof entry==='object') ? entry.kind : null;
   el.innerHTML = colorizeLogLine(g, text);
-  // 重新触发 CSS 动画:先摘掉 .show(可能还在播放上一条的动画),强制回流,再加回去。
+  // 先清空 class(#logToast 基础样式来自 id 选择器,清 class 不影响基础外观),再按本条 kind 上强调色。
+  // 无 kind 则保持默认金色样式;染色的玩家名字有 inline color、不受强调色影响,只影响其余文字。
+  el.className = '';
+  if(kind) el.classList.add('toast-'+kind);
+  // 重新触发 CSS 动画:强制回流后加回 .show(和原来一致)。
   el.classList.remove('show');
   void el.offsetWidth;
   el.classList.add('show');
@@ -377,6 +386,11 @@ function maybePlaySkillSound(g){
 // 判定命中的"【闪电】发动")、伤害结算("受到",dealDamage 统一走"受到N点伤害"这个固定文案,
 // 覆盖所有伤害来源)、以及部分技能发动提示("发动")。不是每条新增日志都弹——摸牌/回合切换
 // 这类高频但信息量低的日志不触发,避免刷屏。
+// 【结构化事件层接入后的定位】这套"从文本嗅探子串"的判定本身很脆弱——改一处措辞或撞上无关词
+// 就可能误伤/误弹。日志条目现在可以携带 kind 标签(见 game.js 的 logEvent),打了标签的条目
+// 改走下面 isToastworthyEntry 的 kind 白名单判定,不再嗅探文本;这个函数只作为"未打标签的旧
+// 条目"的 fallback 继续存在(目前只有 damage/sha 两个漏斗打了标签,其余日志仍然全部落到这里,
+// 行为和结构化事件层接入之前完全一致)。
 function isToastworthyLog(text){
   return text.includes('使用【')
     || text.includes('打出【')
@@ -387,6 +401,19 @@ function isToastworthyLog(text){
     || text.includes('发动');     // 闪电等判定生效的措辞变体,以及部分技能发动提示
 }
 
+// TOAST_KINDS: 会弹 toast 的事件类型白名单(取代"从文本嗅探子串")。设成较全的一组,方便以后新 tag 的
+// 同类事件自动纳入;当前只有 damage/sha 被真正打了标签,其余靠 fallback。
+const TOAST_KINDS = new Set(['damage','sha','useCard','playCard','convertCard','judge','skill']);
+// isToastworthyEntry: 打了结构标签(有 kind)的条目只看 kind 白名单,不再嗅探文本;未打标签的旧条目
+// (占绝大多数)回退到 isToastworthyLog 的文本子串判定,行为与第二步之前完全一致。
+function isToastworthyEntry(entry){
+  if(entry && typeof entry==='object' && entry.kind){
+    return TOAST_KINDS.has(entry.kind);
+  }
+  const text = (entry && typeof entry==='object') ? entry.text : entry;
+  return isToastworthyLog(text);
+}
+
 // queueLogToasts: 把一次事务里新增的多条日志排队依次展示(每条showLogToast后等一段时间
 // 再切下一条),而不是只弹最后一条——解决延时锦囊判定这类"中间结果"被淹没看不到的问题。
 // 上限 5 条:无懈连锁反应这种极端场景可能一次性新增十几条日志,全部排队展示会等很久、
@@ -395,18 +422,18 @@ function isToastworthyLog(text){
 const LOG_TOAST_QUEUE_CAP = 5;
 let toastQueue = [];
 let toastQueueRunning = false;
-function queueLogToasts(g, lines){
-  // 先按 isToastworthyLog 过滤掉不值得弹的日志(摸牌/回合切换等),上限只针对过滤后剩下的
-  // 这些"真正会弹"的日志计数,不该把无关日志也算进这5条名额里。
-  const worthy = lines.filter(isToastworthyLog);
+function queueLogToasts(g, entries){
+  // 用 isToastworthyEntry 过滤(有 kind 看白名单、无 kind 回退子串)。队列里存整条目对象,
+  // 供 showLogToast 取 text 显示、取 kind 决定强调色。上限只针对过滤后"真正会弹"的这些条目计数。
+  const worthy = entries.filter(isToastworthyEntry);
   const capped = worthy.length > LOG_TOAST_QUEUE_CAP ? worthy.slice(-LOG_TOAST_QUEUE_CAP) : worthy;
   toastQueue.push(...capped);
   if(toastQueueRunning) return;
   toastQueueRunning = true;
   const step=()=>{
     if(toastQueue.length===0){ toastQueueRunning=false; return; }
-    const text = toastQueue.shift();
-    showLogToast(g, text);
+    const entry = toastQueue.shift();
+    showLogToast(g, entry);
     // 间隔要略大于动画总时长(2.5s),否则下一条会在上一条淡入-停留-淡出还没播完时就提前打断它。
     setTimeout(step, 2600);
   };
@@ -477,6 +504,12 @@ function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COL
 // style 可选,仅 game-over 播报胜利时需要金色特殊样式。
 function setBanner(html, style){
   document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
+}
+// waitAskBanner: 旁观者视角"等待 XX 决定是否发动【技能】…"这句在 renderControls 里重复十余处、
+// 形状完全一致的提示,集中成一个函数,避免每处手拼、措辞漂移。name 由调用点算好后传入(兼容各分支
+// 原有的 p / (p?p.name:'默认名') 兜底写法),skill 传技能名(不含书名号,函数内部补【】)。
+function waitAskBanner(name, skill){
+  setBanner('等待 '+escapeHtml(name||'')+' 决定是否发动【'+skill+'】…');
 }
 // fangtianSuffix: 方天画戟排队中的目标提示后缀(如"(方天画戟 目标2/3)"),没有排队则返回空串。
 // 附加在响应阶段(respond/tieqi/liegong)的 banner 末尾,帮旁观者看懂"这是第几个目标"。
@@ -564,6 +597,12 @@ function render(g){
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
+  // 同款兜底:只要不在「自己的弃牌阶段」,就清空已勾选待弃置的手牌下标——覆盖克己跳过/确认
+  // 提交完毕换下一回合/中断离开等一切离开弃牌阶段的情形。注意这里不能靠 renderControls
+  // 内部discard分支末尾自己清(那段代码被套在 if(!myTurn){return;} 之后,轮到别人时根本
+  // 不会执行到,必须放在这个不受myTurn限制的单点兜底里才能真正覆盖"换到别人回合"这个最
+  // 常见的离开discard阶段的场景)。
+  if(!(g.started && g.phase==='discard' && g.turn===mySeat)) resetDiscardSelected();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
   // 同款兜底:只要不在「自己的摸牌阶段」,就退出突袭选目标模式。
@@ -985,22 +1024,17 @@ function render(g){
   // 日志 toast:有新日志才弹,把本次新增的日志(可能不止一条,比如延时锦囊判定这类一次事务
   // 里连续 pushLog 好几次)排队依次展示——早期版本"只弹最新一条"会把中间结果(比如判定牌本身
   // 生效/无效那条)淹没掉,只看到判定后紧跟着的下一条日志,看不出判定过程发生了什么。
-  // 定位新增日志的起点:不能按数组长度(会被 pushLog 的 slice(-40) 封顶,详见上面
-  // lastToastedLogText 声明处的说明),而是从数组末尾往前找"上次已展示的那条文本"出现的位置——
-  // 找不到(日志被封顶顶掉、或全新房间)就只展示这次拿到的全部(newLines,由下面的上限兜底)。
+  // 定位新增日志:直接用每条元素自带的 seq 过滤(> 上次已弹的 seq)即可,不用再"从数组末尾
+  // 回溯匹配文本"——seq 单调递增且跨读取稳定,不受 slice(-40) 长度封顶影响,详见上面
+  // lastToastedSeq 声明处的说明。
   const log = g.log||[];
-  if(lastToastedLogText===undefined){
-    lastToastedLogText = log.length ? log[log.length-1] : null; // 第一次render,只记文本,不弹历史
+  if(lastToastedSeq===undefined){
+    lastToastedSeq = log.length ? log[log.length-1].seq : 0; // 第一次 render:只记当前最新 seq,不弹历史
   } else if(log.length){
-    let startIdx = log.length; // 默认:没有新增
-    for(let i=log.length-1; i>=0; i--){
-      if(log[i]===lastToastedLogText){ startIdx=i+1; break; }
-      if(i===0) startIdx=0; // 没找到,说明这段时间新增了不止能追溯的量,从头展示这次拿到的全部
-    }
-    const newLines = log.slice(startIdx);
-    if(newLines.length){
-      queueLogToasts(g, newLines);
-      lastToastedLogText = log[log.length-1];
+    const newEntries = log.filter(e => e && Number.isInteger(e.seq) && e.seq > lastToastedSeq);
+    if(newEntries.length){
+      queueLogToasts(g, newEntries); // 直接传整条目(含 kind),由 queueLogToasts/showLogToast 内部取 text 与 kind
+      lastToastedSeq = log[log.length-1].seq;
     }
   }
 }
@@ -1092,6 +1126,31 @@ function renderPickGeneral(g, c){
       list.appendChild(card);
     });
     c.appendChild(list);
+    // ===== 调试选将入口:仅供测试用,不是正式游戏机制 =====
+    // 不受三选一候选池(me.generalChoices)限制,可以直接指定任意已实现的武将,方便测试某个
+    // 具体武将不用靠随机等它出现在候选池里。视觉上刻意和上面正式的候选卡片区分开(警示色
+    // 虚线边框+⚠️字样),避免正常玩家误触把它当成正式流程的一部分。
+    const debugBox=document.createElement('div');
+    debugBox.style.cssText='margin-top:16px;padding:12px;border:2px dashed #d4a017;border-radius:10px;background:rgba(212,160,23,.08);';
+    const warn=document.createElement('div');
+    warn.style.cssText='color:#d4a017;font-weight:700;margin-bottom:8px;font-size:13px;';
+    warn.textContent='⚠️ 仅供调试测试使用：自由选择任意武将（不受候选池限制，不是正式游戏功能）';
+    debugBox.appendChild(warn);
+    const sel=document.createElement('select');
+    sel.style.cssText='width:100%;margin-bottom:8px;background:#15120f;color:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px;';
+    GENERAL_IDS.forEach(id=>{
+      const gen=getGeneral(id); if(!gen) return;
+      const opt=document.createElement('option');
+      opt.value=id; opt.textContent=gen.name+' · '+gen.skill;
+      sel.appendChild(opt);
+    });
+    debugBox.appendChild(sel);
+    const debugBtn=document.createElement('button');
+    debugBtn.style.cssText='border:1px solid #d4a017;color:#d4a017;background:transparent;';
+    debugBtn.textContent='【测试】确认选择';
+    debugBtn.onclick=()=>debugPickGeneral(sel.value);
+    debugBox.appendChild(debugBtn);
+    c.appendChild(debugBox);
     return;
   }
   // 自己已经选完,等待其他玩家
@@ -1253,7 +1312,7 @@ function renderControls(g){
   }
   if(g.phase==='yijiAsk' && g.pending && g.pending.type==='yijiAsk'){
     const p=g.players[g.pending.seat].name;
-    setBanner('等待 '+escapeHtml(p)+' 决定是否发动【遗计】…'); // 不剧透是否受伤/发动详情之外的任何牌面信息
+    waitAskBanner(p, '遗计'); // 不剧透是否受伤/发动详情之外的任何牌面信息
     return;
   }
   // 郭嘉【遗计】分配阶段:g.pending.cards 是共享状态里的真实牌面,理论上任何客户端都能读到——
@@ -1305,7 +1364,7 @@ function renderControls(g){
   }
   if(g.phase==='ganglieAsk' && g.pending && g.pending.type==='ganglieAsk'){
     const p=g.players[g.pending.seat].name;
-    setBanner('等待 '+escapeHtml(p)+' 决定是否发动【刚烈】…');
+    waitAskBanner(p, '刚烈');
     return;
   }
   if(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===mySeat){
@@ -1356,7 +1415,7 @@ function renderControls(g){
   }
   if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'许褚')+' 决定是否发动【裸衣】…');
+    waitAskBanner(p?p.name:'许褚', '裸衣');
     return;
   }
   if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat){
@@ -1469,7 +1528,7 @@ function renderControls(g){
   }
   if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'荀彧')+' 决定是否发动【节命】…');
+    waitAskBanner(p?p.name:'荀彧', '节命');
     return;
   }
   if(g.phase==='liuli' && g.pending && g.pending.type==='liuli' && g.pending.to===mySeat){
@@ -1494,7 +1553,7 @@ function renderControls(g){
   }
   if(g.phase==='liuli' && g.pending && g.pending.type==='liuli'){
     const p=g.players[g.pending.to];
-    setBanner('等待 '+escapeHtml(p?p.name:'大乔')+' 决定是否发动【流离】…');
+    waitAskBanner(p?p.name:'大乔', '流离');
     return;
   }
   if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang' && g.pending.seat===mySeat){
@@ -1519,7 +1578,7 @@ function renderControls(g){
   }
   if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'小乔')+' 决定是否发动【天香】…');
+    waitAskBanner(p?p.name:'小乔', '天香');
     return;
   }
   if(g.phase==='biyue' && g.pending && g.pending.type==='biyue' && g.pending.seat===mySeat){
@@ -1536,7 +1595,7 @@ function renderControls(g){
   }
   if(g.phase==='biyue' && g.pending && g.pending.type==='biyue'){
     const p=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(p?p.name:'貂蝉')+' 决定是否发动【闭月】…');
+    waitAskBanner(p?p.name:'貂蝉', '闭月');
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
@@ -2212,10 +2271,24 @@ function renderControls(g){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
     if(over>0) setBanner(keji
-      ? '克己:本回合未出杀,可不弃牌直接结束回合(也可点手牌自愿弃置)。'
-      : '手牌超出体力,需弃掉 '+over+' 张(点手牌弃置)。');
+      ? '克己:本回合未出杀,可不弃牌直接结束回合(也可勾选手牌后点确认弃牌)。'
+      : '手牌超出体力,需选中 '+over+' 张后点确认弃牌(已选 '+discardSelectedSet.size+'/'+over+')。');
     else setBanner('轮到你,弃牌阶段。手牌未超出体力上限,可直接结束回合。');
-    const b=document.createElement('button'); b.className='primary';
+    if(over>0){
+      // 多选后统一确认:必须恰好选够数量才能提交,选多选少都不能点(和discardCards的服务端
+      // 校验口径一致——服务端要求"cardIdxList.length>=need"且不接受重复/越界下标,这里前端
+      // 用===over做更严格的UI层限制,不允许多选,避免玩家多勾了几张、点确认后一次性弃掉超过
+      // 需要的数量这种体验问题)。
+      const confirmBtn=document.createElement('button'); confirmBtn.className='primary';
+      confirmBtn.textContent='确认弃牌('+discardSelectedSet.size+'/'+over+')';
+      confirmBtn.disabled = discardSelectedSet.size!==over;
+      confirmBtn.onclick=()=>{
+        discardCards([...discardSelectedSet]);
+        discardSelectedSet = new Set();
+      };
+      c.appendChild(confirmBtn);
+    }
+    const b=document.createElement('button'); b.className='ghost';
     b.textContent='结束回合'; b.disabled=over>0 && !keji; b.onclick=endTurn; c.appendChild(b);
   }
 }
@@ -2287,7 +2360,8 @@ function renderHand(g){
     const qingnangPicked = qingnangMode && qingnangCardIdx===idx;
     const zhihengPicked = zhihengMode && zhihengPicks.includes(idx);
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
-    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked)?' selected':'');
+    const discardPicked = discardSelectedSet.has(idx);
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked||discardPicked)?' selected':'')+(discardPicked?' discard-selected':'');
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
@@ -2403,7 +2477,14 @@ function renderHand(g){
         onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g); };
       }
     } else if(g.phase==='discard'&&myTurn&&me.hand.length>me.hp){
-      usable=true; onClick=()=>discardCard(idx);
+      // 多选后统一确认:点击只是切换勾选状态(discardSelectedSet),不立刻提交——真正弃牌
+      // 由弃牌阶段的"确认弃牌"按钮统一调用discardCards一次性提交,见renderControls。
+      usable=true;
+      onClick=()=>{
+        if(discardSelectedSet.has(idx)) discardSelectedSet.delete(idx);
+        else discardSelectedSet.add(idx);
+        render(g);
+      };
     } else if(g.phase==='respond'&&g.pending&&g.pending.to===mySeat&&card.name==='闪'){
       // handled via button; leave card non-clickable
     }
@@ -2483,7 +2564,7 @@ function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.a
 function showLog(){ logModalOpen=true; renderLogModal(currentG); }
 function renderLogModal(g){
   if(!logModalOpen || !g) return;
-  const html=(g.log||[]).map(l=>'<div>'+escapeHtml(l)+'</div>').join('');
+  const html=(g.log||[]).map(l=>'<div>'+escapeHtml(l && typeof l==='object' ? l.text : l)+'</div>').join('');
   showInfo('日志', '<div class="log-modal">'+html+'</div>');
   const body=document.querySelector('#infoModal .log-modal');
   if(body) body.scrollTop=body.scrollHeight; // 每次刷新都跟到最新一条,和以前常驻日志的行为一致

@@ -75,7 +75,29 @@ function normalize(g){
   if(!g) return g;
   g.deck = g.deck || [];
   g.discard = g.discard || [];
-  g.log = g.log || [];
+  // 日志:元素统一成 {seq,text[,kind,actor,targets]}。老房间/开局初始条目(createRoom 的
+  // log:['房间已创建…'])可能是裸字符串,在这里一次性补 seq——保留已有合法 seq、绝不重新编号
+  // (seq 必须跨读取稳定,渲染端靠它判断哪些是新日志),只给缺 seq 的项接在当前最大值之后编号。
+  // kind/actor/targets 是第二步新增的结构字段(logEvent 产出),原样透传+轻量类型防御——
+  // Firebase 吞空 targets 数组、读回来是 undefined,消费端按"无目标"处理即可,不强求恢复空数组。
+  // normalize 在读(render→normalize)和写(tx→normalize)两条路径都跑,所以到达渲染端时 g.log
+  // 一定已是这套结构;此修正只在客户端内存进行、不写回 Firebase(同既有空数组防御)。
+  {
+    let maxSeq = 0;
+    const keepMeta = (src, dst)=>{
+      if(src && typeof src.kind==='string') dst.kind = src.kind;
+      if(src && Number.isInteger(src.actor)) dst.actor = src.actor;
+      if(src && Array.isArray(src.targets)) dst.targets = src.targets.filter(Number.isInteger);
+      return dst;
+    };
+    g.log = (g.log || []).map(e=>{
+      if(e && typeof e==='object' && Number.isInteger(e.seq)){
+        if(e.seq>maxSeq) maxSeq=e.seq;
+        return keepMeta(e, { seq:e.seq, text: typeof e.text==='string' ? e.text : String(e.text==null?'':e.text) });
+      }
+      return { seq: ++maxSeq, text: typeof e==='string' ? e : String(e==null?'':e) };
+    });
+  }
   g.players = g.players || [];
   // 轮次计数:数字/数组防御,Firebase 吞空数组、旧存档可能没有这两个字段
   if(!Number.isInteger(g.roundNum)) g.roundNum=1;
@@ -269,8 +291,30 @@ function normalize(g){
   }
   return g;
 }
+// logEvent: 追加一条结构化日志事件。ev = {text, kind?, actor?, targets?}:
+//   text   —— 给日志面板/toast 显示的文本(本步仍由各调用点手写,措辞不变)
+//   kind   —— 事件类型标签('damage'/'sha'/…),渲染端据此判定该不该弹 toast、以及 toast 的强调色,
+//             取代原来"从文本里嗅探子串"的脆弱写法。未带 kind 的条目走旧子串判定,行为不变。
+//   actor  —— 事件发起者座位号(可空);targets —— 目标座位号数组(可空)。本步只存不读,供第三步取用。
+// seq 逻辑与原来一致:从上一条派生自增,跨读取稳定、不受 slice(-40) 长度封顶影响。
+function logEvent(log, ev){
+  log = (log||[]).slice(-40);
+  const last = log.length ? log[log.length-1] : null;
+  const lastSeq = (last && typeof last==='object' && Number.isInteger(last.seq)) ? last.seq : 0;
+  const text = (ev && typeof ev.text==='string') ? ev.text : String(ev && ev.text!=null ? ev.text : '');
+  const entry = { seq: lastSeq+1, text };
+  if(ev){
+    if(typeof ev.kind==='string') entry.kind = ev.kind;
+    if(Number.isInteger(ev.actor)) entry.actor = ev.actor;
+    if(Array.isArray(ev.targets)) entry.targets = ev.targets.filter(Number.isInteger);
+  }
+  log.push(entry);
+  return log;
+}
+// pushLog: 纯文本日志便捷入口,内部就是只带 text 的 logEvent——那 177 个 g.log=pushLog(g.log,'…')
+// 调用点一律不动,产出条目没有 kind,渲染端自动回退到"文本子串判定 toast"的旧路径,行为完全不变。
 function pushLog(log, msg){
-  log = (log||[]).slice(-40); log.push(msg); return log;
+  return logEvent(log, { text: (typeof msg==='string' ? msg : String(msg==null?'':msg)) });
 }
 // markCardSound: 记录"这次打出/使用了哪张牌"这个语音播放事件,供 render.js 的
 // maybePlayCardSound 检测并播放对应语音(assets/audio/{CARD_PINYIN拼音}.mp3)。
@@ -617,6 +661,27 @@ function respondPickGeneral(generalId){
     g.log = pushLog(g.log, me.name+' 已选定武将,等待其他玩家…');
     if(g.players.every(p=>p && p.general)){
       finishGeneralAssign(g); // 全部选完,自动进入正式开局
+    }
+    return g;
+  });
+}
+// debugPickGeneral: 仅供测试用的调试入口——不受 p.generalChoices(三选一候选池)限制,可以
+// 直接指定任意已实现的武将。**刻意不检查"武将是否已被其他玩家选择过"这条唯一性限制**——
+// 正式对局(respondPickGeneral)靠开局前不放回抽样天然保证同局武将互不重复,但测试场景下
+// 经常需要让多人都选到同一个武将来单独反复验证某个技能,不应该受人数/候选池随机性影响,
+// 所以这里放宽这条规则,允许重复选择同一个武将。这不代表正式对局允许重复,只是测试专用的
+// 例外通道,和 render.js 里明显标注"仅供调试测试使用"的 UI 入口配套。
+function debugPickGeneral(generalId){
+  tx(g=>{
+    if(g.phase!=='pickingGeneral') return g;
+    const me=g.players[mySeat];
+    if(!me || me.general) return g; // 已经选过了不能重复选,和正式respondPickGeneral保持同样的基本约束
+    if(!GENERALS[generalId]) return g; // 必须是真实存在的武将id
+    me.general = generalId;
+    me.generalChoices = null;
+    g.log = pushLog(g.log, me.name+' (调试模式)选择了武将【'+GENERALS[generalId].name+'】');
+    if(g.players.every(p=>p && p.general)){
+      finishGeneralAssign(g);
     }
     return g;
   });
@@ -991,11 +1056,11 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard){
   // undefined 时都安全跳过这个判断,只有精确等于 'black' 才命中。
   if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
-    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效');
+    g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
     finishSingleShaTarget(g);
     return;
   }
-  g.log=pushLog(g.log, me.name+' 对 '+target.name+' '+usedAs);
+  g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' '+usedAs });
   if(hasCap(me,'tieqi')){
     g.pending={type:'tieqi', from:fromSeat, to:targetSeat};
     if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
@@ -1659,7 +1724,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   if(!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   if(!skipTianxiang && maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   p.hp = Math.max(0, p.hp - amount);
-  g.log=pushLog(g.log, p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点伤害（体力'+p.hp+'）');
+  g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点伤害（体力'+p.hp+'）' });
   if(p.hp<=0){
     startDying(g, seat, srcType);
     return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解决时统一处理)
@@ -2977,6 +3042,35 @@ function discardCard(cardIdx){
       g.liRangRecord.discarded.push(card);
     }
     g.log=pushLog(g.log, me.name+' 弃置一张牌');
+    return g;
+  });
+}
+// discardCards: 弃牌阶段"多选后统一确认"的批量版本——UI 改成点击只是勾选/取消勾选,累积选好
+// 几张,最后点"确认弃牌"才一次性提交到这里(不再是discardCard那种"点一张立即弃一张")。
+// discardCard 本身保留不删,防止其它地方还在单独调用它,只是弃牌阶段UI不再走这个入口。
+function discardCards(cardIdxList){
+  tx(g=>{
+    if(g.phase!=='discard'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!Array.isArray(cardIdxList) || cardIdxList.length===0) return g;
+    // 校验:下标不重复、不越界
+    const uniqueIdx = [...new Set(cardIdxList)];
+    if(uniqueIdx.length!==cardIdxList.length) return g;
+    if(!uniqueIdx.every(i=>Number.isInteger(i) && i>=0 && i<me.hand.length)) return g;
+    const need = me.hand.length - me.hp;
+    if(need<=0) return g; // 没有超出上限,不需要弃牌
+    if(cardIdxList.length < need) return g; // 弃的不够,拒绝(必须一次性弃够,不允许弃少了留着下次再弃)
+    // 按下标从大到小依次splice,避免删除时下标错位
+    const sorted = [...uniqueIdx].sort((a,b)=>b-a);
+    const discarded = sorted.map(i=>me.hand.splice(i,1)[0]);
+    g.discard.push(...discarded);
+    // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
+    // (礼让回收的是"本弃牌阶段弃置的全部牌",不能因为改成批量提交就漏记)。
+    if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
+      g.liRangRecord.discarded = g.liRangRecord.discarded || [];
+      g.liRangRecord.discarded.push(...discarded);
+    }
+    g.log=pushLog(g.log, me.name+' 弃置了'+discarded.length+'张牌');
     return g;
   });
 }
