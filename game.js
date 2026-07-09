@@ -431,12 +431,13 @@ function tryBagua(g, seat, resumeInfo){
   const card=judge(g);
   if(!card) return false; // 无牌可判,视为未发动
   if(maybeGuicai(g, seat, card, Object.assign({kind:'bagua'}, resumeInfo))==='pending') return 'pending';
-  return finishBaguaColor(g, card);
+  return finishBaguaColor(g, seat, card);
 }
 // finishBaguaColor: 八卦阵判定的红黑结算(独立出来,供 tryBagua 直接判 和 finishGuicai 改判后判 共用)。
-function finishBaguaColor(g, card){
-  if(isRedForPlayer(p, card)){ g.log=pushLog(g.log, '判定为红,视为打出【闪】'); return true; }
-  g.log=pushLog(g.log, '判定为黑,【八卦阵】未生效'); return false;
+function finishBaguaColor(g, seat, card){
+  const p = g.players[seat];
+  if(isRedForPlayer(p, card)){ g.log=pushLog(g.log, p.name+' 判定为红,视为打出【闪】'); return true; }
+  g.log=pushLog(g.log, p.name+' 判定为黑,【八卦阵】未生效'); return false;
 }
 // ===== 鬼才:判定牌亮出后,判定者自己(优先)或攻击范围内的其他鬼才拥有者可打出一张手牌替换 =====
 // 四个判定场景(八卦阵 tryBagua、闪电/乐不思蜀/兵粮寸断的 processOneDelayCard)都调用 maybeGuicai,
@@ -504,6 +505,13 @@ function respondGuicai(useReplace, cardIdx){
 // 'delayJudge':用最终判定牌重新调用该延时锦囊的 effect,处理去向后继续该玩家判定区剩余的牌。
 function finishGuicai(g, finalCard){
   const resume=g.pending.resume;
+  // judgedSeat: 由 maybeGuicai 统一写在 g.pending.seat 上,不管 resume 具体带了哪些字段都始终
+  // 正确——kind==='bagua' 的 resume(来自 tryBagua 的 resumeInfo,sha 场景是 {type,from,to,
+  // sourceCard}、aoe 场景是 {type,target})都没有 .seat 这个字段,直接读 resume.seat 会是
+  // undefined(真实踩过的坑:finishBaguaColor 内部 g.players[undefined] 抛异常,和本次要修的
+  // ReferenceError 同一类问题,只是换了个位置)。g.pending.seat 才是所有 kind 都保证存在、
+  // 值恒等于判定者座位的字段,必须在 g.pending=null 之前先取出来。
+  const judgedSeat=g.pending.seat;
   g.pending=null;
   if(resume.kind==='delayJudge'){
     const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], finalCard, resume.card);
@@ -541,7 +549,7 @@ function finishGuicai(g, finalCard){
     return;
   }
   // kind==='bagua'
-  const red = finishBaguaColor(g, finalCard);
+  const red = finishBaguaColor(g, judgedSeat, finalCard);
   if(resume.type==='sha'){
     // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要
     // 继续;青龙偃月刀/贯石斧同样要在这里给一次触发机会,原因见 continueShaAfterTieqi 对应
