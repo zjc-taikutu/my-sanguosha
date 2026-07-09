@@ -230,6 +230,68 @@ let lastToastedSeq = undefined;
 // 于生成出的HTML字符串内部,轮到处理"AA"时又在已生成的HTML里重新匹配到、再包一层嵌套span,
 // 内层颜色覆盖外层,导致同一个名字在一句话里被拆成两种颜色。这次改成先在纯文本坐标系里
 // 用 claimed 数组标记哪些字符位置已经被占用,长名字优先占坑,从根本上避免嵌套/重叠染色。
+// getPlayerDisplayLabel: 日志里玩家的显示文本——已选定武将则"武将名(玩家名)",未选武将/武将id
+// 查不到则退回只显示玩家名。只用于展示层,不影响 g.log 存储的原始文本。
+function getPlayerDisplayLabel(p){
+  if(!p) return '';
+  const gen = (p.general!=null) ? getGeneral(p.general) : null;
+  return gen ? (gen.name+'('+p.name+')') : p.name;
+}
+// SUIT_COLOR: 红桃/方块用醒目的朱红色(呼应主题色 --cinnabar-bright),黑桃/梅花不特意变色,
+// 沿用正文默认文字色(暗色主题下强行标"黑色"对比度反而不够,不如不处理)。
+const SUIT_COLOR = { '♥':'var(--cinnabar-bright)', '♦':'var(--cinnabar-bright)' };
+// colorizeSuits: 对一段"确定没有被姓名替换占用"的纯文本,逐字符扫描,给花色符号包色、
+// 其余字符正常转义。只处理未被姓名匹配占用的片段,不会和 formatLogEntry 的姓名替换重叠处理。
+function colorizeSuits(segment){
+  let out = '';
+  for(const ch of segment){
+    if(SUIT_COLOR[ch]) out += '<span style="color:'+SUIT_COLOR[ch]+'">'+ch+'</span>';
+    else out += escapeHtml(ch);
+  }
+  return out;
+}
+// formatLogEntry: 日志展示层的统一格式化入口,给常驻面板和完整历史弹窗共用。不改变 g.log 里
+// 存储的原始文本——原文本仍是各处手写的纯字符串,只在这一步做两件事:①把玩家名字替换成
+// "武将名(玩家名)"并按座位色染色(getPlayerDisplayLabel);②给文本里的花色符号染色
+// (colorizeSuits)。和 colorizeLogLine 同一套"先在纯文本坐标系标记已占用区间、长名字优先
+// 占坑、最后一次性拼出HTML"写法,避免嵌套/重叠替换,同时保证姓名区间不会被花色染色重复处理
+// (colorizeSuits 只作用于姓名匹配之间/之外的剩余片段)。
+function formatLogEntry(g, text){
+  const entries = (g.players||[]).map((p,i)=>({i,p}))
+    .filter(o=>o.p && o.p.name)
+    .map(o=>Object.assign(o, {label:getPlayerDisplayLabel(o.p)}))
+    .sort((a,b)=>b.p.name.length-a.p.name.length); // 长名字优先占坑,避免被短名字子串抢先匹配
+
+  const claimed = new Array(text.length).fill(false);
+  const matches = []; // {start,end,html}
+  entries.forEach(({i,p,label})=>{
+    const name = p.name;
+    let searchFrom = 0;
+    while(true){
+      const idx = text.indexOf(name, searchFrom);
+      if(idx<0) break;
+      const end = idx+name.length;
+      let overlap = false;
+      for(let k=idx;k<end;k++){ if(claimed[k]){ overlap=true; break; } }
+      if(!overlap){
+        for(let k=idx;k<end;k++) claimed[k]=true;
+        matches.push({start:idx, end, html:'<span style="color:'+seatColor(i)+'">'+escapeHtml(label)+'</span>'});
+      }
+      searchFrom = idx+1; // 继续找同一名字在这条日志里的其它出现位置(比如同时提到来源和目标)
+    }
+  });
+  matches.sort((a,b)=>a.start-b.start);
+
+  let result = '';
+  let cursor = 0;
+  matches.forEach(m=>{
+    result += colorizeSuits(text.slice(cursor, m.start));
+    result += m.html;
+    cursor = m.end;
+  });
+  result += colorizeSuits(text.slice(cursor));
+  return result;
+}
 function colorizeLogLine(g, text){
   const entries = (g.players||[]).map((p,i)=>({i,p}))
     .filter(o=>o.p && o.p.name && o.p.name.length>=2)
@@ -991,7 +1053,9 @@ function render(g){
   renderControls(g);
   renderHand(g);
 
-  // 日志不再常驻:默认收起,只有 #logBtn 点开的浮层打开着时才需要跟着这次 render 同步刷新内容
+  // 常驻小面板:不受 logModalOpen 影响,每次 render 都刷新,只展示最近 LOG_PANEL_LINES 条。
+  renderLogPanel(g);
+  // 完整历史弹窗:仍然默认收起,只有 #logBtn 点开时才需要跟着这次 render 同步刷新内容
   // (Firebase 是实时推送,面板开着的时候底下状态可能还在变,不刷新就会显示过期日志)。
   if(logModalOpen) renderLogModal(g);
 
@@ -2512,10 +2576,22 @@ function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.a
 function showLog(){ logModalOpen=true; renderLogModal(currentG); }
 function renderLogModal(g){
   if(!logModalOpen || !g) return;
-  const html=(g.log||[]).map(l=>'<div>'+escapeHtml(l && typeof l==='object' ? l.text : l)+'</div>').join('');
+  const html=(g.log||[]).map(l=>'<div>'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
   showInfo('日志', '<div class="log-modal">'+html+'</div>');
   const body=document.querySelector('#infoModal .log-modal');
   if(body) body.scrollTop=body.scrollHeight; // 每次刷新都跟到最新一条,和以前常驻日志的行为一致
+}
+// LOG_PANEL_LINES: 常驻面板只展示最近这么多条,完整历史仍走 📜 按钮的 renderLogModal。
+const LOG_PANEL_LINES = 8;
+// renderLogPanel: 常驻可见的日志小面板,不需要点开——和 renderControls/renderHand 同一批,
+// 每次 render() 都会调用,不受 logModalOpen 影响(那个开关只管完整历史弹窗)。
+function renderLogPanel(g){
+  const el = document.getElementById('logPanel');
+  if(!el) return;
+  const log = g.log||[];
+  const recent = log.slice(-LOG_PANEL_LINES);
+  el.innerHTML = recent.map(l=>'<div>'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
+  el.scrollTop = el.scrollHeight; // 跟到最新一条
 }
 // 供座位卡内联触发(武将/装备,均公开信息);inline onclick 已 stopPropagation,不触发选目标
 function showGeneralInfo(id){ const gen=getGeneral(id); if(gen) showInfo(gen.name+' · '+gen.skill, escapeHtml(gen.desc||'(暂无说明)')); }
