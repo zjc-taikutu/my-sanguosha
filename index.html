@@ -500,6 +500,23 @@
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   .log-modal div:last-child{color:var(--paper);}
+  /* 常驻日志小面板:嵌在 controls 下方的正常文档流里,不用 fixed 定位——手机窄屏下固定定位
+     容易和其它元素重叠(#closeRoomBtn 那次真机踩过的坑),这里刻意避开同类问题。只展示最近
+     几条(renderLogPanel 控制条数),完整历史仍走 📜 按钮的弹窗。 */
+  .log-panel{max-height:132px;overflow-y:auto;text-align:left;font-size:13px;line-height:1.6;
+    color:var(--paper-dim);background:rgba(0,0,0,.18);border:1px solid var(--line);
+    border-radius:10px;padding:8px 10px;margin-top:10px;}
+  .log-panel div{padding:2px 0;}
+  .log-panel div:last-child{color:var(--paper);}
+  /* 宽屏(>=900px,手机断点之外)下把常驻日志面板切到右侧,不再挤在 controls 下方——
+     窄屏没有侧边空间，保持原来嵌入 controls 下方的位置不变，只在这里加宽屏覆盖。
+     top:64px 避开顶部 44px 高的 helpBtn/logBtn/closeRoomBtn(它们在 top:12px，
+     底边约在 56px)，留出安全间距；宽度/最大高度按侧栏尺寸给，允许自行微调数值，
+     但必须保持 position:fixed 只出现在这条宽屏媒体查询内、不影响窄屏默认布局。 */
+  @media (min-width:900px){
+    .log-panel{position:fixed;top:64px;right:12px;width:260px;
+      max-height:calc(100vh - 90px);margin-top:0;z-index:40;}
+  }
   #infoModal{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
   #infoModal.hidden{display:none;}
   .info-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:560px;width:100%;
@@ -570,6 +587,7 @@
       <div class="deckinfo" id="deckInfo"></div>
       <div id="banner"></div>
       <div class="controls" id="controls"></div>
+      <div class="log-panel" id="logPanel"></div>
     </div>
 
     <div class="hand-label" id="myGeneral"></div>
