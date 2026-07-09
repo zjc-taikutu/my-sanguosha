@@ -2213,7 +2213,10 @@ function renderControls(g){
         if(lianhuanTargets.length>=1){
           const ub=document.createElement('button'); ub.className='primary';
           ub.textContent='使用【铁索连环】';
-          ub.onclick=()=>{ confirmAndPlay('将这张梅花牌当【铁索连环】使用,目标 '+lianhuanTargets.map(seat=>g.players[seat].name).join('、')+'？', ()=>lianHuan(idx, lianhuanTargets.slice())); };
+          ub.onclick=()=>{
+            const targets=lianhuanTargets.slice();
+            confirmAndPlay('将这张梅花牌当【铁索连环】使用,目标 '+targets.map(seat=>g.players[seat].name).join('、')+'？', ()=>lianHuan(idx, targets));
+          };
           c.appendChild(ub);
         }
       }
@@ -2271,7 +2274,10 @@ function renderControls(g){
           const ub=document.createElement('button'); ub.className='primary';
           const idx=selectedCardIdx;
           ub.textContent='使用【铁索连环】';
-          ub.onclick=()=>{ confirmAndPlay('对 '+tiesuoTargets.map(seat=>g.players[seat].name).join('、')+' 使用【铁索连环】？', ()=>playCard(idx, actionId, tiesuoTargets.slice())); };
+          ub.onclick=()=>{
+            const targets=tiesuoTargets.slice();
+            confirmAndPlay('对 '+targets.map(seat=>g.players[seat].name).join('、')+' 使用【铁索连环】？', ()=>playCard(idx, actionId, targets));
+          };
           c.appendChild(ub);
         }
         const cb=document.createElement('button'); cb.className='ghost';
