@@ -240,9 +240,21 @@ function normalize(g){
       g.liRangRecord=null;
     }
   }
-  if(g.pending && (g.pending.type==='quhuRespond' || g.pending.type==='quhuDamageChoice')){
+  // quhuRespond(拼点阶段)和 quhuDamageChoice(拼点赢后选伤害目标)结构不同,不能共用同一份校验——
+  // 前者带 selfCard(拼点用的那张牌),后者带 targets(可选的伤害目标座位数组),没有 selfCard。
+  // 曾经两者共用一段校验、都要求 selfCard 非空,quhuDamageChoice 从来不带这个字段,
+  // 导致刚设置好 pending 就被下一次 normalize 判定"无效"直接清空、phase 打回 'play'——
+  // 真实 bug:拼点赢了之后完全没机会选目标,见 CLAUDE.md 记录。
+  if(g.pending && g.pending.type==='quhuRespond'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
+      g.pending=null; g.phase='play';
+    }
+  }
+  if(g.pending && g.pending.type==='quhuDamageChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !Array.isArray(d.targets) || d.targets.length===0
+       || !g.players[d.seat] || !g.players[d.targetSeat] || !d.targets.every(t=>Number.isInteger(t) && g.players[t] && g.players[t].alive)){
       g.pending=null; g.phase='play';
     }
   }
