@@ -50,6 +50,7 @@ const SKILL_PINYIN = {
   '天妒':'tiandu', '遗计':'yiji', '枭姬':'xiaoji', '反馈':'fankui',
   '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi',
   '苦肉':'kurou', '集智':'jizhi', '制衡':'zhiheng', '奸雄':'jianxiong',
+  '反间':'fanjian',
   '仁德':'rende', '激昂':'jiang', '青囊':'qingnang', '急救':'jijiu',
   '刚烈':'ganglie', '裸衣':'luoyi', '驱虎':'quhu', '节命':'jieming',
   '国色':'guose', '流离':'liuli', '天香':'tianxiang', '红颜':'hongyan',
@@ -159,6 +160,8 @@ let lijianMode = false;
 let lijianCardIdx = null;
 let lijianFromSeat = null;
 function resetLijian(){ lijianMode=false; lijianCardIdx=null; lijianFromSeat=null; }
+let fanjianMode = false;
+function resetFanjian(){ fanjianMode=false; }
 let lirangPicks = [];
 function resetLirang(){ lirangPicks=[]; }
 // guanshifuOptions: 攻击者自己当前可弃的项(手牌逐张 + 非空装备槽逐件,武器槽排除——那就是
@@ -520,7 +523,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetLirang(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
@@ -682,6 +685,7 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQingnang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQuhu();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLijian();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetFanjian();
   if(!(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat)) resetLirang();
   // 同款兜底:一旦不在"轮到自己响应骁果"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
@@ -1001,6 +1005,12 @@ function render(g){
         d.title='女性角色不能成为【离间】目标';
       }
     }
+    if(fanjianMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
+      d.style.cursor='pointer';
+      d.style.outline='2px dashed var(--cinnabar-bright)';
+      d.title='选择为【反间】目标';
+      d.onclick=()=>{ confirmAndPlay('对 '+g.players[i].name+' 发动【反间】？', ()=>fanJian(i)); };
+    }
     // 华佗【青囊】:已选一张手牌后,点任意已受伤角色回复1点体力(可以选自己)。
     if(qingnangMode && qingnangCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
       if(p.hp<p.maxHp){
@@ -1073,7 +1083,7 @@ function render(g){
   });
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -1575,6 +1585,22 @@ function renderControls(g){
   if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice'){
     const xun=g.players[g.pending.seat], source=g.players[g.pending.targetSeat];
     setBanner(escapeHtml(xun?xun.name:'荀彧')+' 【驱虎】拼点赢,正在选择 '+escapeHtml(source?source.name:'目标')+' 造成伤害的对象…');
+    return;
+  }
+  if(g.phase==='fanjianSuit' && g.pending && g.pending.type==='fanjianSuit' && g.pending.targetSeat===mySeat){
+    const zhou=g.players[g.pending.seat];
+    ['♠','♥','♣','♦'].forEach(suit=>{
+      const b=document.createElement('button');
+      b.textContent='选择 '+suit;
+      b.onclick=()=>respondFanjianSuit(suit);
+      c.appendChild(b);
+    });
+    setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 对你发动【反间】,请选择一种花色。');
+    return;
+  }
+  if(g.phase==='fanjianSuit' && g.pending && g.pending.type==='fanjianSuit'){
+    const zhou=g.players[g.pending.seat], target=g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 发动【反间】,等待 '+escapeHtml(target?target.name:'目标')+' 选择花色…');
     return;
   }
   if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk' && g.pending.seat===mySeat){
@@ -2200,6 +2226,10 @@ function renderControls(g){
       setBanner(text);
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetLijian(); render(g); }; c.appendChild(cb);
+    } else if(fanjianMode){
+      setBanner('【反间】选择一名其他角色,令其猜一种花色并抽取你一张手牌。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetFanjian(); render(g); }; c.appendChild(cb);
     } else if(qingnangMode){
       setBanner(qingnangCardIdx===null
         ? '【青囊】选择一张要弃置的手牌。'
@@ -2272,7 +2302,7 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode;
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
@@ -2315,6 +2345,10 @@ function renderControls(g){
       const lb=document.createElement('button'); lb.className='ghost';
       lb.textContent='发动【离间】'; lb.onclick=()=>{ selectedCardIdx=null; lijianMode=true; lijianCardIdx=null; lijianFromSeat=null; render(g); }; c.appendChild(lb);
     }
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'fanjian') && !g.fanJianUsed && (me.hand||[]).length>=1 && g.players.some((p,i)=>p&&p.alive&&i!==mySeat)){
+      const fb=document.createElement('button'); fb.className='ghost';
+      fb.textContent='发动【反间】'; fb.onclick=()=>{ selectedCardIdx=null; fanjianMode=true; render(g); }; c.appendChild(fb);
+    }
     // 方天画戟入口:锁定技,仅当手牌恰好只剩这最后一张、且这张牌能当杀、且本回合还能出杀时才出现——
     // 不满足条件(手里还有别的牌)时和没有这把武器一样,普通单目标出杀流程完全不受影响。
     const hasQingnangTarget = g.players.some(p=>p && p.alive && p.hp<p.maxHp);
@@ -2333,7 +2367,7 @@ function renderControls(g){
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌

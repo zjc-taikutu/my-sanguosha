@@ -229,6 +229,8 @@ function normalize(g){
   if(typeof g.quHuUsed!=='boolean') g.quHuUsed=false;
   // 貂蝉【离间】:出牌阶段限一次
   if(typeof g.liJianUsed!=='boolean') g.liJianUsed=false;
+  // 周瑜【反间】:出牌阶段限一次
+  if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
   // 孔融【礼让】:每轮限一次 + 当前礼让对象/弃牌阶段记录
   if(!Number.isInteger(g.liRangRound)) g.liRangRound=0;
   if(!g.liRangRecord || typeof g.liRangRecord!=='object') g.liRangRecord=null;
@@ -241,6 +243,12 @@ function normalize(g){
   if(g.pending && (g.pending.type==='quhuRespond' || g.pending.type==='quhuDamageChoice')){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
+      g.pending=null; g.phase='play';
+    }
+  }
+  if(g.pending && g.pending.type==='fanjianSuit'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !g.players[d.seat] || !g.players[d.targetSeat]){
       g.pending=null; g.phase='play';
     }
   }
@@ -1400,6 +1408,47 @@ function liJian(cardIdx, fromSeat, toSeat){
     return g;
   });
 }
+function fanJian(targetSeat){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat], target=g.players[targetSeat];
+    if(!me || !target || !me.alive || !target.alive || targetSeat===mySeat) return g;
+    if(!hasCap(me,'fanjian') || g.fanJianUsed || (me.hand||[]).length===0) return g;
+    g.fanJianUsed=true;
+    g.pending={type:'fanjianSuit', seat:mySeat, targetSeat};
+    g.phase='fanjianSuit';
+    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 发动【反间】,令其选择一种花色');
+    markSkillSound(g, '反间');
+    return g;
+  });
+}
+function respondFanjianSuit(suit){
+  tx(g=>{
+    if(g.phase!=='fanjianSuit'||!g.pending||g.pending.type!=='fanjianSuit'||g.pending.targetSeat!==mySeat) return g;
+    if(!['♠','♥','♣','♦'].includes(suit)) return g;
+    const {seat, targetSeat}=g.pending;
+    const zhou=g.players[seat], target=g.players[targetSeat];
+    if(!zhou || !target || !zhou.alive || !target.alive || (zhou.hand||[]).length===0){ g.pending=null; g.phase='play'; return g; }
+    const idx=Math.floor(Math.random()*zhou.hand.length);
+    const card=zhou.hand.splice(idx,1)[0];
+    target.hand.push(card);
+    const same=card.suit===suit;
+    g.log=pushLog(g.log, target.name+' 为【反间】选择 '+suit+',获得并展示 '+card.suit+rankText(card.rank)+'【'+card.name+'】');
+    g.pending=null;
+    if(!same){
+      const interrupted=dealDamage(g, targetSeat, 1, seat, '【反间】', 'fanjian');
+      if(interrupted){
+        if(g.pending) g.pending.resume={type:'fanjian'};
+        return g;
+      }
+      if(checkWin(g)) return g;
+    } else {
+      g.log=pushLog(g.log, '花色相同,'+target.name+' 不受到【反间】伤害');
+    }
+    g.phase='play';
+    return g;
+  });
+}
 function recastLianHuan(cardIdx){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
@@ -1981,7 +2030,7 @@ function resumeAfterInterrupt(g, resume, seat){
       g.log=pushLog(g.log, g.players[seat].name+' 【苦肉】结算,摸两张牌');
       g.phase='play';
     }
-  } else if(resume.type==='quhu'){
+  } else if(resume.type==='quhu' || resume.type==='fanjian'){
     if(g.players[g.turn] && g.players[g.turn].alive) g.phase='play';
     else startTurn(g, nextAlive(g, g.turn));
   } else { // 'sha' 及其它:攻击者继续出牌阶段——若这是方天画戟排队目标中的一个,继续问下一个而不是直接回play
@@ -3242,7 +3291,7 @@ function startTurn(g, seat){
   } else {
     g.roundSeatsActed.push(seat);
   }
-  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.luoyiActive=false;
+  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueGuanxingCheck(g, seat);
 }
