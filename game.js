@@ -222,6 +222,9 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  if(g.tiesuoQueue && (!Array.isArray(g.tiesuoQueue.targets) || !Number.isInteger(g.tiesuoQueue.idx) || typeof g.tiesuoQueue.from!=='number')){
+    g.tiesuoQueue=null;
+  }
   if(g.pending && g.pending.type==='jiemingAsk'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
@@ -803,11 +806,12 @@ const CARD_PLAYS = {
     allowSelf:true,
     canPlay:(g,me,card)=> card.name==='铁索连环',
     effect:(g,me,card,targetSeat)=>{
-      const target=g.players[targetSeat];
-      if(!target || !target.alive) return;
-      g.log=pushLog(g.log, me.name+' 对 '+target.name+' 使用【铁索连环】');
-      markCardSound(g, '铁索连环');
-      startTrick(g, {trick:'铁索连环', from:mySeat, to:targetSeat, sourceCard:card});
+      const targets=(Array.isArray(targetSeat)?targetSeat:[targetSeat])
+        .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
+        .slice(0,2)
+        .filter(seat=>g.players[seat] && g.players[seat].alive);
+      if(targets.length===0) return;
+      startTieSuoTargets(g, mySeat, targets);
     }
   },
   '顺手牵羊': {
@@ -929,9 +933,18 @@ function playCard(cardIdx, actionId, targetSeat){
     const spec=CARD_PLAYS[actionId];
     if(!spec || !spec.canPlay(g,me,card)) return g;
     if(spec.target){
+      if(actionId==='铁索连环' && Array.isArray(targetSeat)){
+        const targets=targetSeat
+          .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
+          .slice(0,2)
+          .filter(seat=>g.players[seat] && g.players[seat].alive);
+        if(targets.length===0) return g;
+        targetSeat=targets;
+      } else {
       // 默认拒绝自选目标;spec.allowSelf(如闪电这类延时锦囊)放行
       if((targetSeat===mySeat && !spec.allowSelf) || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
       if(spec.canTarget && !spec.canTarget(g,me,card,targetSeat)) return g; // 额外目标限制(如杀的攻击距离)
+      }
     }
     me.hand.splice(cardIdx,1);
     if(!spec.noDiscard) g.discard.push(card); // 装备牌 noDiscard:不进弃牌堆,由 effect 放进装备区
@@ -1286,14 +1299,16 @@ function lianHuan(cardIdx, targetSeat){
     if(!me || !me.alive || !hasCap(me,'lianhuan')) return g;
     const card=me.hand[cardIdx];
     if(!card || card.suit!=='♣') return g;
-    const target=g.players[targetSeat];
-    if(!target || !target.alive) return g;
+    const targets=(Array.isArray(targetSeat)?targetSeat:[targetSeat])
+      .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
+      .slice(0,2)
+      .filter(seat=>g.players[seat] && g.players[seat].alive);
+    if(targets.length===0) return g;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
-    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【铁索连环】使用,目标 '+target.name);
+    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【铁索连环】使用,目标 '+targets.map(seat=>g.players[seat].name).join('、'));
     markSkillSound(g, '连环');
-    markCardSound(g, '铁索连环');
-    startTrick(g, {trick:'铁索连环', from:mySeat, to:targetSeat});
+    startTieSuoTargets(g, mySeat, targets);
     return g;
   });
 }
@@ -1334,6 +1349,32 @@ function recastLianHuan(cardIdx){
     markSkillSound(g, '连环');
     return g;
   });
+}
+function advanceTieSuoQueue(g){
+  const q=g.tiesuoQueue;
+  if(!q){ g.phase='play'; return; }
+  const from=g.players[q.from];
+  while(q.idx<q.targets.length){
+    const to=q.targets[q.idx++];
+    const target=g.players[to];
+    if(!from || !from.alive || !target || !target.alive) continue;
+    g.log=pushLog(g.log, from.name+' 对 '+target.name+' 使用【铁索连环】');
+    markCardSound(g, '铁索连环');
+    startTrick(g, {trick:'铁索连环', from:q.from, to});
+    return;
+  }
+  g.tiesuoQueue=null;
+  g.pending=null;
+  g.phase='play';
+}
+function startTieSuoTargets(g, fromSeat, targetSeats){
+  const seats=(Array.isArray(targetSeats)?targetSeats:[targetSeats])
+    .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
+    .slice(0,2)
+    .filter(seat=>g.players[seat] && g.players[seat].alive);
+  if(seats.length===0){ g.phase='play'; return; }
+  g.tiesuoQueue={from:fromSeat, targets:seats, idx:0};
+  advanceTieSuoQueue(g);
 }
 function liuliDiscardOptions(p){
   const list=[];
@@ -2303,6 +2344,11 @@ function finishWuxieRound(g){
     if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
   } else {
     if(blocked){
+      if(info.trick==='铁索连环' && g.tiesuoQueue){
+        g.pending=null;
+        advanceTieSuoQueue(g);
+        return;
+      }
       // 延时锦囊的物理牌在 playCard 那步是 noDiscard(没进弃牌堆);被无懈挡下=放置失败,这里补进弃牌堆
       // (虚拟牌如徐晃【断粮】用 discardOrVanish 直接消失,不进弃牌堆重新流通)。
       // 普通锦囊 info.card 恒为 undefined,这条判断对它们是无操作(它们的牌在 playCard 时已经进了弃牌堆)。
@@ -2353,10 +2399,17 @@ function resolveTrick(g, info){
     return;
   }
   if(info.trick==='铁索连环'){
-    if(!tgt || !tgt.alive){ g.pending=null; g.phase='play'; return; }
+    if(!tgt || !tgt.alive){
+      g.pending=null;
+      if(g.tiesuoQueue) advanceTieSuoQueue(g);
+      else g.phase='play';
+      return;
+    }
     tgt.chained=!tgt.chained;
-    g.pending=null; g.phase='play';
-    g.log=pushLog(g.log, tgt.name+(tgt.chained?' 被横置':' 解除横置'));
+    g.log=pushLog(g.log, tgt.name+(tgt.chained?' 进入连环状态':' 解除连环状态'));
+    g.pending=null;
+    if(g.tiesuoQueue) advanceTieSuoQueue(g);
+    else g.phase='play';
     return;
   }
   if(info.trick==='借刀杀人'){

@@ -118,7 +118,10 @@ let guoseCardIdx = null;
 function resetGuose(){ guoseMode=false; guoseCardIdx=null; }
 let lianhuanMode = false;
 let lianhuanCardIdx = null;
-function resetLianhuan(){ lianhuanMode=false; lianhuanCardIdx=null; }
+let lianhuanTargets = [];
+let tiesuoTargets = [];
+function resetLianhuan(){ lianhuanMode=false; lianhuanCardIdx=null; lianhuanTargets=[]; }
+function resetTiesuo(){ tiesuoTargets=[]; }
 let qingnangMode = false;
 let qingnangCardIdx = null;
 function resetQingnang(){ qingnangMode=false; qingnangCardIdx=null; }
@@ -425,7 +428,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetLirang(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetLirang(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
@@ -570,6 +573,7 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQixi();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetGuose();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLianhuan();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetTiesuo();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhiheng();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQingnang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQuhu();
@@ -660,7 +664,7 @@ function render(g){
       '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
-        (p.chained?'<span class="tag">横置</span>':'')+
+        (p.chained?'<span class="tag">连环</span>':'')+
         (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'')+
       '</div>';
     // 武将名+技能名拼一行(如"关羽 · 武圣"),贴合旧版"武将 X · 技能"的习惯——去掉"武将"
@@ -844,10 +848,32 @@ function render(g){
       }
     }
     if(lianhuanMode && lianhuanCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
-      const idx=lianhuanCardIdx;
-      d.style.outline='2px solid var(--accent)';
-      d.title='对该角色使用【铁索连环】';
-      d.onclick=()=>{ confirmAndPlay('将这张梅花牌当【铁索连环】使用,目标 '+g.players[i].name+'？', ()=>lianHuan(idx, i)); };
+      const picked=lianhuanTargets.includes(i);
+      d.style.cursor='pointer';
+      d.style.outline=picked?'3px solid var(--accent)':'2px dashed var(--cinnabar-bright)';
+      d.title=picked?'已选择为【铁索连环】目标':'选择为【铁索连环】目标';
+      d.onclick=()=>{
+        if(picked) lianhuanTargets=lianhuanTargets.filter(seat=>seat!==i);
+        else if(lianhuanTargets.length<2) lianhuanTargets=[...lianhuanTargets, i];
+        render(g);
+      };
+    }
+    if(selectedCardIdx!==null && selCard && resolveActionId(g,meP,selCard)==='铁索连环' && g.phase==='play' && g.turn===mySeat && p.alive){
+      const picked=tiesuoTargets.includes(i);
+      d.style.cursor='pointer';
+      d.style.outline=picked?'3px solid var(--accent)':'2px dashed var(--cinnabar-bright)';
+      d.title=picked?'已选择为【铁索连环】目标':'选择为【铁索连环】目标';
+      d.onclick=()=>{
+        if(picked) tiesuoTargets=tiesuoTargets.filter(seat=>seat!==i);
+        else if(tiesuoTargets.length<2) tiesuoTargets=[...tiesuoTargets, i];
+        render(g);
+      };
+    }
+    if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat && (g.pending.targets||[]).includes(i)){
+      d.style.cursor='pointer';
+      d.style.outline='3px solid var(--accent)';
+      d.title='选择该角色承受【驱虎】伤害';
+      d.onclick=()=>respondQuhuDamage(i);
     }
     if(lijianMode && lijianCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
       if(isMale(p)){
@@ -2025,7 +2051,20 @@ function renderControls(g){
     } else if(lianhuanMode){
       setBanner(lianhuanCardIdx===null
         ? '【连环】选择一张梅花手牌当【铁索连环】使用。'
-        : '已选中,点上方一名角色横置或解除横置。');
+        : '已选中,点上方选择一至两名角色进入或解除连环状态；也可以重铸这张牌。');
+      if(lianhuanCardIdx!==null){
+        const idx=lianhuanCardIdx;
+        const rb=document.createElement('button'); rb.className='ghost';
+        rb.textContent='重铸这张牌';
+        rb.onclick=()=>{ confirmAndPlay('重铸这张梅花牌发动【连环】,弃置后摸一张牌？', ()=>recastLianHuan(idx)); };
+        c.appendChild(rb);
+        if(lianhuanTargets.length>=1){
+          const ub=document.createElement('button'); ub.className='primary';
+          ub.textContent='使用【铁索连环】';
+          ub.onclick=()=>{ confirmAndPlay('将这张梅花牌当【铁索连环】使用,目标 '+lianhuanTargets.map(seat=>g.players[seat].name).join('、')+'？', ()=>lianHuan(idx, lianhuanTargets.slice())); };
+          c.appendChild(ub);
+        }
+      }
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetLianhuan(); render(g); }; c.appendChild(cb);
     } else if(lijianMode){
@@ -2070,6 +2109,19 @@ function renderControls(g){
       // 只有真的会按"杀"结算才显示"当【杀】"/攻击距离提示(见 resolveActionId:红/黑牌若自己有
       // 独立效果,默认不会被判成杀,不该显示这段容易让人误以为要当杀打的文案)
       const label = (actionId==='杀' && nm!=='杀') ? '【'+nm+'】当【杀】' : '【'+nm+'】';
+      if(actionId==='铁索连环'){
+        setBanner('已选中【铁索连环】,点上方选择一至两名角色进入或解除连环状态(或点牌取消)。');
+        if(tiesuoTargets.length>=1){
+          const ub=document.createElement('button'); ub.className='primary';
+          const idx=selectedCardIdx;
+          ub.textContent='使用【铁索连环】';
+          ub.onclick=()=>{ confirmAndPlay('对 '+tiesuoTargets.map(seat=>g.players[seat].name).join('、')+' 使用【铁索连环】？', ()=>playCard(idx, actionId, tiesuoTargets.slice())); };
+          c.appendChild(ub);
+        }
+        const cb=document.createElement('button'); cb.className='ghost';
+        cb.textContent='清空目标'; cb.onclick=()=>{ resetTiesuo(); render(g); }; c.appendChild(cb);
+        return;
+      }
       const rangeNote = (actionId==='杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
       const rendeNote = hasCap(me,'rende') ? '；也可点目标座位上的“仁德”按钮交给别人' : '';
       const recastNote = hasCap(me,'lianhuan') && selCard.suit==='♣' ? '；也可重铸发动【连环】' : '';
@@ -2155,7 +2207,7 @@ function renderControls(g){
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetLijian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
@@ -2309,7 +2361,7 @@ function renderHand(g){
       if(usable) onClick=()=>{ guoseCardIdx = (guoseCardIdx===idx?null:idx); render(g); };
     } else if(g.phase==='play'&&myTurn&&lianhuanMode){
       usable = card.suit==='♣';
-      if(usable) onClick=()=>{ lianhuanCardIdx = (lianhuanCardIdx===idx?null:idx); render(g); };
+      if(usable) onClick=()=>{ lianhuanCardIdx = (lianhuanCardIdx===idx?null:idx); lianhuanTargets=[]; render(g); };
     } else if(g.phase==='play'&&myTurn&&lijianMode){
       usable = true;
       if(usable) onClick=()=>{ lijianCardIdx = (lijianCardIdx===idx?null:idx); lijianFromSeat=null; render(g); };
@@ -2343,12 +2395,12 @@ function renderHand(g){
       const canRende = hasCap(me,'rende');
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
-        if(spec.target || canRende){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g);} ; } // 目标牌/刘备仁德:点=选中
+        if(spec.target || canRende){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/刘备仁德:点=选中
         else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
       } else if(canRende){
         // 刘备【仁德】可交出任意手牌,包括当前出牌阶段不能直接使用的【闪】等。
         usable=true;
-        onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g); };
+        onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g); };
       }
     } else if(g.phase==='discard'&&myTurn&&me.hand.length>me.hp){
       usable=true; onClick=()=>discardCard(idx);
