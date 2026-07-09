@@ -84,6 +84,10 @@ function cardImgError(imgEl){
 
 // ---------- targeting UI state ----------
 let selectedCardIdx = null;
+// 弃牌阶段:已勾选待弃置的手牌下标集合,纯客户端状态,不提交服务端直到点"确认弃牌"
+// (多选后统一确认,和之前"点一张立即弃一张"的旧交互不同,见discardCards)。
+let discardSelectedSet = new Set();
+function resetDiscardSelected(){ discardSelectedSet = new Set(); }
 // 丈八蛇矛「两张牌当杀」的纯客户端选牌状态(和 selectedCardIdx 互斥,从不入库)。
 let zhangbaMode = false;
 // 鬼才改判:点"发动"进入选牌模式(纯客户端,不入库),再点一张手牌确认替换;与 zhangbaMode 同款但各自独立。
@@ -561,6 +565,12 @@ function render(g){
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
+  // 同款兜底:只要不在「自己的弃牌阶段」,就清空已勾选待弃置的手牌下标——覆盖克己跳过/确认
+  // 提交完毕换下一回合/中断离开等一切离开弃牌阶段的情形。注意这里不能靠 renderControls
+  // 内部discard分支末尾自己清(那段代码被套在 if(!myTurn){return;} 之后,轮到别人时根本
+  // 不会执行到,必须放在这个不受myTurn限制的单点兜底里才能真正覆盖"换到别人回合"这个最
+  // 常见的离开discard阶段的场景)。
+  if(!(g.started && g.phase==='discard' && g.turn===mySeat)) resetDiscardSelected();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
   // 同款兜底:只要不在「自己的摸牌阶段」,就退出突袭选目标模式。
@@ -2185,10 +2195,24 @@ function renderControls(g){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
     if(over>0) setBanner(keji
-      ? '克己:本回合未出杀,可不弃牌直接结束回合(也可点手牌自愿弃置)。'
-      : '手牌超出体力,需弃掉 '+over+' 张(点手牌弃置)。');
+      ? '克己:本回合未出杀,可不弃牌直接结束回合(也可勾选手牌后点确认弃牌)。'
+      : '手牌超出体力,需选中 '+over+' 张后点确认弃牌(已选 '+discardSelectedSet.size+'/'+over+')。');
     else setBanner('轮到你,弃牌阶段。手牌未超出体力上限,可直接结束回合。');
-    const b=document.createElement('button'); b.className='primary';
+    if(over>0){
+      // 多选后统一确认:必须恰好选够数量才能提交,选多选少都不能点(和discardCards的服务端
+      // 校验口径一致——服务端要求"cardIdxList.length>=need"且不接受重复/越界下标,这里前端
+      // 用===over做更严格的UI层限制,不允许多选,避免玩家多勾了几张、点确认后一次性弃掉超过
+      // 需要的数量这种体验问题)。
+      const confirmBtn=document.createElement('button'); confirmBtn.className='primary';
+      confirmBtn.textContent='确认弃牌('+discardSelectedSet.size+'/'+over+')';
+      confirmBtn.disabled = discardSelectedSet.size!==over;
+      confirmBtn.onclick=()=>{
+        discardCards([...discardSelectedSet]);
+        discardSelectedSet = new Set();
+      };
+      c.appendChild(confirmBtn);
+    }
+    const b=document.createElement('button'); b.className='ghost';
     b.textContent='结束回合'; b.disabled=over>0 && !keji; b.onclick=endTurn; c.appendChild(b);
   }
 }
@@ -2260,7 +2284,8 @@ function renderHand(g){
     const qingnangPicked = qingnangMode && qingnangCardIdx===idx;
     const zhihengPicked = zhihengMode && zhihengPicks.includes(idx);
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
-    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked)?' selected':'');
+    const discardPicked = discardSelectedSet.has(idx);
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked||discardPicked)?' selected':'')+(discardPicked?' discard-selected':'');
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
@@ -2376,7 +2401,14 @@ function renderHand(g){
         onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g); };
       }
     } else if(g.phase==='discard'&&myTurn&&me.hand.length>me.hp){
-      usable=true; onClick=()=>discardCard(idx);
+      // 多选后统一确认:点击只是切换勾选状态(discardSelectedSet),不立刻提交——真正弃牌
+      // 由弃牌阶段的"确认弃牌"按钮统一调用discardCards一次性提交,见renderControls。
+      usable=true;
+      onClick=()=>{
+        if(discardSelectedSet.has(idx)) discardSelectedSet.delete(idx);
+        else discardSelectedSet.add(idx);
+        render(g);
+      };
     } else if(g.phase==='respond'&&g.pending&&g.pending.to===mySeat&&card.name==='闪'){
       // handled via button; leave card non-clickable
     }

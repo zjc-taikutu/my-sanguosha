@@ -2948,6 +2948,35 @@ function discardCard(cardIdx){
     return g;
   });
 }
+// discardCards: 弃牌阶段"多选后统一确认"的批量版本——UI 改成点击只是勾选/取消勾选,累积选好
+// 几张,最后点"确认弃牌"才一次性提交到这里(不再是discardCard那种"点一张立即弃一张")。
+// discardCard 本身保留不删,防止其它地方还在单独调用它,只是弃牌阶段UI不再走这个入口。
+function discardCards(cardIdxList){
+  tx(g=>{
+    if(g.phase!=='discard'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!Array.isArray(cardIdxList) || cardIdxList.length===0) return g;
+    // 校验:下标不重复、不越界
+    const uniqueIdx = [...new Set(cardIdxList)];
+    if(uniqueIdx.length!==cardIdxList.length) return g;
+    if(!uniqueIdx.every(i=>Number.isInteger(i) && i>=0 && i<me.hand.length)) return g;
+    const need = me.hand.length - me.hp;
+    if(need<=0) return g; // 没有超出上限,不需要弃牌
+    if(cardIdxList.length < need) return g; // 弃的不够,拒绝(必须一次性弃够,不允许弃少了留着下次再弃)
+    // 按下标从大到小依次splice,避免删除时下标错位
+    const sorted = [...uniqueIdx].sort((a,b)=>b-a);
+    const discarded = sorted.map(i=>me.hand.splice(i,1)[0]);
+    g.discard.push(...discarded);
+    // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
+    // (礼让回收的是"本弃牌阶段弃置的全部牌",不能因为改成批量提交就漏记)。
+    if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
+      g.liRangRecord.discarded = g.liRangRecord.discarded || [];
+      g.liRangRecord.discarded.push(...discarded);
+    }
+    g.log=pushLog(g.log, me.name+' 弃置了'+discarded.length+'张牌');
+    return g;
+  });
+}
 // 吕蒙【克己】(锁定技):本回合未主动出过杀(!shaUsed)则可跳过弃牌阶段。shaUsed 只被主动出杀置真(被动出杀不碰)。
 function canSkipDiscard(g, seat){
   const p=g.players[seat];
