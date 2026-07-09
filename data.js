@@ -47,8 +47,8 @@ const DELAY_TRICKS = {};
 DELAY_TRICKS['闪电'] = {
   onlySelf:true,
   effect:(g, seat, judgeCard, card)=>{
-    if(judgeCard.suit==='♠' && judgeCard.rank>=2 && judgeCard.rank<=9){
-      const dying = dealDamage(g, seat, 3, undefined, '【闪电】发动', 'delay');
+    if(cardSuitForPlayer(g.players[seat], judgeCard)==='♠' && judgeCard.rank>=2 && judgeCard.rank<=9){
+      const dying = dealDamage(g, seat, 3, undefined, '【闪电】发动', 'delay', card);
       return dying ? 'pending' : undefined;
     }
     // 判定不中:移到下一名"判定区里没有【闪电】"的其他存活角色(官方通则:同一判定区不能有两张同名牌)。
@@ -77,7 +77,7 @@ DELAY_TRICKS['乐不思蜀'] = {
   onlySelf:false,
   effect:(g, seat, judgeCard, card)=>{
     const name=g.players[seat].name;
-    if(judgeCard.suit!=='♥'){
+    if(cardSuitForPlayer(g.players[seat], judgeCard)!=='♥'){
       g.skipPlay=true;
       g.log=pushLog(g.log, name+' 判定不为红桃,【乐不思蜀】生效,跳过出牌阶段');
     } else {
@@ -100,7 +100,7 @@ DELAY_TRICKS['兵粮寸断'] = {
   onlySelf:false,
   effect:(g, seat, judgeCard, card)=>{
     const name=g.players[seat].name;
-    if(judgeCard.suit!=='♣'){
+    if(cardSuitForPlayer(g.players[seat], judgeCard)!=='♣'){
       g.skipDraw=true;
       g.log=pushLog(g.log, name+' 判定不为梅花,【兵粮寸断】生效,跳过摸牌阶段');
     } else {
@@ -112,8 +112,8 @@ DELAY_TRICKS['兵粮寸断'] = {
 // ---------- 武将定义表(数据结构 + 技能均已实现) ----------
 // 技能有两种表达:被动能力挂 caps(经 generalHasCap/generalCapValue 查),触发型挂 hooks(经 triggerHook 分发);统一经 getGeneral(id) 取用。
 const GENERALS = {
-  zhangfei:      { id:'zhangfei',      name:'张飞',   maxHp:4, skill:'咆哮', desc:'出牌阶段,你可以使用任意数量的【杀】。', caps:{ unlimitedSha:true } },
-  guojia: { id:'guojia', name:'郭嘉', maxHp:3, skill:'天妒/遗计',
+  zhangfei:      { id:'zhangfei',      name:'张飞',   gender:'male',   maxHp:4, skill:'咆哮', desc:'出牌阶段,你可以使用任意数量的【杀】。', caps:{ unlimitedSha:true } },
+  guojia: { id:'guojia', name:'郭嘉', gender:'male', maxHp:3, skill:'天妒/遗计',
     desc:'天妒:当你的判定牌生效后,你可以获得此牌。遗计:当你受到1点伤害后,你可以选择观看牌堆顶两张牌,然后将这两张牌分别交给任意角色(可以是自己)。',
     caps:{ tiandu:true },
     hooks:{
@@ -131,10 +131,16 @@ const GENERALS = {
         g.log = pushLog(g.log, p.name+' 是否发动【遗计】,观看牌堆顶两张牌…');
       }
     } },
-  sunshangxiang: { id:'sunshangxiang', name:'孙尚香', maxHp:3, skill:'枭姬', desc:'当你失去装备区里的一张装备牌时,你摸两张牌。', hooks:{ onLoseEquip:(g, seat, ctx)=>{ const n = 2 * (ctx && ctx.count || 1); drawN(g, seat, n); g.log=pushLog(g.log, g.players[seat].name+' 发动【枭姬】,摸'+n+'张牌'); markSkillSound(g, '枭姬'); } } },
-  zhaoyun:       { id:'zhaoyun',       name:'赵云',   maxHp:4, skill:'龙胆', desc:'你可以将【杀】当【闪】、【闪】当【杀】使用(1:1 转化)。', caps:{ longdan:true } },
-  lvmeng:        { id:'lvmeng',        name:'吕蒙',   maxHp:4, skill:'克己', desc:'若你于出牌阶段未使用或打出过【杀】,你可以跳过弃牌阶段(手牌超过体力上限也不必弃牌)。', caps:{ keji:true } },
-  simayi:        { id:'simayi',        name:'司马懿', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
+  sunshangxiang: { id:'sunshangxiang', name:'孙尚香', gender:'female', maxHp:3, skill:'枭姬', desc:'当你失去装备区里的一张装备牌时,你摸两张牌。', hooks:{ onLoseEquip:(g, seat, ctx)=>{ const n = 2 * (ctx && ctx.count || 1); drawN(g, seat, n); g.log=pushLog(g.log, g.players[seat].name+' 发动【枭姬】,摸'+n+'张牌'); markSkillSound(g, '枭姬'); } } },
+  diaochan:      { id:'diaochan',      name:'貂蝉',   gender:'female', maxHp:3, skill:'离间/闭月',
+    desc:'离间:出牌阶段限一次,你可以弃置一张手牌,选择两名男性角色,令其中一名男性角色视为对另一名男性角色使用【决斗】。闭月:结束阶段,你可以摸1张牌。',
+    caps:{ lijian:true, biyue:true } },
+  kongrong:      { id:'kongrong',      name:'孔融',   gender:'male', maxHp:3, skill:'礼让/争义',
+    desc:'礼让:每轮限一次,其他角色的摸牌阶段开始时,你可以交给其两张牌;其本回合弃牌阶段结束时,你可以获得其在此弃牌阶段弃置的牌。争义:每回合首次受到伤害时,本轮内因礼让获得过你牌的角色可以替你承受此次伤害。',
+    caps:{ lirang:true, zhengyi:true } },
+  zhaoyun:       { id:'zhaoyun',       name:'赵云',   gender:'male',   maxHp:4, skill:'龙胆', desc:'你可以将【杀】当【闪】、【闪】当【杀】使用(1:1 转化)。', caps:{ longdan:true } },
+  lvmeng:        { id:'lvmeng',        name:'吕蒙',   gender:'male',   maxHp:4, skill:'克己', desc:'若你于出牌阶段未使用或打出过【杀】,你可以跳过弃牌阶段(手牌超过体力上限也不必弃牌)。', caps:{ keji:true } },
+  simayi:        { id:'simayi',        name:'司马懿', gender:'male', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
     caps:{ guicai:true },
     hooks:{
       // 受伤后从伤害来源随机获得一张手牌。ctx={amount, sourceSeat}。
@@ -151,52 +157,120 @@ const GENERALS = {
         markSkillSound(g, '反馈');
       }
     } },
-  machao:        { id:'machao',        name:'马超',   maxHp:4, skill:'马术/铁骑',
+  xiahoudun:     { id:'xiahoudun',     name:'夏侯惇', gender:'male', maxHp:4, skill:'刚烈',
+    desc:'当你受到伤害后,你可以进行判定,若结果不为红桃,伤害来源选择弃置2张手牌或受到你造成的1点伤害。',
+    hooks:{
+      onDamaged(g, seat, ctx){
+        const self=g.players[seat];
+        const sourceSeat=ctx && ctx.sourceSeat;
+        const source=(typeof sourceSeat==='number') ? g.players[sourceSeat] : null;
+        if(!self || !self.alive || !source || !source.alive || sourceSeat===seat || ctx.srcType==='ganglie') return;
+        g.pending={type:'ganglieAsk', seat, sourceSeat, resume:{type:ctx.srcType}};
+        g.phase='ganglieAsk';
+        g.log=pushLog(g.log, self.name+' 是否发动【刚烈】,对 '+source.name+' 进行判定反击…');
+      }
+    } },
+  xuchu:         { id:'xuchu',         name:'许褚',   gender:'male', maxHp:4, skill:'裸衣',
+    desc:'摸牌阶段,你可以少摸1张牌。若如此做,直到本回合结束,你使用【杀】或【决斗】造成的伤害+1。',
+    caps:{ luoyi:true } },
+  xunyu:         { id:'xunyu',         name:'荀彧',   gender:'male', maxHp:3, skill:'驱虎/节命',
+    desc:'驱虎:出牌阶段限一次,你可以与一名体力值大于你的角色拼点。若你赢,该角色对其攻击范围内由你选择的一名角色造成1点伤害;若你没赢,该角色对你造成1点伤害。节命:每受到1点伤害后,你可以令一名角色摸牌至手牌数等于体力上限,最多摸至5张。',
+    caps:{ quhu:true },
+    hooks:{
+      onDamaged(g, seat, ctx){
+        const p=g.players[seat];
+        if(!p || !p.alive || (ctx && ctx.srcType)==='jieming') return;
+        const amount=Math.max(1, (ctx && ctx.amount) || 1);
+        g.pending={type:'jiemingAsk', seat, remaining:amount, resume:{type:ctx.srcType}};
+        g.phase='jiemingAsk';
+        g.log=pushLog(g.log, p.name+' 是否发动【节命】,令一名角色补牌…');
+      }
+    } },
+  daqiao:        { id:'daqiao',        name:'大乔',   gender:'female', maxHp:3, skill:'国色/流离',
+    desc:'国色:出牌阶段,你可以将一张方块牌当【乐不思蜀】使用。流离:当你成为其他角色使用【杀】的目标时,你可以弃置一张牌,将此【杀】转移给你攻击范围内的另一名其他角色(不能是此【杀】的使用者)。',
+    caps:{ guose:true, liuli:true } },
+  xiaoqiao:      { id:'xiaoqiao',      name:'小乔',   gender:'female', maxHp:3, skill:'天香/红颜',
+    desc:'天香:当你受到伤害时,你可以弃置一张红桃手牌并选择一名其他角色,防止此伤害,改为该角色受到此伤害,然后其摸等同于已损失体力值的牌。红颜:锁定技,你的黑桃牌均视为红桃牌。',
+    caps:{ tianxiang:true, hongyan:true } },
+  pangtong:      { id:'pangtong',      name:'庞统',   gender:'male', maxHp:3, skill:'连环/涅槃',
+    desc:'连环:你可以将一张梅花手牌当【铁索连环】使用或重铸。涅槃:限定技,当你处于濒死状态时,你可以弃置所有牌,解除横置和翻面,摸3张牌并将体力回复至3点。',
+    caps:{ lianhuan:true, niepan:true } },
+  machao:        { id:'machao',        name:'马超',   gender:'male', maxHp:4, skill:'马术/铁骑',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。铁骑:当你使用【杀】指定一名角色为目标后,你可以进行判定,若结果为红色,此【杀】不可被【闪】抵消(含视为闪的效果,如八卦阵)。',
     caps:{ extraMinus1:true, tieqi:true } },
-  zhenji:        { id:'zhenji',        name:'甄姬',   maxHp:3, skill:'洛神/倾国',
+  zhenji:        { id:'zhenji',        name:'甄姬',   gender:'female', maxHp:3, skill:'洛神/倾国',
     desc:'洛神:回合开始时,你可以进行判定,若结果为黑色,你获得这张判定牌(计入手牌),并可以再次发动(直到红色或你选择停止)。倾国:你可以将黑色手牌当【闪】使用或打出。',
     caps:{ luoshen:true, qingguo:true } },
-  zhangliao:     { id:'zhangliao',     name:'张辽',   maxHp:4, skill:'突袭',
+  zhangliao:     { id:'zhangliao',     name:'张辽',   gender:'male', maxHp:4, skill:'突袭',
     desc:'摸牌阶段,你可以放弃摸牌,改为从至多两名其他角色的手牌中各摸一张牌。',
     caps:{ tuxi:true } },
-  ganning:       { id:'ganning',       name:'甘宁',   maxHp:4, skill:'奇袭',
+  ganning:       { id:'ganning',       name:'甘宁',   gender:'male', maxHp:4, skill:'奇袭',
     desc:'你可以将任意一张黑色手牌当【过河拆桥】使用。',
     caps:{ qixi:true } },
-  huanggai:      { id:'huanggai',      name:'黄盖',   maxHp:4, skill:'苦肉',
+  huanggai:      { id:'huanggai',      name:'黄盖',   gender:'male', maxHp:4, skill:'苦肉',
     desc:'出牌阶段,你可以失去1点体力,然后摸两张牌。',
     caps:{ kurou:true } },
-  huangyueying:  { id:'huangyueying',  name:'黄月英', maxHp:3, skill:'集智',
+  huangyueying:  { id:'huangyueying',  name:'黄月英', gender:'female', maxHp:3, skill:'集智',
     desc:'当你使用一张锦囊牌时,你可以摸一张牌。',
     caps:{ jizhi:true } },
-  sunquan:       { id:'sunquan',       name:'孙权',   maxHp:4, skill:'制衡',
+  sunquan:       { id:'sunquan',       name:'孙权',   gender:'male', maxHp:4, skill:'制衡',
     desc:'出牌阶段限一次,你可以弃置任意张牌,然后摸等量的牌。',
     caps:{ zhiheng:true } },
-  zhouyu:        { id:'zhouyu',        name:'周瑜',   maxHp:3, skill:'英姿',
+  zhouyu:        { id:'zhouyu',        name:'周瑜',   gender:'male', maxHp:3, skill:'英姿',
     desc:'锁定技,摸牌阶段你额外摸一张牌。',
     caps:{ extraDrawPhase:1 } },
-  guanyu:        { id:'guanyu',        name:'关羽',   maxHp:4, skill:'武圣',
+  sunce:         { id:'sunce',         name:'孙策',   gender:'male', maxHp:4, skill:'激昂',
+    desc:'当你使用【决斗】或红色【杀】指定目标后,或成为【决斗】或红色【杀】的目标后,你可以摸一张牌。魂姿为觉醒技、制霸为主公技,当前暂不实现。',
+    caps:{ jiang:true } },
+  huatuo:        { id:'huatuo',        name:'华佗',   gender:'male', maxHp:3, skill:'青囊/急救',
+    desc:'青囊:出牌阶段限一次,你可以弃置一张手牌,令一名已受伤的角色回复1点体力。急救:你的回合外,你可以将一张红色牌当【桃】使用。',
+    caps:{ qingnang:true, jijiu:true } },
+  liubei:        { id:'liubei',        name:'刘备',   gender:'male', maxHp:4, skill:'仁德',
+    desc:'出牌阶段,你可以将任意数量的手牌交给其他角色,若本阶段内给出的牌达到2张或以上,你回复1点体力。激将为主公技,当前无身份局系统,暂不实现。',
+    caps:{ rende:true } },
+  caocao:        { id:'caocao',        name:'曹操',   gender:'male', maxHp:4, skill:'奸雄',
+    desc:'当你受到伤害后,你可以获得对你造成伤害的牌。护驾为主公技,当前无身份局系统,暂不实现。',
+    hooks:{
+      onDamaged(g, seat, ctx){
+        const p=g.players[seat];
+        const source=ctx && ctx.sourceCard;
+        if(!p || !p.alive || !source) return;
+        const cards=Array.isArray(source) ? source : [source];
+        const gained=[];
+        cards.forEach(card=>{
+          if(!card) return;
+          const idx=(g.discard||[]).findIndex(c=>c===card || (c && card.id!==undefined && c.id===card.id));
+          if(idx<0) return;
+          gained.push(g.discard.splice(idx,1)[0]);
+        });
+        if(gained.length===0) return;
+        p.hand.push(...gained);
+        g.log=pushLog(g.log, p.name+' 发动【奸雄】,获得造成伤害的'+gained.map(c=>'【'+c.name+'】').join('、'));
+        markSkillSound(g, '奸雄');
+      }
+    } },
+  guanyu:        { id:'guanyu',        name:'关羽',   gender:'male', maxHp:4, skill:'武圣',
     desc:'你可以将任意一张红色手牌当【杀】使用或打出。',
     caps:{ wusheng:true } },
-  huangzhong:    { id:'huangzhong',    name:'黄忠',   maxHp:4, skill:'烈弓',
+  huangzhong:    { id:'huangzhong',    name:'黄忠',   gender:'male', maxHp:4, skill:'烈弓',
     desc:'出牌阶段,你使用【杀】指定一名角色为目标后,若该角色手牌数≥你的体力值,或手牌数≤你的攻击范围,你可以令此【杀】不可被【闪】抵消。',
     caps:{ liegong:true } },
-  xuhuang:       { id:'xuhuang',       name:'徐晃',   maxHp:4, skill:'断粮',
+  xuhuang:       { id:'xuhuang',       name:'徐晃',   gender:'male', maxHp:4, skill:'断粮',
     desc:'出牌阶段限一次,你可以将一张黑色基本牌或黑色装备牌当【兵粮寸断】使用(距离2以内)。',
     caps:{ duanliang:true } },
-  yujin:         { id:'yujin',         name:'于禁',   maxHp:4, skill:'毅重',
+  yujin:         { id:'yujin',         name:'于禁',   gender:'male', maxHp:4, skill:'毅重',
     desc:'锁定技,若你的装备区里没有防具牌,黑色【杀】对你无效。',
     caps:{ yizhong:true } },
-  yuejin:        { id:'yuejin',        name:'乐进',   maxHp:4, skill:'骁果',
+  yuejin:        { id:'yuejin',        name:'乐进',   gender:'male', maxHp:4, skill:'骁果',
     desc:'其他角色的结束阶段,你可以弃置一张基本牌,然后该角色选择一项:弃置一张装备牌,你摸一张牌;或受到你造成的1点伤害。',
     caps:{ xiaoguo:true } },
-  zhanghe:       { id:'zhanghe',       name:'张郃',   maxHp:4, skill:'巧变',
+  zhanghe:       { id:'zhanghe',       name:'张郃',   gender:'male', maxHp:4, skill:'巧变',
     desc:'回合开始时(限一次),你可以弃置一张手牌并选择判定/摸牌/出牌/弃牌阶段之一跳过。若跳过的是出牌阶段,你可以将场上一张装备牌移到另一名角色的对应空槽,或将一张延时锦囊移到另一名角色没有同名锦囊的判定区。',
     caps:{ qiaobian:true } },
-  lvbu:          { id:'lvbu',          name:'吕布',   maxHp:4, skill:'无双(锁定技)',
+  lvbu:          { id:'lvbu',          name:'吕布',   gender:'male', maxHp:4, skill:'无双(锁定技)',
     desc:'你使用【杀】指定目标后,该角色需要连续使用两张【闪】才能抵消。你或你的对手使用/成为【决斗】的目标时,每次响应需要连续打出两张【杀】。',
     caps:{ wushuang:true } },
-  zhuge:         { id:'zhuge',         name:'诸葛亮', maxHp:3, skill:'观星/空城',
+  zhuge:         { id:'zhuge',         name:'诸葛亮', gender:'male', maxHp:3, skill:'观星/空城',
     desc:'观星:准备阶段,你可以观看牌堆顶的X张牌(X为存活角色数且最多为5),以任意顺序分配至牌堆顶或牌堆底。空城:锁定技,若你没有手牌,你不能成为【杀】或【决斗】的目标。',
     caps:{ guanxing:true, kongcheng:true } },
 };
@@ -213,6 +287,11 @@ function generalCapValue(player, cap, fallback){
   const v = gen && gen.caps && gen.caps[cap];
   return (typeof v === 'number') ? v : fallback;
 }
+function generalGender(player){
+  const gen = player && getGeneral(player.general);
+  return (gen && gen.gender) || 'male';
+}
+function isMale(player){ return generalGender(player)==='male'; }
 // 装备来源的能力:任一已装备的牌在 EQUIPS 里声明了 cap===该能力(如诸葛连弩 cap:'unlimitedSha')。
 function equipHasCap(player, cap){
   if(!player || !player.equips) return false;
@@ -226,8 +305,18 @@ function equipHasCap(player, cap){
 function hasCap(player, cap){ return generalHasCap(player, cap) || equipHasCap(player, cap); }
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
+function cardSuitForPlayer(player, card){
+  if(!card) return undefined;
+  if(generalHasCap(player,'hongyan') && card.suit==='♠') return '♥';
+  return card.suit;
+}
 function isRed(card){ return !!(card && (card.suit==='♥'||card.suit==='♦')); }
+function isRedForPlayer(player, card){
+  const suit=cardSuitForPlayer(player, card);
+  return suit==='♥'||suit==='♦';
+}
 function cardColor(card){ return isRed(card)?'red':'black'; }
+function cardColorForPlayer(player, card){ return isRedForPlayer(player, card)?'red':'black'; }
 // singleCardShaColor: 普通杀(含转化牌,如龙胆的闪当杀、武圣的红牌当杀)的颜色——直接查这张
 // 物理牌本身的花色。给 resolveShaUse 的 shaColor 参数用,不是给"判定牌颜色"这类场景用
 // (判定区/铁骑/洛神那些判定,直接查 isRed(judgeCard) 即可,不涉及"杀的颜色"这个概念)。
@@ -259,8 +348,8 @@ function canUseAs(player, card, role){
     if(role==='杀' && card.name==='闪') return true;
     if(role==='闪' && card.name==='杀') return true;
   }
-  if(role==='闪' && hasCap(player,'qingguo') && !isRed(card)) return true;
-  if(role==='杀' && hasCap(player,'wusheng') && isRed(card)) return true;
+  if(role==='闪' && hasCap(player,'qingguo') && !isRedForPlayer(player, card)) return true;
+  if(role==='杀' && hasCap(player,'wusheng') && isRedForPlayer(player, card)) return true;
   return false;
 }
 // 在手牌里找一张能当 role 用的牌:优先本名牌,没有才用可转化的牌。返回索引,无则 -1。
@@ -296,6 +385,7 @@ const CARD_DESC = {
   '闪电': '延时锦囊,只能放在你自己的判定区。轮到你回合开始时判定:黑桃2~9,你受到3点伤害,然后此牌作废;否则无事发生,将此牌移到下一名角色的判定区。',
   '乐不思蜀': '延时锦囊,只能放在其他角色的判定区。轮到该角色回合开始时判定:若判定牌不为♥(红桃),跳过本回合的出牌阶段;为♥则无效果。判定完此牌作废。',
   '兵粮寸断': '延时锦囊,只能放在其他角色的判定区。轮到该角色回合开始时判定:若判定牌不为♣(梅花),跳过本回合的摸牌阶段;为♣则无效果。判定完此牌作废。',
+  '铁索连环': '指定一名角色,令其横置或解除横置。横置状态用于日后的属性伤害传导;也可以被庞统【连环】重铸。',
   '借刀杀人': '选择一名装备着武器牌的角色(A),再选择A攻击范围内的另一名角色(B)。A可以选择对B使用一张【杀】(不受A本回合出杀次数限制),否则弃置A装备的武器牌。可被无懈可击整体抵消。',
   '五谷丰登': '亮出等同于存活角色数量的牌堆顶的牌,从你开始按座位顺序,每人依次挑选一张收入手中。可被无懈可击整体抵消(亮出的牌全部作废)。',
 };
@@ -332,6 +422,7 @@ function buildDeck(){
     ['五谷丰登',H,3],['五谷丰登',H,4],
     ['乐不思蜀',S,6],['乐不思蜀',H,6],['乐不思蜀',C,6],
     ['闪电',S,1],['闪电',H,12],
+    ['铁索连环',C,10],['铁索连环',C,11],
     // 标准版装备 18(官方19,省略雌雄双股剑)
     ['诸葛连弩',C,1],['诸葛连弩',D,1],
     ['青釭剑',S,6],['青龙偃月刀',S,5],['丈八蛇矛',S,12],
