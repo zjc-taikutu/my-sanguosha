@@ -85,6 +85,9 @@
     justify-items:center;
     gap:14px;
     margin-bottom:6px;
+    position:relative; /* feature/table-ui 第4步:飞牌动画(.flying-card)用 position:absolute
+      相对这个容器定位,需要一个 relative 祖先——纯粹是给绝对定位提供坐标系,不影响自身的
+      grid 布局本身(position:relative 不改变元素在正常流/grid 里的排布方式)。 */
   }
   /* 320px 曾是这里的上限,但排查装备栏换行问题时发现:2人局这一整列(top+me共用同一列)
      会把 .seat.me 也一起卡在320px,比 .seat.me 自己的 max-width:640px 更早触顶——
@@ -129,6 +132,15 @@
   .table-card-who{font-size:13px;color:var(--paper-dim);}
   .table-card-name{font-size:22px;font-weight:700;color:var(--gold);letter-spacing:.06em;}
   .table-card-face{font-size:17px;margin-top:2px;}
+  /* 飞牌动画的临时元素(feature/table-ui 第4步):position:absolute 相对 #seats(已加
+     position:relative)定位,left/top 由 render.js 运行时用 getBoundingClientRect 算好的
+     像素坐标赋值,这里只定义外观和过渡时长。transition 时长(.6s)比 renderTableCard 里
+     setTimeout 移除的 650ms 略短,确保透明度先降到0再被摘除,不会出现"瞬间消失"的跳变。 */
+  .flying-card{position:absolute;transform:translate(-50%,-50%);
+    background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
+    padding:4px 10px;font-size:13px;color:var(--paper);white-space:nowrap;
+    pointer-events:none;z-index:30;
+    transition:left .6s ease,top .6s ease,opacity .6s ease .3s;}
   /* ===== 座位卡片:头像居左+信息居右(第7步,取代第6步的"头像铺底"方案)=====
      第6步试过"头像铺满卡片上半部分",结果框的宽高比(如桌面638x300≈2.1:1)远比素材本身
      的 3:4 竖版扁得多——object-fit:cover 在这种情况下必然按宽度撑满、纵向大幅裁切,
@@ -652,9 +664,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=102"></script>
-<script src="data.js?v=102"></script>
-<script src="game.js?v=102"></script>
-<script src="render.js?v=102"></script>
+<script src="config.js?v=103"></script>
+<script src="data.js?v=103"></script>
+<script src="game.js?v=103"></script>
+<script src="render.js?v=103"></script>
 </body>
 </html>

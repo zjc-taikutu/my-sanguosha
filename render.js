@@ -477,6 +477,49 @@ function renderTableCard(g){
       if(targetEl) targetEl.classList.add('table-target');
     });
   }
+  // 飞牌动画(feature/table-ui 第4步):出牌方座位 -> 中央 #tableCard。用 getBoundingClientRect
+  // 算两者的屏幕坐标差,生成一个绝对定位的临时元素做 transform 位移动画,动画结束后移除,
+  // 不常驻 DOM。任何一步拿不到有效坐标就静默跳过——这是纯装饰层,绝不能因为它出错而影响
+  // 上面已经完成的文字展示/座位高亮(那两块是本函数的主体,必须始终生效)。只做"出牌方->中央"
+  // 这一段,不做"中央->目标"的连线(运行时坐标计算风险最高的部分,留给下一步,可复用这里的
+  // getBoundingClientRect 写法)。
+  const existingFly = document.getElementById('flyingCard');
+  if(existingFly) existingFly.remove(); // 连续快速出牌:先清掉上一张还没飞完的,不叠加多个
+  if(Number.isInteger(seat)){
+    const actorEl = document.querySelector('.seat[data-seat="'+seat+'"]');
+    const centerEl = document.getElementById('tableCard');
+    if(actorEl && centerEl){
+      try{
+        const fromRect = actorEl.getBoundingClientRect();
+        const toRect = centerEl.getBoundingClientRect();
+        const seatsEl = document.getElementById('seats');
+        const containerRect = seatsEl.getBoundingClientRect();
+        // 坐标都换算成相对 #seats 容器的偏移,配合 #seats 的 position:relative 定位飞牌元素,
+        // 不用 fixed(fixed 相对视口,#seats 内部滚动/布局变化时容易和真实座位位置脱节)。
+        const fromX = fromRect.left - containerRect.left + fromRect.width/2;
+        const fromY = fromRect.top - containerRect.top + fromRect.height/2;
+        const toX = toRect.left - containerRect.left + toRect.width/2;
+        const toY = toRect.top - containerRect.top + toRect.height/2;
+        const fly = document.createElement('div');
+        fly.id = 'flyingCard';
+        fly.className = 'flying-card';
+        fly.textContent = name; // 飞行途中只显示牌名文字,足够传达"这张牌在飞",不需要完整牌面渲染
+        fly.style.left = fromX + 'px';
+        fly.style.top = fromY + 'px';
+        seatsEl.appendChild(fly);
+        // 强制回流后再设置终点坐标,触发 CSS transition 位移(而不是直接跳到终点)。
+        void fly.offsetWidth;
+        fly.style.left = toX + 'px';
+        fly.style.top = toY + 'px';
+        fly.style.opacity = '0';
+        setTimeout(()=>{ if(fly.parentNode) fly.remove(); }, 650); // 略长于 CSS transition 时长,确保动画播完再摘除
+      }catch(e){
+        // 坐标计算出任何异常(理论上不该发生,但飞牌是装饰层,宁可静默跳过也不能抛出影响主渲染)
+        const stray = document.getElementById('flyingCard');
+        if(stray) stray.remove();
+      }
+    }
+  }
 }
 // maybePlaySkillSound: 和 maybePlayCardSound 同一模式,独立字段(lastSkillSound)+独立哨兵变量。
 let lastPlayedSkillSeq = undefined;
