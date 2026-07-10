@@ -440,6 +440,19 @@ function maybePlayCardSound(g){
 // maybePlayCardSound 同款写法,不是比较牌名文本)。seat/card/targets 都是可选展示信息:
 // 调用点只有能安全拿到的才传,没有 seat 就整体不落座位名/不高亮出牌方,没有 card 就不显示
 // 花色点数,没有 targets 就不高亮任何目标座位——不强行拼凑数据,退化成只显示牌名。
+// tableCardFaceHtml: 中央出牌区/交换展示共用的牌面结构——和手牌同一套图片素材(cardImageSrc)+
+// 同一套失败降级(cardImgError/CARD_FALLBACK_EXTS),只是尺寸更小、没有手牌那套按视口自适应
+// 字号的复杂逻辑(中央区文字量小、固定尺寸足够,不需要那么精细)。card 为空时返回空字符串。
+function tableCardFaceHtml(card){
+  if(!card) return '';
+  const imgSrc = cardImageSrc(card.name);
+  const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
+  const cornerText = cardFace(card)||'';
+  return '<div class="card '+(imgSrc?'':'no-art')+' table-card-mini">'
+    + '<div class="card-art-box">'+imgTag+'</div>'
+    + '<div class="corner">'+cornerText+'</div>'
+    + '</div>';
+}
 let lastShownTableCardSeq = undefined;
 function renderTableCard(g){
   const el = document.getElementById('tableCard');
@@ -451,11 +464,11 @@ function renderTableCard(g){
     el.classList.add('exchange-mode');
     el.innerHTML = g.exchangeCards.map(entry=>{
       const w = (Number.isInteger(entry.seat) && g.players[entry.seat]) ? getPlayerDisplayLabel(g, g.players[entry.seat]) : '';
-      const f = entry.card ? cardFace(entry.card) : '';
+      const f = entry.card ? tableCardFaceHtml(entry.card) : '';
       return '<div class="exchange-card">'
         + (w ? '<div class="table-card-who">'+escapeHtml(w)+'</div>' : '')
         + '<div class="table-card-name">'+escapeHtml(entry.name)+'</div>'
-        + (f ? '<div class="table-card-face">'+f+'</div>' : '')
+        + f
         + '</div>';
     }).join('');
     return; // 交换展示接管了这次渲染,不再往下走单槽位逻辑
@@ -467,10 +480,10 @@ function renderTableCard(g){
   lastShownTableCardSeq = g.tableCard.seq;
   const { name, seat, card } = g.tableCard;
   const who = (Number.isInteger(seat) && g.players[seat]) ? getPlayerDisplayLabel(g, g.players[seat]) : '';
-  const faceHtml = card ? cardFace(card) : ''; // cardFace(data.js)是项目里现成的牌面(花色+点数)渲染函数,不新造一套
+  const faceHtml = card ? tableCardFaceHtml(card) : ''; // 复用手牌同款"插画图+花色角标"结构,不再只显示文字角标
   el.innerHTML = (who ? '<div class="table-card-who">'+escapeHtml(who)+'</div>' : '')
     + '<div class="table-card-name">'+escapeHtml(name)+'</div>'
-    + (faceHtml ? '<div class="table-card-face">'+faceHtml+'</div>' : '');
+    + faceHtml;
   // 和 #logToast 同款"淡入-停留-淡出"手法:先移除 .show 强制回流,再加回去,保证 CSS 动画
   // 每次都从头重新播放(而不是因为 class 已经是 show 而被浏览器判定"没有变化"、动画不重触发)。
   el.classList.remove('show');

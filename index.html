@@ -139,6 +139,12 @@
     justify-content:center;align-items:flex-start;}
   .exchange-card{background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
     padding:4px 8px;font-size:12px;}
+  /* 中央出牌区的迷你卡牌:复用 .card/.card-art-box/.corner/.no-art 已有的插画+角标+降级样式,
+     只覆盖尺寸——比手牌小一号,不需要手牌那套按视口自适应字号的逻辑(中央区没有标题栏文字,
+     牌名已经单独用 .table-card-name 显示在上方)。cursor:default 且不绑定 onclick,纯展示。 */
+  .table-card-mini{width:64px;height:88px;cursor:default;margin:0 auto;}
+  .table-card-mini .corner{transform:scale(.75);transform-origin:top left;}
+  .exchange-card .table-card-mini{width:52px;height:72px;}
   /* 飞牌动画的临时元素(feature/table-ui 第4步):position:absolute 相对 #seats(已加
      position:relative)定位,left/top 由 render.js 运行时用 getBoundingClientRect 算好的
      像素坐标赋值,这里只定义外观和过渡时长。transition 时长(.6s)比 renderTableCard 里
@@ -683,9 +689,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=105"></script>
-<script src="data.js?v=105"></script>
-<script src="game.js?v=105"></script>
-<script src="render.js?v=105"></script>
+<script src="config.js?v=106"></script>
+<script src="data.js?v=106"></script>
+<script src="game.js?v=106"></script>
+<script src="render.js?v=106"></script>
 </body>
 </html>
