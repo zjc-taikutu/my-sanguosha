@@ -105,6 +105,7 @@ function normalize(g){
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
   if(g.tableCard===undefined) g.tableCard=null;
+  if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
   if(g.tableCard && g.tableCard.targets!=null && !Array.isArray(g.tableCard.targets)) g.tableCard.targets=null;
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
@@ -352,12 +353,21 @@ function pushLog(log, msg){
 // 调用点没有现成的 seat/card 就不传,中央区退化为只显示牌名。targets 是可选的目标座位
 // 信息(单个座位号或座位号数组,如铁索连环两个目标)——座位高亮用,没有目标的牌(如无中生有、
 // 南蛮入侵这类非单目标或本步没能力提供的场景)传 null,单个座位号会被归一化成长度为1的数组。
+// markCardSound: 音效/单次展示逻辑不变(g.lastCardSound/g.tableCard 照旧,每次覆盖+按 seq 淡入淡出)。
+// 额外判断:调用这一刻如果正处于"多步骤交换"过程中(南蛮入侵/万箭齐发这类群体锦囊 g.aoe 非空,或
+// 正在决斗 g.phase==='duel'),把这张牌也追加进 g.exchangeCards 数组——这个数组不设时间上限、
+// 不被下一张覆盖,交给 renderTableCard 持续显示,直到交换动作真正结束(aoeAdvance 收尾/
+// duelResponse 分出胜负)时才清空。
 function markCardSound(g, cardName, seat, card, targets){
   const seq = (g.lastCardSound && g.lastCardSound.seq) ? g.lastCardSound.seq : 0;
   g.lastCardSound = { name: cardName, seq: seq+1 };
   const normTargets = targets==null ? null
     : (Array.isArray(targets) ? targets.filter(Number.isInteger) : (Number.isInteger(targets) ? [targets] : null));
   g.tableCard = { name: cardName, seq: seq+1, seat: (Number.isInteger(seat) ? seat : null), card: card || null, targets: normTargets };
+  if(g.aoe || g.phase==='duel'){
+    if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
+    g.exchangeCards.push({ name: cardName, seat: (Number.isInteger(seat) ? seat : null), card: card || null, seq: seq+1 });
+  }
 }
 // markSkillSound: 和 markCardSound 同一模式,独立字段(lastSkillSound),记录"这次真正发动了
 // 哪个技能"这个语音播放事件,供 render.js 的 maybePlaySkillSound 检测并播放对应语音
@@ -2434,6 +2444,7 @@ function duelResponse(useSha){
     const dying = dealDamage(g, mySeat, damageAmount(g, opp, 1, 'duel'), opp, '不出【杀】', 'duel', g.pending.sourceCard);
     if(dying) return g; // 濒死流程接管,后续(轮转/阶段)延后到 finishDying 处理
     g.pending=null;
+    g.exchangeCards=[]; // 决斗结束(认输一方受伤):清空持续展示,恢复单次出牌的原有淡入淡出
     if(checkWin(g)) return g;
     // 若回合玩家在决斗中阵亡,直接换下家;否则回合玩家继续出牌阶段
     if(!g.players[g.turn].alive){
@@ -2808,6 +2819,7 @@ function aoeAdvance(g, prevSeat){
   const next=nextAskee(g, from, prevSeat);
   if(next===null){
     g.aoe=null; g.pending=null; g.phase='play';
+    g.exchangeCards=[]; // 交换动作结束:清空持续展示,之后新的单次出牌恢复原来的单槽位淡入淡出
     g.log=pushLog(g.log, '【群体锦囊】结算完毕');
     return;
   }

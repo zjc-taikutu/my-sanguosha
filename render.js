@@ -444,12 +444,29 @@ let lastShownTableCardSeq = undefined;
 function renderTableCard(g){
   const el = document.getElementById('tableCard');
   if(!el) return;
+  // 交换进行中(南蛮入侵/万箭齐发的多目标应战、或决斗的连续出杀):持续显示这个数组里的每一张牌,
+  // 不走下面的单槽位 seq 去重/淡入淡出——只要 g.exchangeCards 非空就一直渲染、不设定时器清除,
+  // 交给 game.js 在动作真正结束时(aoeAdvance收尾/duelResponse分出胜负)清空数组来"结束显示"。
+  if(Array.isArray(g.exchangeCards) && g.exchangeCards.length>0){
+    el.classList.add('exchange-mode');
+    el.innerHTML = g.exchangeCards.map(entry=>{
+      const w = (Number.isInteger(entry.seat) && g.players[entry.seat]) ? getPlayerDisplayLabel(g, g.players[entry.seat]) : '';
+      const f = entry.card ? cardFace(entry.card) : '';
+      return '<div class="exchange-card">'
+        + (w ? '<div class="table-card-who">'+escapeHtml(w)+'</div>' : '')
+        + '<div class="table-card-name">'+escapeHtml(entry.name)+'</div>'
+        + (f ? '<div class="table-card-face">'+f+'</div>' : '')
+        + '</div>';
+    }).join('');
+    return; // 交换展示接管了这次渲染,不再往下走单槽位逻辑
+  }
+  el.classList.remove('exchange-mode');
   if(!g.tableCard){ return; } // 房间刚创建/旧存档没有这个字段:不渲染,保持空
   if(lastShownTableCardSeq===undefined){ lastShownTableCardSeq=g.tableCard.seq; return; } // 首次进入房间/刷新页面,不补放历史
   if(g.tableCard.seq===lastShownTableCardSeq) return;
   lastShownTableCardSeq = g.tableCard.seq;
   const { name, seat, card } = g.tableCard;
-  const who = (Number.isInteger(seat) && g.players[seat]) ? g.players[seat].name : '';
+  const who = (Number.isInteger(seat) && g.players[seat]) ? getPlayerDisplayLabel(g, g.players[seat]) : '';
   const faceHtml = card ? cardFace(card) : ''; // cardFace(data.js)是项目里现成的牌面(花色+点数)渲染函数,不新造一套
   el.innerHTML = (who ? '<div class="table-card-who">'+escapeHtml(who)+'</div>' : '')
     + '<div class="table-card-name">'+escapeHtml(name)+'</div>'
