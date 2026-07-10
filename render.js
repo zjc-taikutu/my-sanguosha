@@ -36,7 +36,7 @@ const CARD_PINYIN = {
   '杀':'sha', '闪':'shan', '桃':'tao',
   '决斗':'juedou', '无中生有':'wuzhongshengyou', '顺手牵羊':'shunshouqianyang',
   '过河拆桥':'guohechaiqiao', '无懈可击':'wuxiekeji', '南蛮入侵':'nanmanruqin',
-  '万箭齐发':'wanjianqifa', '闪电':'shandian', '乐不思蜀':'lebusishu',
+  '万箭齐发':'wanjianqifa', '火攻':'huogong', '闪电':'shandian', '乐不思蜀':'lebusishu',
   '兵粮寸断':'bingliangcunduan', '借刀杀人':'jiedaosharen', '五谷丰登':'wugufengdeng',
   '桃园结义':'taoyuanjieyi', '铁索连环':'tiesuolianhuan',
   '诸葛连弩':'zhugeliannu', '青釭剑':'qinggangjian', '青龙偃月刀':'qinglongyanyuedao',
@@ -246,6 +246,18 @@ function getPlayerDisplayLabel(g, p){
   if(!p) return '';
   const gen = (g && g.started && p.general!=null) ? getGeneral(p.general) : null;
   return gen ? (gen.name+'('+p.name+')') : p.name;
+}
+function chainedTagText(g, seat){
+  const p=g.players && g.players[seat];
+  if(!g.started || !p || !p.chained) return '';
+  const others=(g.players||[])
+    .map((op,i)=>({op,i}))
+    .filter(o=>o.i!==seat && o.op && o.op.alive && o.op.chained)
+    .map(o=>{
+      const gen=getGeneral(o.op.general);
+      return gen ? gen.name : o.op.name;
+    });
+  return others.length ? ('连环-'+others.join('/')) : '连环';
 }
 // SUIT_COLOR: 红桃/方块用醒目的朱红色(呼应主题色 --cinnabar-bright),黑桃/梅花不特意变色,
 // 沿用正文默认文字色(暗色主题下强行标"黑色"对比度反而不够,不如不处理)。
@@ -779,7 +791,7 @@ function render(g){
       '<div class="nm"><span style="color:'+seatColor(i)+'">'+escapeHtml(p.name)+'</span>'+
         (i===mySeat?'<span class="tag">你</span>':'')+
         (g.turn===i&&g.started?'<span class="tag turn">回合</span>':'')+
-        (p.chained?'<span class="tag">连环</span>':'')+
+        (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, i))+'</span>':'')+
         (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'')+
       '</div>';
     // 武将名+技能名拼一行(如"关羽 · 武圣"),贴合旧版"武将 X · 技能"的习惯——去掉"武将"
@@ -814,6 +826,7 @@ function render(g){
     const isShuangxiongDuelSel=canShuangxiongDuelCard(meP, selCard);
     const isJiedaoSel=!!(selCard && selCard.name==='借刀杀人');             // 借刀杀人走专属两步选择,不进通用单目标块
     const needHandOrEquip=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
+    const needHandOnly=!!(selCard && selCard.name==='火攻');
     // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
     // 手牌、装备、判定区(延时锦囊)任一非空即可选——否则"手牌0但有装备/判定区的牌"会被
     // UI 误挡在选目标这一步(官方规则判定区也在可拿/可拆范围内,见 CLAUDE.md 改动记录)。
@@ -838,7 +851,7 @@ function render(g){
     const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat || !!(selSpec && selSpec.allowSelf));
     // 官方规则:同一判定区不能有两张同名的延时类锦囊牌,和服务端 canTarget 的 hasDup 判断口径一致。
     const hasDupDelay = !!(selDT && (p.delays||[]).some(c=>c && c.name===selCard.name));
-    const targetable = !!(selSpec && selSpec.target) && selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange && !hasDupDelay;
+    const targetable = !!(selSpec && selSpec.target) && selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && (!needHandOnly || (p.hand||[]).length>0) && inRange && !hasDupDelay;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
         // idx 在这里(渲染时/挂载 onclick 那一刻)冻结,而不是等点击时才读 selectedCardIdx——
@@ -1988,6 +2001,39 @@ function renderControls(g){
     setBanner('【决斗】进行中,轮到你打出【杀】,'+tail);
     return;
   }
+  if(g.phase==='huogongReveal' && g.pending && g.pending.type==='huogongReveal' && g.pending.to===mySeat){
+    setBanner('【火攻】请选择一张手牌展示。');
+    (me.hand||[]).forEach((card, idx)=>{
+      const b=document.createElement('button');
+      b.className='primary';
+      b.innerHTML='展示 '+cardFace(card)+'【'+escapeHtml(card.name)+'】';
+      b.onclick=()=>respondHuogongReveal(idx);
+      c.appendChild(b);
+    });
+    return;
+  }
+  if(g.phase==='huogongReveal' && g.pending && g.pending.type==='huogongReveal'){
+    const p=g.players[g.pending.to];
+    setBanner('等待 '+escapeHtml(p?p.name:'目标')+' 为【火攻】展示一张手牌…');
+    return;
+  }
+  if(g.phase==='huogong' && g.pending && g.pending.type==='huogong' && g.pending.from===mySeat){
+    setBanner('【火攻】请选择一张 '+g.pending.suit+' 手牌弃置,或不弃牌。');
+    const choices=(me.hand||[]).map((card,idx)=>({card,idx})).filter(o=>cardSuitForPlayer(me,o.card)===g.pending.suit);
+    choices.forEach(o=>{
+      const b=document.createElement('button');
+      b.className='primary';
+      b.innerHTML='弃置 '+cardFace(o.card)+'【'+escapeHtml(o.card.name)+'】';
+      b.onclick=()=>respondHuogong(true, o.idx);
+      c.appendChild(b);
+    });
+    const pass=document.createElement('button');
+    pass.className='ghost';
+    pass.textContent='不弃牌';
+    pass.onclick=()=>respondHuogong(false);
+    c.appendChild(pass);
+    return;
+  }
   if(g.phase==='duel' && g.pending){
     const a=g.players[g.pending.active].name;
     setBanner('【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…');
@@ -2307,7 +2353,7 @@ function renderControls(g){
       const spec=CARD_PLAYS[actionId];
       // 只有真的会按"杀"结算才显示"当【杀】"/攻击距离提示(见 resolveActionId:红/黑牌若自己有
       // 独立效果,默认不会被判成杀,不该显示这段容易让人误以为要当杀打的文案)
-      const label = (actionId==='杀' && nm!=='杀') ? '【'+nm+'】当【杀】' : '【'+nm+'】';
+      const label = (actionId==='杀' && !isShaName(nm)) ? '【'+nm+'】当【杀】' : '【'+nm+'】';
       if(actionId==='铁索连环'){
         setBanner('已选中【铁索连环】,点上方选择一至两名角色进入或解除连环状态(或点牌取消)。');
         if(tiesuoTargets.length>=1){
@@ -2503,7 +2549,7 @@ function renderHand(g){
     : '';
   (me.hand||[]).forEach((card,idx)=>{
     const el=document.createElement('div');
-    const cls = card.name==='杀'?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':card.name==='顺手牵羊'?'steal':'trick';
+    const cls = isShaName(card.name)?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':card.name==='顺手牵羊'?'steal':'trick';
     // 过河拆桥沿用统一锦囊样式 trick
     const picked = zhangbaMode && zhangbaPicks.includes(idx);
     const duanliangPicked = duanliangMode && duanliangCardIdx===idx;
@@ -2744,7 +2790,7 @@ function showDelayInfo(name){ showInfo(name, escapeHtml(getCardDesc(name)||'(暂
 // 帮助按钮:一次性列出全部牌/武将/装备说明
 function showHelp(){
   let html='<div class="sec">基础牌 / 锦囊</div>';
-  ['杀','闪','桃','决斗','无中生有','桃园结义','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','闪电','乐不思蜀','兵粮寸断','借刀杀人','五谷丰登'].forEach(n=>{
+  ['杀','火杀','雷杀','闪','桃','决斗','无中生有','桃园结义','顺手牵羊','过河拆桥','无懈可击','南蛮入侵','万箭齐发','火攻','闪电','乐不思蜀','兵粮寸断','借刀杀人','五谷丰登','铁索连环'].forEach(n=>{
     html+='<div class="item"><b>'+escapeHtml(n)+'</b>：'+escapeHtml(getCardDesc(n))+'</div>'; });
   html+='<div class="sec">武将</div>';
   GENERAL_IDS.forEach(id=>{ const gg=getGeneral(id);

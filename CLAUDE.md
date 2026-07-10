@@ -293,9 +293,9 @@ const CARD_PINYIN = {
   '杀':'sha', '闪':'shan', '桃':'tao',
   '决斗':'juedou', '无中生有':'wuzhongshengyou', '顺手牵羊':'shunshouqianyang',
   '过河拆桥':'guohechaiqiao', '无懈可击':'wuxiekeji', '南蛮入侵':'nanmanruqin',
-  '万箭齐发':'wanjianqifa', '闪电':'shandian', '乐不思蜀':'lebusishu',
+  '万箭齐发':'wanjianqifa', '火攻':'huogong', '闪电':'shandian', '乐不思蜀':'lebusishu',
   '兵粮寸断':'bingliangcunduan', '借刀杀人':'jiedaosharen', '五谷丰登':'wugufengdeng',
-  '桃园结义':'taoyuanjieyi',
+  '桃园结义':'taoyuanjieyi', '铁索连环':'tiesuolianhuan',
   '诸葛连弩':'zhugeliannu', '青釭剑':'qinggangjian', '青龙偃月刀':'qinglongyanyuedao',
   '丈八蛇矛':'zhangbashemao', '贯石斧':'guanshifu', '方天画戟':'fangtianhuaji',
   '麒麟弓':'qilingong', '寒冰剑':'hanbingjian', '古锭刀':'gudingdao',
@@ -304,6 +304,8 @@ const CARD_PINYIN = {
   '赤兔':'chitu', '紫骍':'zixing', '大宛':'dawan', '骕骦':'sushuang'
 };
 ```
+
+- **新增军争属性伤害牌与连环传导：火杀/雷杀/火攻接入牌堆和出牌系统，闪电也接入同一套属性伤害传导逻辑**。`BASIC_CARDS` 扩展为 `['杀','火杀','雷杀','闪','桃']`，新增 `isShaName(name)` 让【火杀】/【雷杀】按【杀】走距离、出杀次数、闪响应、青龙偃月刀、借刀杀人等既有流程；`cardDamageNature(card)` 标记【火杀】/【火攻】为火属性、【雷杀】/【闪电】为雷属性，`dealDamage` 统一从 `sourceCard` 推导属性，不新增零散判断。连环传导规则接在 `dealDamage` 内：只有属性伤害且受伤者处于连环状态时触发，受伤者和被传导到的其他连环角色都会解除连环状态；普通杀、决斗、南蛮、万箭等普通伤害不传导。当前实现按官方“连环状态/横置”模型处理，不记录 A-B 这种边关系。`火攻` 作为普通锦囊接入 `CARD_PLAYS`/`startTrick`：目标先选择并展示一张手牌，使用者可弃同花色手牌令其受到1点火属性伤害；不弃或无同花色手牌则无伤害。牌堆按军争常见配置新增：火杀5张、雷杀9张、火攻3张；项目原有闪电2张继续保留并改为雷属性伤害。当前 `buildDeck()` 总牌数为130张。`index.html` cache-busting 版本号更新到 `v=100`。
 
 - **修复 `g.shaUsed` 被决斗应战污染，导致出牌阶段发起决斗打杀应战后本回合再也出不了杀（这是上一条"吕蒙【克己】"修复自身引入的真实回归 bug）**：`g.shaUsed` 曾经被两条完全不同的规则共用同一个标志——①`CARD_PLAYS['杀'].canPlay` 查 `!g.shaUsed` 做"出牌阶段主动出杀次数限制"；②`canSkipDiscard` 查 `!g.shaUsed` 判断吕蒙【克己】是否被破坏。上一次修复"克己没有覆盖决斗应战出杀"时，直接在 `duelResponse` 的 `useSha` 分支里加了 `g.shaUsed=true`——这行赋值确实让②正确了，但同时误伤了①：任何一名回合玩家只要在自己的出牌阶段发起【决斗】、且应战时打出了杀，`g.shaUsed` 就会被置真，导致这名玩家回到出牌阶段后再也不能主动出杀（次数限制被错误地提前触发），这是一次实打实的严重回归，且发起决斗本身就是出牌阶段的常见操作，触发条件很容易被日常游玩碰到。**修复**：把两条规则拆成两个独立标志——`g.shaUsed` 收敛回只由**主动出杀**置真（`CARD_PLAYS['杀'].effect`/`playZhangbaSha`），只管出杀次数限制；新增 `g.shaPlayedInDuel`（`normalize` 里和 `g.shaUsed` 同款防御非布尔值），只由 `duelResponse` 的应战出杀分支置真，只服务于克己判断。`canSkipDiscard` 改为 `!g.shaUsed && !g.shaPlayedInDuel`——两个标志任一为真都破坏克己（保持官方 FAQ"决斗中打出杀同样破坏克己"这条规则不变），但只有 `g.shaUsed` 会影响出杀次数限制，`g.shaPlayedInDuel` 完全不参与 `canPlay` 判断。`startTurn` 回合重置里 `g.shaPlayedInDuel=false` 紧跟在 `g.shaUsed=false` 之后同款重置。**青龙偃月刀连续杀（`respondQinglong`）的情况没有变动**——它触发的是杀命中/被闪抵消之后"再来一张杀"，这条路径本质是"又主动使用了一张杀"（不是决斗应战这种"被迫打出杀"的场景），继续沿用 `g.shaUsed=true`（此前那条遗留的理论 edge case——青龙偃月刀连续杀若发生在借刀杀人的借来杀链条上，可能错误影响真正当前回合玩家的次数/克己状态——依然没有处理，见「吕蒙【克己】」那条的既有说明，这次改动没有涉及、也没有让它变得更严重或更轻）。这类"一个标志身兼两种不同语义的判断依据"的设计，在后续新增类似"某个动作既要影响次数限制、又要影响另一个技能的判定条件"的场景时，应当优先考虑从一开始就拆成两个独立标志，而不是共用同一个、日后再各自打补丁——这正是这次真实踩过的教训。回归测试 `test_duel_sha_limit.js` 覆盖：端到端复现原 bug 场景（决斗应战出杀后 `g.shaUsed` 应仍为 `false`、且 `CARD_PLAYS['杀'].canPlay` 应仍为 `true`）、出杀次数限制本身不受影响（主动出杀后 `canPlay` 变 `false`）、克己判断的三种组合（两标志皆假可跳过弃牌阶段/仅 `shaUsed` 为真破坏克己/仅 `shaPlayedInDuel` 为真也破坏克己）、`startTurn` 后两个标志都归零、`normalize` 对缺失字段和非布尔值的防御与幂等性、张飞【咆哮】无限杀不受本次改动影响（`shaUsed=true` 时仍可出杀）。
 

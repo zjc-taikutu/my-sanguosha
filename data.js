@@ -3,7 +3,7 @@ const SEATS = 3;        // 房间容量上限(满 3 不再加入)
 const MIN_PLAYERS = 2;  // 开始游戏的最低人数(2 或 3 人均可开始)
 const MAX_HP = 4; // 大厅占位 / 兜底默认体力上限
 const START_HAND = 4;
-const BASIC_CARDS = ['杀','闪','桃']; // 基本牌:不含锦囊/装备,乐进【骁果】等按"是不是基本牌"判断的地方统一查这个表
+const BASIC_CARDS = ['杀','火杀','雷杀','闪','桃']; // 基本牌:不含锦囊/装备,乐进【骁果】等按"是不是基本牌"判断的地方统一查这个表
 
 // ---------- 装备区(地基:只搭容器+显示;派生属性/距离/射程/效果一律后续经 EQUIPS 常量表 + getEquip 实现,不写进 Firebase) ----------
 // 四槽:weapon 武器 / armor 防具 / plus1 +1马(防御马) / minus1 -1马(进攻马);每槽存一张装备牌对象 {id,name} 或 null(空)。
@@ -323,7 +323,17 @@ function cardColorForPlayer(player, card){ return isRedForPlayer(player, card)?'
 // singleCardShaColor: 普通杀(含转化牌,如龙胆的闪当杀、武圣的红牌当杀)的颜色——直接查这张
 // 物理牌本身的花色。给 resolveShaUse 的 shaColor 参数用,不是给"判定牌颜色"这类场景用
 // (判定区/铁骑/洛神那些判定,直接查 isRed(judgeCard) 即可,不涉及"杀的颜色"这个概念)。
+function isShaName(name){ return name==='杀' || name==='火杀' || name==='雷杀'; }
 function singleCardShaColor(card){ return card ? (isRed(card)?'red':'black') : undefined; }
+function cardDamageNature(card){
+  if(!card || Array.isArray(card)) return null;
+  if(card.name==='火杀' || card.name==='火攻') return 'fire';
+  if(card.name==='雷杀' || card.name==='闪电') return 'thunder';
+  return null;
+}
+function damageNatureText(nature){
+  return nature==='fire' ? '火属性' : nature==='thunder' ? '雷属性' : '';
+}
 // combinedShaColor: 丈八蛇矛"两张牌当一张杀"的颜色规则——不看单张牌花色,按两张牌的红黑
 // 组合决定:两张都红→红,两张都黑→黑,一红一黑→"无色"(仁王盾/毅重这类"黑杀无效"的效果
 // 对无色杀不生效)。这是一个真实存在的三态结果,不是"非红即黑"的二元判断,和 isRed 的语义
@@ -346,6 +356,7 @@ function cardFace(card){
 // (都是按颜色,不看名字);三条判断各自独立,互不覆盖。
 function canUseAs(player, card, role){
   if(!card) return false;
+  if(role==='杀' && isShaName(card.name)) return true;
   if(card.name===role) return true;
   if(generalHasCap(player,'longdan')){
     if(role==='杀' && card.name==='闪') return true;
@@ -377,6 +388,8 @@ function generalMaxHp(id){ const gen=getGeneral(id); return (gen && typeof gen.m
 // 基础牌/锦囊的一句话效果说明(给新手看,通俗;装备说明在 EQUIPS.desc)。唯一查询入口 getCardDesc,业务层不硬编码牌名。
 const CARD_DESC = {
   '杀':       '出牌阶段使用,对攻击距离内的一名其他角色造成1点伤害;对方可打出【闪】抵消。每回合一般只能使用1张,且受攻击距离限制。',
+  '火杀':     '属性【杀】。用法同【杀】,造成火属性伤害;若目标处于连环状态,会传导给其他连环角色。',
+  '雷杀':     '属性【杀】。用法同【杀】,造成雷属性伤害;若目标处于连环状态,会传导给其他连环角色。',
   '闪':       '当你被【杀】指定为目标时打出,用来抵消这张【杀】、免受伤害。不能主动使用。',
   '桃':       '让自己回复1点体力,只能在自己体力没满时使用。',
   '决斗':     '指定一名其他角色决斗:双方轮流打出【杀】,先打不出【杀】的一方受到1点伤害。',
@@ -387,6 +400,7 @@ const CARD_DESC = {
   '无懈可击': '抵消一张功能牌(“锦囊”,如决斗、南蛮入侵等)对一名角色的效果;也能抵消别人的【无懈可击】。',
   '南蛮入侵': '你以外的所有角色各需打出一张【杀】,打不出的人受到1点伤害。',
   '万箭齐发': '你以外的所有角色各需打出一张【闪】,打不出的人受到1点伤害。',
+  '火攻':     '指定一名有手牌的角色,其展示一张手牌;你可弃置一张同花色手牌,令其受到1点火属性伤害。',
   '闪电': '延时锦囊,只能放在你自己的判定区。轮到你回合开始时判定:黑桃2~9,你受到3点伤害,然后此牌作废;否则无事发生,将此牌移到下一名角色的判定区。',
   '乐不思蜀': '延时锦囊,只能放在其他角色的判定区。轮到该角色回合开始时判定:若判定牌不为♥(红桃),跳过本回合的出牌阶段;为♥则无效果。判定完此牌作废。',
   '兵粮寸断': '延时锦囊,只能放在其他角色的判定区。轮到该角色回合开始时判定:若判定牌不为♣(梅花),跳过本回合的摸牌阶段;为♣则无效果。判定完此牌作废。',
@@ -401,7 +415,7 @@ function getAnyDesc(name){ const e=getEquip(name); return (e && e.desc) || getCa
 const SUITS = ['♠','♥','♦','♣']; // 黑/红/红/♣黑;轮询分配保证红黑严格均衡(判定公平)
 function buildDeck(){
   // 牌堆:标准版(104基础+4EX)官方花色点数 + 项目额外实现的军争/非官方牌。
-  // 省略未实现的【雌雄双股剑】(♠2,需性别系统)。共111张。
+  // 省略未实现的【雌雄双股剑】(♠2,需性别系统)。当前共130张。
   // 点数:A=1,J=11,Q=12,K=13。同花色点数可在不同牌名重复,靠 id 区分。
   const S='♠', H='♥', C='♣', D='♦';
   const LIST = [
@@ -428,6 +442,11 @@ function buildDeck(){
     ['乐不思蜀',S,6],['乐不思蜀',H,6],['乐不思蜀',C,6],
     ['闪电',S,1],['闪电',H,12],
     ['铁索连环',C,10],['铁索连环',C,11],
+    // 军争属性伤害牌:火杀5、雷杀9、火攻3
+    ['火杀',H,4],['火杀',H,7],['火杀',H,10],['火杀',D,4],['火杀',D,5],
+    ['雷杀',S,4],['雷杀',S,5],['雷杀',S,6],['雷杀',S,7],['雷杀',S,8],
+    ['雷杀',C,5],['雷杀',C,6],['雷杀',C,7],['雷杀',C,8],
+    ['火攻',H,2],['火攻',H,3],['火攻',D,12],
     // 标准版装备 18(官方19,省略雌雄双股剑)
     ['诸葛连弩',C,1],['诸葛连弩',D,1],
     ['青釭剑',S,6],['青龙偃月刀',S,5],['丈八蛇矛',S,12],
