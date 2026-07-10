@@ -69,11 +69,15 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
   .row>div{flex:1;min-width:120px;}
 
-  /* ===== 座位环形布局(第2步:JS 现算槽位 class + CSS 命名区域精确定位)=====
+  /* ===== 座位环绕布局(feature/table-ui 第1步:只改定位,不改 seatSlot 语义/renderControls/
+     任何动作函数)=====
      容器按"对手数量"(总座位数-1,开局后不随存活人数变化)分两套列模板:
-     .opp1(2人局,1个对手)只有居中的 top 一列;.opp2(3人局,2个对手)左右各一列(tl/tr),
-     不再像第1步那样用 auto-fit 让浏览器"猜"该分几列——现在 render.js 的 seatSlot() 已经
-     算好每个座位具体该在哪个命名区域,这里只需要把区域摆对位置。
+     .opp1(2人局,1个对手)只有居中的 top 一列;.opp2(3人局,2个对手)左右各一列(tl/tr)——
+     这部分沿用第2步就定下的分区方式,render.js 的 seatSlot() 逻辑本身不需要跟着改。
+     这一步新增的是中间一条不放置任何座位的 "table" 行——对手环绕在上方、"我"固定在
+     下方居中,中间用这条空行让出一块视觉上的牌桌空区(下一步中央出牌区/动画会用到这块
+     空间,这一步只预留尺寸,不放任何内容)。grid-template-areas 里出现但没有任何元素
+     认领的区域名,浏览器仍会按 grid-template-rows 给它保留对应的行高,不需要额外占位元素。
      阵亡不重排:.dead 只变暗/去色,不改变 grid 位置(避免布局跳动打断"有人死了"这条信息的消化)。 */
   .seats{
     display:grid;
@@ -81,6 +85,9 @@
     justify-items:center;
     gap:14px;
     margin-bottom:6px;
+    position:relative; /* feature/table-ui 第4步:飞牌动画(.flying-card)用 position:absolute
+      相对这个容器定位,需要一个 relative 祖先——纯粹是给绝对定位提供坐标系,不影响自身的
+      grid 布局本身(position:relative 不改变元素在正常流/grid 里的排布方式)。 */
   }
   /* 320px 曾是这里的上限,但排查装备栏换行问题时发现:2人局这一整列(top+me共用同一列)
      会把 .seat.me 也一起卡在320px,比 .seat.me 自己的 max-width:640px 更早触顶——
@@ -89,11 +96,75 @@
      直接对齐成640px,让 .seat.me 自己的 max-width 变回真正起作用的那道限制。 */
   .seats.opp1{
     grid-template-columns:minmax(150px,640px);
-    grid-template-areas:"top" "me";
+    grid-template-rows:auto minmax(56px,180px) auto;
+    grid-template-areas:"top" "table" "me";
   }
   .seats.opp2{
     grid-template-columns:minmax(120px,1fr) minmax(120px,1fr);
-    grid-template-areas:"tl tr" "me me";
+    grid-template-rows:auto minmax(56px,180px) auto;
+    grid-template-areas:"tl tr" "table table" "me me";
+  }
+  /* ===== 中央出牌区(feature/table-ui 第2步):落在第1步留出的 table 网格空区里,不是
+     fixed 悬浮层——#tableCard 是 index.html 里 #seats 的一个静态子元素(grid-area:table),
+     render.js 只清空 .seat 座位卡本身,不再整体 innerHTML='' 清空 #seats,所以这个节点
+     全程只创建一次,不会跟着座位重绘被销毁重建(否则淡入淡出的 CSS 动画/展示状态会在
+     下一次任意游戏状态变化时被打断重置——这个坑和 #logToast 的"下一条要等上一条动画播完"
+     是同一类问题,但这里的根源是"容器节点本身被销毁重建",不是"新旧内容抢占同一个节点")。
+     视觉上参考 #logToast 的"淡入-停留-淡出"@keyframes 写法,但不用 position:fixed/transform
+     居中那一套——这里是正常的 grid 子项,内容靠 flex 居中,随 .seats 的响应式断点走。 */
+  .table-card{
+    grid-area:table;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:2px;text-align:center;
+    opacity:0;pointer-events:none;
+    line-height:1.1; /* 覆盖 body 全局的 line-height:1.5——三行内容(谁/牌名/牌面)叠加1.5倍行高
+      在最紧的断点(3人局480px,table行只有minmax(28px,48px))会把整块内容撑出保留行、
+      溢出到下方"我"的座位卡里几像素(实测截图+getBoundingClientRect量出的真实重叠,不是
+      臆测),收紧行高让三行文字的总高度回到能被小屏这条窄行装下的范围。 */
+  }
+  .table-card.show{ animation:tableCardFade 2.6s ease forwards; }
+  @keyframes tableCardFade{
+    0%{opacity:0;transform:scale(.9);}
+    10%{opacity:1;transform:scale(1);}
+    80%{opacity:1;}
+    100%{opacity:0;}
+  }
+  .table-card-who{font-size:13px;color:var(--paper-dim);}
+  .table-card-name{font-size:22px;font-weight:700;color:var(--gold);letter-spacing:.06em;}
+  .table-card-face{font-size:17px;margin-top:2px;}
+  /* 交换进行中(南蛮入侵应战链/决斗连续出杀):#tableCard 切换成横向排列多张卡片,不使用
+     单次出牌那套淡入淡出动画(.exchange-mode 时不触发 tableCardFade,靠 game.js 清空数组
+     来结束显示,不是靠时间)。 */
+  .table-card.exchange-mode{animation:none;opacity:1;display:flex;flex-direction:row;gap:6px;
+    flex-wrap:wrap;justify-content:center;align-items:flex-start;}
+  .exchange-card{background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
+    padding:4px 8px;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:2px;}
+  /* 中央出牌区的迷你卡牌:复用 .card/.card-art-box/.corner/.no-art 已有的插画+角标+降级样式,
+     只覆盖尺寸——比手牌小一号,不需要手牌那套按视口自适应字号的逻辑(中央区没有标题栏文字,
+     牌名已经单独用 .table-card-name 显示在上方)。cursor:default 且不绑定 onclick,纯展示。 */
+  .table-card-mini{width:64px;height:88px;cursor:default;margin:0 auto;}
+  .table-card-mini .corner{transform:scale(.75);transform-origin:top left;}
+  .exchange-card .table-card-mini{width:52px;height:72px;}
+  /* 飞牌动画的临时元素(feature/table-ui 第4步):position:absolute 相对 #seats(已加
+     position:relative)定位,left/top 由 render.js 运行时用 getBoundingClientRect 算好的
+     像素坐标赋值,这里只定义外观和过渡时长。transition 时长(.6s)比 renderTableCard 里
+     setTimeout 移除的 650ms 略短,确保透明度先降到0再被摘除,不会出现"瞬间消失"的跳变。 */
+  .flying-card{position:absolute;transform:translate(-50%,-50%);
+    background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
+    padding:4px 10px;font-size:13px;color:var(--paper);white-space:nowrap;
+    pointer-events:none;z-index:30;
+    transition:left .6s ease,top .6s ease,opacity .6s ease .3s;}
+  /* 目标连线的 SVG overlay(feature/table-ui 第5步):position:absolute 覆盖 #seats(同飞牌
+     动画依赖 #seats 的 position:relative),pointer-events:none 不拦截下面座位卡片的点击。
+     线本身用 CSS animation 做"画出后淡出"的效果,和 #tableCard 的 2.6s 节奏对齐。 */
+  .target-lines{position:absolute;top:0;left:0;pointer-events:none;z-index:25;}
+  .target-line{stroke:var(--gold);stroke-width:2;opacity:0;
+    animation:targetLineFade 2.6s ease forwards;}
+  @keyframes targetLineFade{
+    0%{opacity:0;}
+    15%{opacity:.85;}
+    70%{opacity:.85;}
+    100%{opacity:0;}
   }
   /* ===== 座位卡片:头像居左+信息居右(第7步,取代第6步的"头像铺底"方案)=====
      第6步试过"头像铺满卡片上半部分",结果框的宽高比(如桌面638x300≈2.1:1)远比素材本身
@@ -115,6 +186,12 @@
   .seat.slot-tr{grid-area:tr;}
   .seat.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;}
   .seat.dead{opacity:.45;filter:grayscale(.6);} /* 连头像一起变灰,免费拿到,不用额外处理 */
+  /* 出牌方/目标座位的短暂高亮(feature/table-ui 第3步),和中央出牌区(#tableCard)同一节奏
+     淡出。用 outline 而不是 border——border-color 已经被 .seat.active(回合中,金色)、
+     .seat.me(朱红)占用,再抢同一个属性会互相覆盖;outline 是叠加在盒模型外层的独立视觉层,
+     不影响 border 也不挤压卡片内容布局(不占用文档流空间),两者可以同时生效互不冲突。 */
+  .seat.table-actor{outline:2px solid var(--cinnabar-bright);outline-offset:2px;transition:outline-color .3s;}
+  .seat.table-target{outline:2px solid var(--gold);outline-offset:2px;transition:outline-color .3s;}
   .seat.me{
     grid-area:me;
     border-color:var(--cinnabar);
@@ -419,8 +496,8 @@
   /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
   @media (max-width:640px){
     .seats{gap:8px;}
-    .seats.opp1{grid-template-columns:minmax(120px,1fr);}
-    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);}
+    .seats.opp1{grid-template-columns:minmax(120px,1fr);grid-template-rows:auto minmax(36px,108px) auto;}
+    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);grid-template-rows:auto minmax(36px,108px) auto;}
     .seat{padding:9px 10px;}
     .seat.me{max-width:100%;padding:12px 14px;}
     /* 窄屏头像框收紧尺寸(仍严格保持3:4比例,不引入裁切)。 */
@@ -451,6 +528,9 @@
        不受 --badge 变量影响,继续独立维护尺寸。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
     #logToast{font-size:15px;padding:8px 16px;}
+    .table-card-who{font-size:11px;}
+    .table-card-name{font-size:17px;}
+    .table-card-face{font-size:14px;}
   }
   /* ===== 极窄手机断点(叠加在上面 640px 断点之上,数值更紧、且改了 opp2 的结构) ===== */
   @media (max-width:480px){
@@ -460,7 +540,8 @@
        正常手机(640px 断点覆盖的范围)仍然维持左右分列。 */
     .seats.opp2{
       grid-template-columns:minmax(0,1fr);
-      grid-template-areas:"tl" "tr" "me";
+      grid-template-rows:auto auto minmax(42px,72px) auto;
+      grid-template-areas:"tl" "tr" "table" "me";
     }
     .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
       跟着 --badge 自动缩小,不用逐处对齐;.card-title 字号同上由 fitFontSize 实测,
@@ -469,6 +550,9 @@
     .avatar-box{width:60px;height:80px;}
     .seat.me .avatar-box{width:72px;height:96px;}
     #logToast{font-size:14px;padding:7px 14px;}
+    .table-card-who{font-size:10px;}
+    .table-card-name{font-size:14px;}
+    .table-card-face{font-size:12px;}
   }
 
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
@@ -580,7 +664,7 @@
 
   <!-- ============ GAME ============ -->
   <div id="game" class="hidden">
-    <div class="seats" id="seats"></div>
+    <div class="seats" id="seats"><div id="tableCard" class="table-card"></div></div>
 
     <div class="panel table">
       <div class="phase-pill" id="phasePill">等待开始</div>
@@ -605,9 +689,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=100"></script>
-<script src="data.js?v=100"></script>
-<script src="game.js?v=100"></script>
-<script src="render.js?v=100"></script>
+<script src="config.js?v=108"></script>
+<script src="data.js?v=108"></script>
+<script src="game.js?v=108"></script>
+<script src="render.js?v=108"></script>
 </body>
 </html>
