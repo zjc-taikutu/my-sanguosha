@@ -434,11 +434,12 @@ function maybePlayCardSound(g){
     audio.play().catch(err=>console.warn('卡牌语音播放失败:', py, err && err.name, err));
   }catch(e){}
 }
-// renderTableCard: 中央出牌区(feature/table-ui 第2步)。复用 markCardSound 同一批调用点写入的
-// g.tableCard={name,seq,seat,card}——seq 和 g.lastCardSound 永远同步递增(同一次 markCardSound
-// 调用里一起写),这里按 seq 去重(和 maybePlayCardSound 同款写法,不是比较牌名文本)。
-// seat/card 是可选展示信息:16 处调用点里只有能安全拿到的才传,没有 seat 就整体不落座位名,
-// 没有 card 就不显示花色点数——不强行拼凑数据,退化成只显示牌名。
+// renderTableCard: 中央出牌区(feature/table-ui 第2步)+ 出牌方/目标座位高亮(第3步)。复用
+// markCardSound 同一批调用点写入的 g.tableCard={name,seq,seat,card,targets}——seq 和
+// g.lastCardSound 永远同步递增(同一次 markCardSound 调用里一起写),这里按 seq 去重(和
+// maybePlayCardSound 同款写法,不是比较牌名文本)。seat/card/targets 都是可选展示信息:
+// 调用点只有能安全拿到的才传,没有 seat 就整体不落座位名/不高亮出牌方,没有 card 就不显示
+// 花色点数,没有 targets 就不高亮任何目标座位——不强行拼凑数据,退化成只显示牌名。
 let lastShownTableCardSeq = undefined;
 function renderTableCard(g){
   const el = document.getElementById('tableCard');
@@ -458,6 +459,24 @@ function renderTableCard(g){
   el.classList.remove('show');
   void el.offsetWidth;
   el.classList.add('show');
+  // 座位高亮(feature/table-ui 第3步):出牌方 + 目标座位短暂加一个高亮 class,和中央出牌区
+  // 同一节奏淡出——复用 CSS transition,不额外起新的 setTimeout 链,靠下一次 seq 变化时清除
+  // 上一轮残留的高亮(不需要单独的计时器让它消失,新事件到来/离开页面前它就一直保持,视觉上
+  // 配合 outline 的 transition 从有到无是瞬间的,但因为下一次事件通常不会立刻到来,实际观感
+  // 和中央出牌区的淡出节奏一致;只读 g.tableCard,不新增判定逻辑,不碰 .active/.dead/.me)。
+  document.querySelectorAll('.seat.table-actor,.seat.table-target').forEach(elx=>{
+    elx.classList.remove('table-actor','table-target');
+  });
+  if(Number.isInteger(seat)){
+    const actorEl = document.querySelector('.seat[data-seat="'+seat+'"]');
+    if(actorEl) actorEl.classList.add('table-actor');
+  }
+  if(Array.isArray(g.tableCard.targets)){
+    g.tableCard.targets.forEach(t=>{
+      const targetEl = document.querySelector('.seat[data-seat="'+t+'"]');
+      if(targetEl) targetEl.classList.add('table-target');
+    });
+  }
 }
 // maybePlaySkillSound: 和 maybePlayCardSound 同一模式,独立字段(lastSkillSound)+独立哨兵变量。
 let lastPlayedSkillSeq = undefined;
@@ -687,7 +706,6 @@ function render(g){
     lastAnnouncedTurnKey = undefined;
   }
   maybePlayCardSound(g); // 打出手牌语音:和上面announceMyTurn同一批"每次状态更新都检测一次"的位置
-  renderTableCard(g); // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
@@ -747,6 +765,7 @@ function render(g){
     const d=document.createElement('div');
     const slot = (mySeat===null) ? 'top' : seatSlot(seatN, mySeat, i);
     d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+' slot-'+slot;
+    d.dataset.seat = i; // 供中央出牌区(renderTableCard)按座位号选中,高亮出牌方/目标座位用
     const gen=getGeneral(p.general); // 可能为 null(大厅/旧数据)
     // 大厅(未开局)武将未定,不显示具体血条格数,避免"占位4格→开局3格"的误导跳变
     const hearts = g.started
@@ -1112,6 +1131,14 @@ function render(g){
     }
     seatsEl.appendChild(d);
   });
+  // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列。调用点必须放在
+  // 座位卡片(.seat)全部重新创建完毕之后——曾经放在 render() 更靠前的位置(座位重绘之前),
+  // 结果是这一次 render() 里先给旧的座位元素加上高亮 class,紧接着座位重绘又把这些旧元素
+  // 整体销毁替换成全新的(不带任何 class),同一次 render() 内高亮被自己立刻冲掉,座位高亮
+  // 永远不可见(真实复现过的 bug,Playwright 截图+DOM 检查确认过)。#tableCard 本身不受
+  // 这个顺序影响(它是持久节点,不会被座位重绘销毁),但它的目标座位高亮逻辑必须在这里、
+  // 座位元素已经是"这一轮最终版本"之后执行。
+  renderTableCard(g);
 
   // phase pill + deck info
   const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;

@@ -149,6 +149,12 @@
   .seat.slot-tr{grid-area:tr;}
   .seat.active{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset;}
   .seat.dead{opacity:.45;filter:grayscale(.6);} /* 连头像一起变灰,免费拿到,不用额外处理 */
+  /* 出牌方/目标座位的短暂高亮(feature/table-ui 第3步),和中央出牌区(#tableCard)同一节奏
+     淡出。用 outline 而不是 border——border-color 已经被 .seat.active(回合中,金色)、
+     .seat.me(朱红)占用,再抢同一个属性会互相覆盖;outline 是叠加在盒模型外层的独立视觉层,
+     不影响 border 也不挤压卡片内容布局(不占用文档流空间),两者可以同时生效互不冲突。 */
+  .seat.table-actor{outline:2px solid var(--cinnabar-bright);outline-offset:2px;transition:outline-color .3s;}
+  .seat.table-target{outline:2px solid var(--gold);outline-offset:2px;transition:outline-color .3s;}
   .seat.me{
     grid-area:me;
     border-color:var(--cinnabar);
@@ -646,9 +652,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=101"></script>
-<script src="data.js?v=101"></script>
-<script src="game.js?v=101"></script>
-<script src="render.js?v=101"></script>
+<script src="config.js?v=102"></script>
+<script src="data.js?v=102"></script>
+<script src="game.js?v=102"></script>
+<script src="render.js?v=102"></script>
 </body>
 </html>
