@@ -218,6 +218,8 @@ function normalize(g){
   // 张郃【巧变】完整版:跳过弃牌阶段的标志位,和 g.skipDraw/g.skipPlay 同款防御
   if(typeof g.skipDiscard!=='boolean') g.skipDiscard=false;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
+  // 吕蒙【克己】辅助标志:本回合是否在决斗中打出过杀,和 g.shaUsed 同款防御
+  if(typeof g.shaPlayedInDuel!=='boolean') g.shaPlayedInDuel=false;
   if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
   // 孙权【制衡】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
   if(typeof g.zhihengUsed!=='boolean') g.zhihengUsed=false;
@@ -2399,7 +2401,10 @@ function duelResponse(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
-      g.shaUsed=true; // 官方FAQ:决斗中打出杀同样破坏吕蒙【克己】,不能只在"主动使用杀"时置位,"打出"(应战)也算
+      // 官方FAQ:决斗中打出杀同样破坏吕蒙【克己】。但这里不能置 g.shaUsed——g.shaUsed 还兼管
+      // "出牌阶段主动出杀次数限制",若置真会导致玩家在自己出牌阶段决斗打杀后再也出不了杀(真实bug)。
+      // 改用独立标志 g.shaPlayedInDuel 只服务于克己判断,不碰出杀次数。
+      g.shaPlayedInDuel=true;
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       markCardSound(g, '杀');
@@ -3144,10 +3149,12 @@ function discardCards(cardIdxList){
     return g;
   });
 }
-// 吕蒙【克己】(锁定技):本回合未主动出过杀(!shaUsed)则可跳过弃牌阶段。shaUsed 只被主动出杀置真(被动出杀不碰)。
+// 吕蒙【克己】(锁定技):本回合"未以任何方式打出过杀"则可跳过弃牌阶段。判据 = 未主动出杀(!shaUsed)
+// 且 未在决斗中打杀(!shaPlayedInDuel)。g.shaUsed 只由主动出杀置真、仅管出杀次数;决斗打杀走
+// g.shaPlayedInDuel,两者分离,避免决斗应战误消耗出牌阶段的出杀次数(见 duelResponse 注释)。
 function canSkipDiscard(g, seat){
   const p=g.players[seat];
-  return !!(p && hasCap(p,'keji') && !g.shaUsed);
+  return !!(p && hasCap(p,'keji') && !g.shaUsed && !g.shaPlayedInDuel);
 }
 function liRangDiscardCardsInPile(g, cards){
   return (cards||[]).filter(card=>(g.discard||[]).some(c=>c===card || (c && card && c.id!==undefined && c.id===card.id)));
@@ -3312,7 +3319,7 @@ function startTurn(g, seat){
   } else {
     g.roundSeatsActed.push(seat);
   }
-  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueGuanxingCheck(g, seat);
 }
