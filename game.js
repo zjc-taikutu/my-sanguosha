@@ -104,6 +104,7 @@ function normalize(g){
   if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
+  if(g.tableCard===undefined) g.tableCard=null;
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   // 许褚【裸衣】:本回合伤害加成标记。回合开始重置,旧存档缺失回退 false。
@@ -345,9 +346,13 @@ function pushLog(log, msg){
 // 每次调用都是可识别的独立事件。cardName 传的是"这次使用在游戏规则意义上算作哪张牌"
 // (即 actionId/概念上的杀|闪|桃|兵粮寸断 等),不是"手里那张被转化的物理牌"——比如
 // 龙胆闪当杀使用,应该播杀的语音,和玩家/其他人听到的"这是一次杀"这个游戏事件一致。
-function markCardSound(g, cardName){
+// markCardSound: seat/card 是可选的展示补充信息(座位号、牌面对象)——音效播放只看
+// name+seq,不受影响;中央出牌区(g.tableCard)额外用 seat/card 显示"谁打了什么牌",
+// 调用点没有现成的 seat/card 就不传,中央区退化为只显示牌名。
+function markCardSound(g, cardName, seat, card){
   const seq = (g.lastCardSound && g.lastCardSound.seq) ? g.lastCardSound.seq : 0;
   g.lastCardSound = { name: cardName, seq: seq+1 };
+  g.tableCard = { name: cardName, seq: seq+1, seat: (Number.isInteger(seat) ? seat : null), card: card || null };
 }
 // markSkillSound: 和 markCardSound 同一模式,独立字段(lastSkillSound),记录"这次真正发动了
 // 哪个技能"这个语音播放事件,供 render.js 的 maybePlaySkillSound 检测并播放对应语音
@@ -1049,7 +1054,7 @@ function playCard(cardIdx, actionId, targetSeat){
       g.log=pushLog(g.log, me.name+' 发动【集智】,摸一张牌');
       markSkillSound(g, '集智');
     }
-    markCardSound(g, actionId); // playCard 是普通出牌的统一出口,这里加一次就覆盖所有走这个入口的牌
+    markCardSound(g, actionId, mySeat, card); // playCard 是普通出牌的统一出口,这里加一次就覆盖所有走这个入口的牌
     return g;
   });
 }
@@ -1141,7 +1146,7 @@ function jieDaoShaRen(cardIdx, seatA, seatB){
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 对 '+A.name+' 使用【借刀杀人】,目标 '+B.name);
-    markCardSound(g, '借刀杀人'); // 借刀杀人不走 playCard 统一出口(两步选目标的独立函数),单独补一次
+    markCardSound(g, '借刀杀人', mySeat, card); // 借刀杀人不走 playCard 统一出口(两步选目标的独立函数),单独补一次
     startTrick(g, {trick:'借刀杀人', from:mySeat, to:seatA, seatB});
     return g;
   });
@@ -1160,7 +1165,7 @@ function respondJiedao(useSha){
       if(idx<0) return g; // 没有可用的杀:不生效(按钮本就不该渲染)
       const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
       g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(card.name==='杀'?'【杀】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
-      markCardSound(g, '杀');
+      markCardSound(g, '杀', mySeat, card);
       if(card.name!=='杀'){ if(hasCap(A,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(A,'wusheng')) markSkillSound(g,'武圣'); }
       g.pending=null;
       resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', singleCardShaColor(card), card);
@@ -1272,7 +1277,9 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
     // 不是"没有颜色"——c1/c2 是 splice 之前存的引用,不受后面 splice 影响。
     resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2), [c1, c2]);
-    markCardSound(g, '杀'); // 丈八蛇矛两张当杀不走 playCard 统一出口,单独补一次
+    // 丈八蛇矛是两张牌合成一个杀,没有单一牌面对象可传(c1/c2 是两张不同的牌,传其中任一张
+    // 都是拼凑/误导),中央出牌区只传座位(仍能显示"谁"),card 留空退化为不显示牌面。
+    markCardSound(g, '杀', mySeat); // 丈八蛇矛两张当杀不走 playCard 统一出口,单独补一次
     return g;
   });
 }
@@ -1311,7 +1318,7 @@ function playShaFangtian(cardIdx, targets){
     g.log=pushLog(g.log, me.name+' 发动【方天画戟】,'+usedAs+',指定 '+order.length+' 个目标：'+order.map(t=>g.players[t].name).join('、'));
     g.fangtianQueue = { from:mySeat, targets:order, idx:0, usedAs, shaColor:singleCardShaColor(card), sourceCard:card };
     resolveShaUse(g, me, order[0], usedAs, singleCardShaColor(card), card);
-    markCardSound(g, '杀'); // 方天画戟多目标出杀不走 playCard 统一出口,单独补一次
+    markCardSound(g, '杀', mySeat, card); // 方天画戟多目标出杀不走 playCard 统一出口,单独补一次
     return g;
   });
 }
@@ -1336,7 +1343,7 @@ function duanLiang(cardIdx, targetSeat){
     g.duanliangUsed=true;
     me.hand.splice(cardIdx,1);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
-    markCardSound(g, '兵粮寸断'); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
+    markCardSound(g, '兵粮寸断', mySeat, card); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
     startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:card});
     return g;
   });
@@ -1362,7 +1369,7 @@ function qiXi(cardIdx, targetSeat){
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【过河拆桥】使用,发动【奇袭】,目标 '+target.name);
     markSkillSound(g, '奇袭');
-    markCardSound(g, '过河拆桥');
+    markCardSound(g, '过河拆桥', mySeat, card);
     startTrick(g, {trick:'过河拆桥', from:mySeat, to:targetSeat});
     return g;
   });
@@ -1382,7 +1389,7 @@ function guoSe(cardIdx, targetSeat){
     const trickCard={...card, name:'乐不思蜀', originalName:card.name};
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【乐不思蜀】使用,发动【国色】,目标 '+target.name);
     markSkillSound(g, '国色');
-    markCardSound(g, '乐不思蜀');
+    markCardSound(g, '乐不思蜀', mySeat, card);
     startTrick(g, {trick:'乐不思蜀', from:mySeat, to:targetSeat, card:trickCard});
     return g;
   });
@@ -1495,7 +1502,9 @@ function advanceTieSuoQueue(g){
     const target=g.players[to];
     if(!from || !from.alive || !target || !target.alive) continue;
     g.log=pushLog(g.log, from.name+' 对 '+target.name+' 使用【铁索连环】');
-    markCardSound(g, '铁索连环');
+    // 这里是队列推进函数,原始那张梅花实体牌在更早的 lianHuan/recastLianHuan 里已经处理完,
+    // 这一步拿不到牌面对象(不同调用点各自持有,不应跨函数传值制造耦合),只传座位。
+    markCardSound(g, '铁索连环', q.from);
     startTrick(g, {trick:'铁索连环', from:q.from, to});
     return;
   }
@@ -1937,7 +1946,7 @@ function respondDying(useTao, jijiuChoice){
       const asTao = jijiuChoice ? '当【桃】' : '';
       g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' 打出【'+card.name+'】'+asTao+',回复1点体力（体力'+dyingP.hp+'）');
       if(jijiuChoice) markSkillSound(g, '急救');
-      markCardSound(g, '桃');
+      markCardSound(g, '桃', mySeat, card);
       if(dyingP.hp>0){ finishDying(g, false); }
       return g;
     }
@@ -2407,7 +2416,7 @@ function duelResponse(useSha){
       g.shaPlayedInDuel=true;
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
-      markCardSound(g, '杀');
+      markCardSound(g, '杀', mySeat, card);
       if(card.name!=='杀'){ if(hasCap(me,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(me,'wusheng')) markSkillSound(g,'武圣'); }
       if(played<needed){ g.pending.shaCount=played; return g; } // 吕布【无双】:这一轮还没出满,留在同一个人身上
       g.pending.active = (mySeat===g.pending.from)?g.pending.to:g.pending.from;
@@ -2764,7 +2773,8 @@ function respondWuxie(useWuxie){
       // depth===0(反制原锦囊)措辞不同于 depth>=1(反制上一次无懈可击)
       const target = g.pending.depth>0 ? g.players[g.pending.exclude].name+' 的【无懈可击】' : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
       g.log=pushLog(g.log, me.name+' 打出【无懈可击】,抵消了'+target);
-      markCardSound(g, '无懈可击');
+      // 这张牌是 splice 结果直接扔进弃牌堆、没有留局部变量(不为了传参新增变量),card 留空。
+      markCardSound(g, '无懈可击', mySeat);
       g.pending.depth++;
       g.pending.exclude=mySeat;
       openWuxieRound(g);
@@ -2833,7 +2843,7 @@ function aoeRespond(useCard){
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
       const label = card.name===need ? '打出【'+need+'】' : '打出【'+card.name+'】当【'+need+'】';
       g.log=pushLog(g.log, me.name+' '+label+',抵消【'+g.aoe.trick+'】');
-      markCardSound(g, need);
+      markCardSound(g, need, mySeat, card);
       if(card.name!==need){
         if(hasCap(me,'longdan')) markSkillSound(g,'龙胆');
         else if(need==='杀' && hasCap(me,'wusheng')) markSkillSound(g,'武圣');
@@ -2865,7 +2875,7 @@ function respondShan(useShan){
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
       const played=(g.pending.shanCount||0)+1;
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
-      markCardSound(g, '闪');
+      markCardSound(g, '闪', mySeat, card);
       if(card.name!=='闪' && hasCap(me,'longdan')) markSkillSound(g,'龙胆');
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
       // 青龙偃月刀:杀被闪抵消,装备者(攻击者)可选择再对同一目标使用一张杀——不计入 g.shaUsed
@@ -2927,7 +2937,7 @@ function respondQinglong(activate, cardIdx){
     g.shaUsed=true; // 青龙偃月刀连续杀本质是又使用了一张杀,同样计入出杀次数限制/破坏克己
     const usedAs = card.name==='杀' ? '出【杀】' : '出【'+card.name+'】当【杀】';
     g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
-    markCardSound(g, '杀');
+    markCardSound(g, '杀', mySeat, card);
     g.pending=null;
     resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card);
     return g;

@@ -101,6 +101,34 @@
     grid-template-rows:auto minmax(56px,120px) auto;
     grid-template-areas:"tl tr" "table table" "me me";
   }
+  /* ===== 中央出牌区(feature/table-ui 第2步):落在第1步留出的 table 网格空区里,不是
+     fixed 悬浮层——#tableCard 是 index.html 里 #seats 的一个静态子元素(grid-area:table),
+     render.js 只清空 .seat 座位卡本身,不再整体 innerHTML='' 清空 #seats,所以这个节点
+     全程只创建一次,不会跟着座位重绘被销毁重建(否则淡入淡出的 CSS 动画/展示状态会在
+     下一次任意游戏状态变化时被打断重置——这个坑和 #logToast 的"下一条要等上一条动画播完"
+     是同一类问题,但这里的根源是"容器节点本身被销毁重建",不是"新旧内容抢占同一个节点")。
+     视觉上参考 #logToast 的"淡入-停留-淡出"@keyframes 写法,但不用 position:fixed/transform
+     居中那一套——这里是正常的 grid 子项,内容靠 flex 居中,随 .seats 的响应式断点走。 */
+  .table-card{
+    grid-area:table;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:2px;text-align:center;
+    opacity:0;pointer-events:none;
+    line-height:1.1; /* 覆盖 body 全局的 line-height:1.5——三行内容(谁/牌名/牌面)叠加1.5倍行高
+      在最紧的断点(3人局480px,table行只有minmax(28px,48px))会把整块内容撑出保留行、
+      溢出到下方"我"的座位卡里几像素(实测截图+getBoundingClientRect量出的真实重叠,不是
+      臆测),收紧行高让三行文字的总高度回到能被小屏这条窄行装下的范围。 */
+  }
+  .table-card.show{ animation:tableCardFade 2.6s ease forwards; }
+  @keyframes tableCardFade{
+    0%{opacity:0;transform:scale(.9);}
+    10%{opacity:1;transform:scale(1);}
+    80%{opacity:1;}
+    100%{opacity:0;}
+  }
+  .table-card-who{font-size:13px;color:var(--paper-dim);}
+  .table-card-name{font-size:22px;font-weight:700;color:var(--gold);letter-spacing:.06em;}
+  .table-card-face{font-size:17px;margin-top:2px;}
   /* ===== 座位卡片:头像居左+信息居右(第7步,取代第6步的"头像铺底"方案)=====
      第6步试过"头像铺满卡片上半部分",结果框的宽高比(如桌面638x300≈2.1:1)远比素材本身
      的 3:4 竖版扁得多——object-fit:cover 在这种情况下必然按宽度撑满、纵向大幅裁切,
@@ -457,6 +485,9 @@
        不受 --badge 变量影响,继续独立维护尺寸。 */
     .info-badge{width:20px;height:20px;font-size:12px;}
     #logToast{font-size:15px;padding:8px 16px;}
+    .table-card-who{font-size:11px;}
+    .table-card-name{font-size:17px;}
+    .table-card-face{font-size:14px;}
   }
   /* ===== 极窄手机断点(叠加在上面 640px 断点之上,数值更紧、且改了 opp2 的结构) ===== */
   @media (max-width:480px){
@@ -476,6 +507,9 @@
     .avatar-box{width:60px;height:80px;}
     .seat.me .avatar-box{width:72px;height:96px;}
     #logToast{font-size:14px;padding:7px 14px;}
+    .table-card-who{font-size:10px;}
+    .table-card-name{font-size:14px;}
+    .table-card-face{font-size:12px;}
   }
 
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
@@ -587,7 +621,7 @@
 
   <!-- ============ GAME ============ -->
   <div id="game" class="hidden">
-    <div class="seats" id="seats"></div>
+    <div class="seats" id="seats"><div id="tableCard" class="table-card"></div></div>
 
     <div class="panel table">
       <div class="phase-pill" id="phasePill">等待开始</div>
@@ -612,9 +646,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=100"></script>
-<script src="data.js?v=100"></script>
-<script src="game.js?v=100"></script>
-<script src="render.js?v=100"></script>
+<script src="config.js?v=101"></script>
+<script src="data.js?v=101"></script>
+<script src="game.js?v=101"></script>
+<script src="render.js?v=101"></script>
 </body>
 </html>

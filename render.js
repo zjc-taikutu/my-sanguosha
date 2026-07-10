@@ -434,6 +434,31 @@ function maybePlayCardSound(g){
     audio.play().catch(err=>console.warn('卡牌语音播放失败:', py, err && err.name, err));
   }catch(e){}
 }
+// renderTableCard: 中央出牌区(feature/table-ui 第2步)。复用 markCardSound 同一批调用点写入的
+// g.tableCard={name,seq,seat,card}——seq 和 g.lastCardSound 永远同步递增(同一次 markCardSound
+// 调用里一起写),这里按 seq 去重(和 maybePlayCardSound 同款写法,不是比较牌名文本)。
+// seat/card 是可选展示信息:16 处调用点里只有能安全拿到的才传,没有 seat 就整体不落座位名,
+// 没有 card 就不显示花色点数——不强行拼凑数据,退化成只显示牌名。
+let lastShownTableCardSeq = undefined;
+function renderTableCard(g){
+  const el = document.getElementById('tableCard');
+  if(!el) return;
+  if(!g.tableCard){ return; } // 房间刚创建/旧存档没有这个字段:不渲染,保持空
+  if(lastShownTableCardSeq===undefined){ lastShownTableCardSeq=g.tableCard.seq; return; } // 首次进入房间/刷新页面,不补放历史
+  if(g.tableCard.seq===lastShownTableCardSeq) return;
+  lastShownTableCardSeq = g.tableCard.seq;
+  const { name, seat, card } = g.tableCard;
+  const who = (Number.isInteger(seat) && g.players[seat]) ? g.players[seat].name : '';
+  const faceHtml = card ? cardFace(card) : ''; // cardFace(data.js)是项目里现成的牌面(花色+点数)渲染函数,不新造一套
+  el.innerHTML = (who ? '<div class="table-card-who">'+escapeHtml(who)+'</div>' : '')
+    + '<div class="table-card-name">'+escapeHtml(name)+'</div>'
+    + (faceHtml ? '<div class="table-card-face">'+faceHtml+'</div>' : '');
+  // 和 #logToast 同款"淡入-停留-淡出"手法:先移除 .show 强制回流,再加回去,保证 CSS 动画
+  // 每次都从头重新播放(而不是因为 class 已经是 show 而被浏览器判定"没有变化"、动画不重触发)。
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+}
 // maybePlaySkillSound: 和 maybePlayCardSound 同一模式,独立字段(lastSkillSound)+独立哨兵变量。
 let lastPlayedSkillSeq = undefined;
 function maybePlaySkillSound(g){
@@ -662,6 +687,7 @@ function render(g){
     lastAnnouncedTurnKey = undefined;
   }
   maybePlayCardSound(g); // 打出手牌语音:和上面announceMyTurn同一批"每次状态更新都检测一次"的位置
+  renderTableCard(g); // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
@@ -704,7 +730,12 @@ function render(g){
   // 同款兜底:只要不在「自己的出牌阶段」,就退出借刀杀人选 A/B 模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetJiedao();
   const seatsEl=document.getElementById('seats');
-  seatsEl.innerHTML='';
+  // 只清空座位卡本身(.seat),不用整体 innerHTML=''——#tableCard(中央出牌区,feature/table-ui
+  // 第2步)是 #seats 里一个静态常驻子元素,落在第1步留出的 table 网格区域(grid-area:table)。
+  // 如果每次重绘都把 #seats 全部清空重建,#tableCard 会跟着被销毁再新建,淡入淡出的 CSS
+  // 过渡/展示状态会在下一次任意游戏状态变化(不一定是出牌事件本身)时被打断重置——
+  // 只清 .seat 能让 #tableCard 在整个页面生命周期内保持同一个 DOM 节点,不受座位重绘影响。
+  [...seatsEl.querySelectorAll('.seat')].forEach(el=>el.remove());
   const seatN=(g.players||[]).length;
   // 容器 class 决定用哪套 grid-template(1个对手 vs 2个对手,形状不同,不能共用一套列模板);
   // 这个数由"总座位数"决定,开局后不随存活人数变化,不会因为死亡触发布局重排。
