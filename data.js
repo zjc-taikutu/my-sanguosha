@@ -173,6 +173,9 @@ const GENERALS = {
   xuchu:         { id:'xuchu',         name:'许褚',   gender:'male', maxHp:4, skill:'裸衣',
     desc:'摸牌阶段,你可以少摸1张牌。若如此做,直到本回合结束,你使用【杀】或【决斗】造成的伤害+1。',
     caps:{ luoyi:true } },
+  yanliangwenchou:{ id:'yanliangwenchou', name:'颜良文丑', gender:'male', maxHp:4, skill:'双雄',
+    desc:'摸牌阶段,你可以放弃摸牌并进行一次判定,获得判定牌。直到本回合结束,你可以将一张与判定牌颜色不同的手牌当【决斗】使用。',
+    caps:{ shuangxiong:true } },
   xunyu:         { id:'xunyu',         name:'荀彧',   gender:'male', maxHp:3, skill:'驱虎/节命',
     desc:'驱虎:出牌阶段限一次,你可以与一名体力值大于你的角色拼点。若你赢,该角色对其攻击范围内由你选择的一名角色造成1点伤害;若你没赢,该角色对你造成1点伤害。节命:每受到1点伤害后,你可以令一名角色摸牌至手牌数等于体力上限,最多摸至5张。',
     caps:{ quhu:true },
@@ -350,6 +353,8 @@ function canUseAs(player, card, role){
   }
   if(role==='闪' && hasCap(player,'qingguo') && !isRedForPlayer(player, card)) return true;
   if(role==='杀' && hasCap(player,'wusheng') && isRedForPlayer(player, card)) return true;
+  if(role==='决斗' && hasCap(player,'shuangxiong') && player.shuangxiongColor
+     && cardColorForPlayer(player, card)!==player.shuangxiongColor) return true;
   return false;
 }
 // 在手牌里找一张能当 role 用的牌:优先本名牌,没有才用可转化的牌。返回索引,无则 -1。
