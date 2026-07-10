@@ -38,7 +38,7 @@ const CARD_PINYIN = {
   '过河拆桥':'guohechaiqiao', '无懈可击':'wuxiekeji', '南蛮入侵':'nanmanruqin',
   '万箭齐发':'wanjianqifa', '闪电':'shandian', '乐不思蜀':'lebusishu',
   '兵粮寸断':'bingliangcunduan', '借刀杀人':'jiedaosharen', '五谷丰登':'wugufengdeng',
-  '桃园结义':'taoyuanjieyi',
+  '桃园结义':'taoyuanjieyi', '铁索连环':'tiesuolianhuan',
   '诸葛连弩':'zhugeliannu', '青釭剑':'qinggangjian', '青龙偃月刀':'qinglongyanyuedao',
   '丈八蛇矛':'zhangbashemao', '贯石斧':'guanshifu', '方天画戟':'fangtianhuaji',
   '麒麟弓':'qilingong', '寒冰剑':'hanbingjian', '古锭刀':'gudingdao',
@@ -55,6 +55,7 @@ const SKILL_PINYIN = {
   '刚烈':'ganglie', '裸衣':'luoyi', '驱虎':'quhu', '节命':'jieming',
   '国色':'guose', '流离':'liuli', '天香':'tianxiang', '红颜':'hongyan',
   '连环':'lianhuan', '涅槃':'niepan', '离间':'lijian', '闭月':'biyue',
+  '双雄':'shuangxiong',
   '礼让':'lirang', '争义':'zhengyi'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
@@ -712,12 +713,18 @@ function resolveActionId(g, me, card){
   if(canUseAs(me, card, '杀')) return '杀';
   return card.name;
 }
+function canShuangxiongDuelCard(player, card){
+  return !!(player && card && hasCap(player,'shuangxiong') && player.shuangxiongColor
+    && cardColorForPlayer(player, card)!==player.shuangxiongColor);
+}
 // playConfirmMsg: 按牌类型生成确认文案。装备用"装备"(spec.noDiscard 是装备牌的统一标志,不硬编码牌名),
 // 其余用"使用";带目标的加上目标姓名;杀由非'杀'名的牌顶替时(赵云的闪)标注"当【杀】"。
 function playConfirmMsg(g, actionId, card, targetSeat){
   const spec = CARD_PLAYS[actionId];
   if(spec && spec.noDiscard) return '装备【'+card.name+'】？';
-  const label = (actionId==='杀' && card.name!=='杀') ? '【'+card.name+'】当【杀】' : '【'+card.name+'】';
+  const label = (actionId==='杀' && card.name!=='杀') ? '【'+card.name+'】当【杀】'
+    : (actionId==='决斗' && card.name!=='决斗') ? '【'+card.name+'】当【决斗】'
+    : '【'+card.name+'】';
   if(spec && spec.target) return '对 '+g.players[targetSeat].name+' 使用'+label+'？';
   return '使用'+label+'？';
 }
@@ -973,6 +980,7 @@ function render(g){
     const meP=g.players[mySeat];
     const selCard=(selectedCardIdx!==null)?(meP.hand||[])[selectedCardIdx]:null;
     const isShaSel=!!(selCard && resolveActionId(g,meP,selCard)==='杀');    // 选的牌最终按"杀"结算(含赵云的闪、没有独立效果的红/黑牌)
+    const isShuangxiongDuelSel=canShuangxiongDuelCard(meP, selCard);
     const isJiedaoSel=!!(selCard && selCard.name==='借刀杀人');             // 借刀杀人走专属两步选择,不进通用单目标块
     const needHandOrEquip=!!(selCard && (selCard.name==='顺手牵羊'||selCard.name==='过河拆桥'));
     // 顺手/拆桥对目标"有没有效果"的口径要和服务端 resolveTrick 的 optCount===0 一致:
@@ -982,7 +990,7 @@ function render(g){
     // 顺手牵羊/兵粮寸断(直接使用场景,不是徐晃【断粮】那条路径)距离限制均为1,和服务端
     // canTarget 的口径一致;过河拆桥/乐不思蜀/闪电均无此限制,不在这个判断范围内。
     const distLimited = !!(selCard && (selCard.name==='顺手牵羊' || selCard.name==='兵粮寸断'));
-    const duelSel = !!(selCard && selCard.name==='决斗'); // 决斗:无距离限制,但同样受空城限制
+    const duelSel = !!(selCard && (selCard.name==='决斗' || isShuangxiongDuelSel)); // 决斗:无距离限制,但同样受空城限制
     // 诸葛亮【空城】:若目标没有手牌,不能成为【杀】或【决斗】的目标,和服务端
     // CARD_PLAYS['杀'/'决斗'].canTarget 的判断口径一致。
     const kongchengBlocked = (isShaSel || duelSel) && hasCap(p,'kongcheng') && (p.hand||[]).length===0;
@@ -999,7 +1007,7 @@ function render(g){
     const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat || !!(selSpec && selSpec.allowSelf));
     // 官方规则:同一判定区不能有两张同名的延时类锦囊牌,和服务端 canTarget 的 hasDup 判断口径一致。
     const hasDupDelay = !!(selDT && (p.delays||[]).some(c=>c && c.name===selCard.name));
-    const targetable = selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange && !hasDupDelay;
+    const targetable = !!(selSpec && selSpec.target) && selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && inRange && !hasDupDelay;
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
         // idx 在这里(渲染时/挂载 onclick 那一刻)冻结,而不是等点击时才读 selectedCardIdx——
@@ -1206,6 +1214,21 @@ function render(g){
       rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
       d.appendChild(rb);
     }
+    // 颜良文丑【双雄】:选中一张与判定牌异色的手牌后,可明确选择"当【决斗】"使用。
+    // 用座位上的独立按钮,避免覆盖这张牌原本自己的出牌效果。
+    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && isShuangxiongDuelSel && i!==mySeat && p.alive){
+      const blocked=hasCap(p,'kongcheng') && (p.hand||[]).length===0;
+      if(!blocked){
+        const idx=selectedCardIdx;
+        const targetSeat=i;
+        const db=document.createElement('button');
+        db.className='ghost';
+        db.textContent='双雄:决斗';
+        db.style.margin='6px 14px 0';
+        db.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌当【决斗】对 '+g.players[targetSeat].name+' 使用,发动【双雄】？', ()=>playCard(idx, '决斗', targetSeat)); };
+        d.appendChild(db);
+      }
+    }
     // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
     if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
       if(jiedaoSeatA===null){
@@ -1260,7 +1283,7 @@ function render(g){
   renderTableCard(g);
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
@@ -1479,6 +1502,23 @@ function renderControls(g){
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 出【杀】,'+escapeHtml(from)+' 是否发动【铁骑】进行判定…'+fangtianSuffix(g));
+    return;
+  }
+  if(g.phase==='shuangxiongAsk' && g.pending && g.pending.type==='shuangxiongAsk' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【双雄】判定';
+    b1.onclick=()=>respondShuangxiong(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动';
+    b2.onclick=()=>respondShuangxiong(false);
+    c.appendChild(b2);
+    setBanner('摸牌阶段,是否发动【双雄】?发动后不摸牌,改为判定并获得判定牌。');
+    return;
+  }
+  if(g.phase==='shuangxiongAsk' && g.pending && g.pending.type==='shuangxiongAsk'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'颜良文丑', '双雄');
     return;
   }
   if(g.phase==='liegong' && g.pending && g.pending.type==='liegong' && g.pending.from===mySeat){
@@ -2457,14 +2497,22 @@ function renderControls(g){
           };
           c.appendChild(ub);
         }
+        if(hasCap(me,'lianhuan') && selCard.suit==='♣'){
+          const rb=document.createElement('button'); rb.className='ghost';
+          const idx=selectedCardIdx;
+          rb.textContent='重铸【连环】';
+          rb.onclick=()=>{ confirmAndPlay('重铸这张梅花牌发动【连环】,弃置后摸一张牌？', ()=>recastLianHuan(idx)); };
+          c.appendChild(rb);
+        }
         const cb=document.createElement('button'); cb.className='ghost';
         cb.textContent='清空目标'; cb.onclick=()=>{ resetTiesuo(); render(g); }; c.appendChild(cb);
         return;
       }
       const rangeNote = (actionId==='杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
       const rendeNote = hasCap(me,'rende') ? '；也可点目标座位上的“仁德”按钮交给别人' : '';
+      const shuangxiongNote = canShuangxiongDuelCard(me, selCard) ? '；也可点目标座位上的“双雄:决斗”按钮' : '';
       const recastNote = hasCap(me,'lianhuan') && selCard.suit==='♣' ? '；也可重铸发动【连环】' : '';
-      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+recastNote+'(或点牌取消)。');
+      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+shuangxiongNote+recastNote+'(或点牌取消)。');
       if(spec && !spec.target && spec.canPlay(g,me,selCard)){
         const ub=document.createElement('button'); ub.className='primary';
         ub.textContent='使用'+label;
@@ -2751,12 +2799,13 @@ function renderHand(g){
       const actionId = resolveActionId(g, me, card);
       const spec = CARD_PLAYS[actionId];
       const canRende = hasCap(me,'rende');
+      const canShuangxiong = canShuangxiongDuelCard(me, card);
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
-        if(spec.target || canRende){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/刘备仁德:点=选中
+        if(spec.target || canRende || canShuangxiong){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/刘备仁德/双雄:点=选中
         else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
-      } else if(canRende){
-        // 刘备【仁德】可交出任意手牌,包括当前出牌阶段不能直接使用的【闪】等。
+      } else if(canRende || canShuangxiong){
+        // 刘备【仁德】可交出任意手牌;颜良文丑【双雄】可把异色手牌当【决斗】使用。
         usable=true;
         onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g); };
       }
