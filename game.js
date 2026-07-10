@@ -226,6 +226,8 @@ function normalize(g){
   // 张郃【巧变】完整版:跳过弃牌阶段的标志位,和 g.skipDraw/g.skipPlay 同款防御
   if(typeof g.skipDiscard!=='boolean') g.skipDiscard=false;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
+  // 吕蒙【克己】辅助标志:本回合是否在决斗中打出过杀,和 g.shaUsed 同款防御
+  if(typeof g.shaPlayedInDuel!=='boolean') g.shaPlayedInDuel=false;
   if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
   // 孙权【制衡】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
   if(typeof g.zhihengUsed!=='boolean') g.zhihengUsed=false;
@@ -248,9 +250,21 @@ function normalize(g){
       g.liRangRecord=null;
     }
   }
-  if(g.pending && (g.pending.type==='quhuRespond' || g.pending.type==='quhuDamageChoice')){
+  // quhuRespond(拼点阶段)和 quhuDamageChoice(拼点赢后选伤害目标)结构不同,不能共用同一份校验——
+  // 前者带 selfCard(拼点用的那张牌),后者带 targets(可选的伤害目标座位数组),没有 selfCard。
+  // 曾经两者共用一段校验、都要求 selfCard 非空,quhuDamageChoice 从来不带这个字段,
+  // 导致刚设置好 pending 就被下一次 normalize 判定"无效"直接清空、phase 打回 'play'——
+  // 真实 bug:拼点赢了之后完全没机会选目标,见 CLAUDE.md 记录。
+  if(g.pending && g.pending.type==='quhuRespond'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
+      g.pending=null; g.phase='play';
+    }
+  }
+  if(g.pending && g.pending.type==='quhuDamageChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !Array.isArray(d.targets) || d.targets.length===0
+       || !g.players[d.seat] || !g.players[d.targetSeat] || !d.targets.every(t=>Number.isInteger(t) && g.players[t] && g.players[t].alive)){
       g.pending=null; g.phase='play';
     }
   }
@@ -439,12 +453,13 @@ function tryBagua(g, seat, resumeInfo){
   const card=judge(g);
   if(!card) return false; // 无牌可判,视为未发动
   if(maybeGuicai(g, seat, card, Object.assign({kind:'bagua'}, resumeInfo))==='pending') return 'pending';
-  return finishBaguaColor(g, card);
+  return finishBaguaColor(g, seat, card);
 }
 // finishBaguaColor: 八卦阵判定的红黑结算(独立出来,供 tryBagua 直接判 和 finishGuicai 改判后判 共用)。
-function finishBaguaColor(g, card){
-  if(isRedForPlayer(p, card)){ g.log=pushLog(g.log, '判定为红,视为打出【闪】'); return true; }
-  g.log=pushLog(g.log, '判定为黑,【八卦阵】未生效'); return false;
+function finishBaguaColor(g, seat, card){
+  const p = g.players[seat];
+  if(isRedForPlayer(p, card)){ g.log=pushLog(g.log, p.name+' 判定为红,视为打出【闪】'); return true; }
+  g.log=pushLog(g.log, p.name+' 判定为黑,【八卦阵】未生效'); return false;
 }
 // ===== 鬼才:判定牌亮出后,判定者自己(优先)或攻击范围内的其他鬼才拥有者可打出一张手牌替换 =====
 // 四个判定场景(八卦阵 tryBagua、闪电/乐不思蜀/兵粮寸断的 processOneDelayCard)都调用 maybeGuicai,
@@ -512,6 +527,13 @@ function respondGuicai(useReplace, cardIdx){
 // 'delayJudge':用最终判定牌重新调用该延时锦囊的 effect,处理去向后继续该玩家判定区剩余的牌。
 function finishGuicai(g, finalCard){
   const resume=g.pending.resume;
+  // judgedSeat: 由 maybeGuicai 统一写在 g.pending.seat 上,不管 resume 具体带了哪些字段都始终
+  // 正确——kind==='bagua' 的 resume(来自 tryBagua 的 resumeInfo,sha 场景是 {type,from,to,
+  // sourceCard}、aoe 场景是 {type,target})都没有 .seat 这个字段,直接读 resume.seat 会是
+  // undefined(真实踩过的坑:finishBaguaColor 内部 g.players[undefined] 抛异常,和本次要修的
+  // ReferenceError 同一类问题,只是换了个位置)。g.pending.seat 才是所有 kind 都保证存在、
+  // 值恒等于判定者座位的字段,必须在 g.pending=null 之前先取出来。
+  const judgedSeat=g.pending.seat;
   g.pending=null;
   if(resume.kind==='delayJudge'){
     const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], finalCard, resume.card);
@@ -553,7 +575,7 @@ function finishGuicai(g, finalCard){
     return;
   }
   // kind==='bagua'
-  const red = finishBaguaColor(g, finalCard);
+  const red = finishBaguaColor(g, judgedSeat, finalCard);
   if(resume.type==='sha'){
     // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要
     // 继续;青龙偃月刀/贯石斧同样要在这里给一次触发机会,原因见 continueShaAfterTieqi 对应
@@ -2112,7 +2134,7 @@ function quHu(cardIdx, targetSeat){
     g.quHuUsed=true;
     g.pending={type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card};
     g.phase='quhuRespond';
-    g.log=pushLog(g.log, me.name+' 发动【驱虎】,用 '+pointText(card)+' 与 '+target.name+' 拼点');
+    g.log=pushLog(g.log, me.name+' 发动【驱虎】,与 '+target.name+' 拼点');
     markSkillSound(g, '驱虎');
     return g;
   });
@@ -2127,20 +2149,21 @@ function respondQuhu(cardIdx){
     if(!card) return g;
     target.hand.splice(cardIdx,1);
     g.discard.push(card);
-    g.log=pushLog(g.log, target.name+' 打出 '+pointText(card)+' 拼点');
-    if((selfCard.rank||0) > (card.rank||0)){
+    const quhuWin = (selfCard.rank||0) > (card.rank||0);
+    g.log=pushLog(g.log, xun.name+' 出 '+pointText(selfCard)+',对方 '+target.name+' 出 '+pointText(card)+',拼点'+(quhuWin?'荀彧赢':'荀彧没赢'));
+    if(quhuWin){
       const targets=quhuDamageTargets(g, targetSeat);
       if(targets.length===0){
-        g.log=pushLog(g.log, xun.name+' 【驱虎】拼点赢,但 '+target.name+' 攻击范围内没有可伤害目标');
+        g.log=pushLog(g.log, '但 '+target.name+' 攻击范围内没有可伤害目标');
         finishQuhu(g);
         return g;
       }
       g.pending={type:'quhuDamageChoice', seat, targetSeat, targets};
       g.phase='quhuDamageChoice';
-      g.log=pushLog(g.log, xun.name+' 【驱虎】拼点赢,选择 '+target.name+' 攻击范围内一名角色受到1点伤害');
+      g.log=pushLog(g.log, '选择 '+target.name+' 攻击范围内一名角色受到1点伤害');
       return g;
     }
-    g.log=pushLog(g.log, xun.name+' 【驱虎】拼点没赢,'+target.name+' 对其造成1点伤害');
+    g.log=pushLog(g.log, target.name+' 对其造成1点伤害');
     g.pending=null;
     const interrupted=dealDamage(g, seat, 1, targetSeat, '【驱虎】', 'quhu');
     if(interrupted){
@@ -2428,13 +2451,11 @@ function duelResponse(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
-      // 决斗中打出杀会破坏出牌者自己的【克己】;只有出牌者正好是当前回合玩家时,
-      // 才能写入本回合的 g.shaUsed。否则会误污染真正回合玩家的出杀次数/克己判断。
-      if(mySeat===g.turn) g.shaUsed=true;
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       markCardSound(g, '杀');
       if(card.name!=='杀'){ if(hasCap(me,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(me,'wusheng')) markSkillSound(g,'武圣'); }
+      if(mySeat===g.turn) g.shaPlayedInDuel=true;
       if(played<needed){ g.pending.shaCount=played; return g; } // 吕布【无双】:这一轮还没出满,留在同一个人身上
       g.pending.active = (mySeat===g.pending.from)?g.pending.to:g.pending.from;
       g.pending.shaCount = 0; // 换人,计数归零重新开始
@@ -3175,10 +3196,12 @@ function discardCards(cardIdxList){
     return g;
   });
 }
-// 吕蒙【克己】(锁定技):本回合未主动出过杀(!shaUsed)则可跳过弃牌阶段。shaUsed 只被主动出杀置真(被动出杀不碰)。
+// 吕蒙【克己】(锁定技):本回合"未以任何方式打出过杀"则可跳过弃牌阶段。判据 = 未主动出杀(!shaUsed)
+// 且 未在决斗中打杀(!shaPlayedInDuel)。g.shaUsed 只由主动出杀置真、仅管出杀次数;决斗打杀走
+// g.shaPlayedInDuel,两者分离,避免决斗应战误消耗出牌阶段的出杀次数(见 duelResponse 注释)。
 function canSkipDiscard(g, seat){
   const p=g.players[seat];
-  return !!(p && hasCap(p,'keji') && !g.shaUsed);
+  return !!(p && hasCap(p,'keji') && !g.shaUsed && !g.shaPlayedInDuel);
 }
 function liRangDiscardCardsInPile(g, cards){
   return (cards||[]).filter(card=>(g.discard||[]).some(c=>c===card || (c && card && c.id!==undefined && c.id===card.id)));
@@ -3344,7 +3367,7 @@ function startTurn(g, seat){
     g.roundSeatsActed.push(seat);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueGuanxingCheck(g, seat);
 }
