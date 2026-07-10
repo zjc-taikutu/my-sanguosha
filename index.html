@@ -141,6 +141,18 @@
     padding:4px 10px;font-size:13px;color:var(--paper);white-space:nowrap;
     pointer-events:none;z-index:30;
     transition:left .6s ease,top .6s ease,opacity .6s ease .3s;}
+  /* 目标连线的 SVG overlay(feature/table-ui 第5步):position:absolute 覆盖 #seats(同飞牌
+     动画依赖 #seats 的 position:relative),pointer-events:none 不拦截下面座位卡片的点击。
+     线本身用 CSS animation 做"画出后淡出"的效果,和 #tableCard 的 2.6s 节奏对齐。 */
+  .target-lines{position:absolute;top:0;left:0;pointer-events:none;z-index:25;}
+  .target-line{stroke:var(--gold);stroke-width:2;opacity:0;
+    animation:targetLineFade 2.6s ease forwards;}
+  @keyframes targetLineFade{
+    0%{opacity:0;}
+    15%{opacity:.85;}
+    70%{opacity:.85;}
+    100%{opacity:0;}
+  }
   /* ===== 座位卡片:头像居左+信息居右(第7步,取代第6步的"头像铺底"方案)=====
      第6步试过"头像铺满卡片上半部分",结果框的宽高比(如桌面638x300≈2.1:1)远比素材本身
      的 3:4 竖版扁得多——object-fit:cover 在这种情况下必然按宽度撑满、纵向大幅裁切,
@@ -664,9 +676,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=103"></script>
-<script src="data.js?v=103"></script>
-<script src="game.js?v=103"></script>
-<script src="render.js?v=103"></script>
+<script src="config.js?v=104"></script>
+<script src="data.js?v=104"></script>
+<script src="game.js?v=104"></script>
+<script src="render.js?v=104"></script>
 </body>
 </html>

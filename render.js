@@ -520,6 +520,52 @@ function renderTableCard(g){
       }
     }
   }
+  // 目标连线(feature/table-ui 第5步):#tableCard 中央 -> 每个目标座位。和上面飞牌动画同一套
+  // 坐标获取/清理/异常处理写法(相对 #seats 容器换算偏移、try/catch 静默降级、连续触发先清掉
+  // 上一批、动画结束后彻底移除不常驻 DOM)——只在 targets 非空数组时触发,每个目标一条独立的线。
+  // 用 SVG line 元素画线(比 CSS border/transform 拼线更简单可靠,不需要算角度)。
+  const existingLines = document.getElementById('targetLines');
+  if(existingLines) existingLines.remove(); // 连续快速出牌:先清掉上一批还没淡出的连线
+  if(Array.isArray(g.tableCard.targets) && g.tableCard.targets.length>0){
+    const centerEl = document.getElementById('tableCard');
+    const seatsEl = document.getElementById('seats');
+    if(centerEl && seatsEl){
+      try{
+        const containerRect = seatsEl.getBoundingClientRect();
+        const toRect = centerEl.getBoundingClientRect();
+        const fromX = toRect.left - containerRect.left + toRect.width/2;
+        const fromY = toRect.top - containerRect.top + toRect.height/2;
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.id = 'targetLines';
+        svg.setAttribute('class', 'target-lines');
+        svg.setAttribute('width', containerRect.width);
+        svg.setAttribute('height', containerRect.height);
+        let anyLine = false;
+        g.tableCard.targets.forEach(t=>{
+          const targetEl = document.querySelector('.seat[data-seat="'+t+'"]');
+          if(!targetEl) return;
+          const tRect = targetEl.getBoundingClientRect();
+          const tx = tRect.left - containerRect.left + tRect.width/2;
+          const ty = tRect.top - containerRect.top + tRect.height/2;
+          const line = document.createElementNS(svgNS, 'line');
+          line.setAttribute('x1', fromX); line.setAttribute('y1', fromY);
+          line.setAttribute('x2', tx); line.setAttribute('y2', ty);
+          line.setAttribute('class', 'target-line');
+          svg.appendChild(line);
+          anyLine = true;
+        });
+        if(anyLine){
+          seatsEl.appendChild(svg);
+          setTimeout(()=>{ if(svg.parentNode) svg.remove(); }, 2600); // 和 #tableCard 淡出节奏(2.6s)一致
+        }
+      }catch(e){
+        // 坐标计算出任何异常(理论上不该发生,但连线是装饰层,宁可静默跳过也不能抛出影响主渲染)
+        const stray = document.getElementById('targetLines');
+        if(stray) stray.remove();
+      }
+    }
+  }
 }
 // maybePlaySkillSound: 和 maybePlayCardSound 同一模式,独立字段(lastSkillSound)+独立哨兵变量。
 let lastPlayedSkillSeq = undefined;
