@@ -113,6 +113,7 @@ function normalize(g){
   g.players.forEach(p=>{ if(p){ p.hand = p.hand || []; if(typeof p.alive!=='boolean') p.alive=true;
     // 三选一候选:pending 期间是数组,其余时候应为 null;Firebase 吞空数组,缺失回退 null
     if(p.generalChoices===undefined) p.generalChoices=null;
+    if(p.shuangxiongColor!==null && p.shuangxiongColor!=='red' && p.shuangxiongColor!=='black') p.shuangxiongColor=null;
     // 体力上限防御:旧数据/异常路径缺失时回退,避免血条/桃回血读到 undefined
     if(typeof p.maxHp!=='number') p.maxHp = MAX_HP;
     // 装备区防御:Firebase 吞 null 值/空对象,读回来容器会缺失或缺键;补容器 + 补齐四槽(缺的回退 null)
@@ -201,6 +202,13 @@ function normalize(g){
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
+  }
+  // 颜良文丑【双雄】摸牌阶段询问:seat 应是当前回合玩家且存活。
+  if(g.pending && g.pending.type==='shuangxiongAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='draw';
+    }
   }
   // 观星阶段:seat 应是数字座位号且对应玩家存活,cards 应是数组;不满足整体判无效,防止卡死
   if(g.pending && g.pending.type==='guanxingReview'){
@@ -529,6 +537,10 @@ function finishGuicai(g, finalCard){
     finishLuoshenJudge(g, resume.seat, finalCard);
     return;
   }
+  if(resume.kind==='shuangxiongJudge'){
+    finishShuangxiongJudge(g, resume.seat, finalCard);
+    return;
+  }
   // 许褚【裸衣】摸牌阶段询问:seat 应是当前回合玩家且存活。
   if(g.pending && g.pending.type==='luoyiAsk'){
     const d=g.pending;
@@ -747,6 +759,43 @@ function respondLuoyi(activate){
     return g;
   });
 }
+function finishShuangxiongJudge(g, seat, card){
+  const p=g.players[seat];
+  g.pending=null;
+  if(!p || !p.alive){ g.phase='draw'; return; }
+  if(card){
+    const idx=g.discard.lastIndexOf(card);
+    if(idx>=0) g.discard.splice(idx,1);
+    p.hand.push(card);
+    p.shuangxiongColor=cardColorForPlayer(p, card);
+    const opposite=p.shuangxiongColor==='red'?'黑色':'红色';
+    g.log=pushLog(g.log, p.name+' 发动【双雄】,获得判定牌 '+card.suit+rankText(card.rank)+'【'+card.name+'】,本回合可将'+opposite+'手牌当【决斗】使用');
+  } else {
+    p.shuangxiongColor=null;
+    g.log=pushLog(g.log, p.name+' 发动【双雄】,但牌堆没有可判定的牌');
+  }
+  markSkillSound(g, '双雄');
+  advancePastPlay(g);
+}
+function respondShuangxiong(activate){
+  tx(g=>{
+    if(g.phase!=='shuangxiongAsk'||!g.pending||g.pending.type!=='shuangxiongAsk'||g.pending.seat!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'shuangxiong')) return g;
+    if(!activate){
+      g.pending=null;
+      me.shuangxiongColor=null;
+      g.log=pushLog(g.log, me.name+'：不发动【双雄】');
+      finishDrawPhase(g, mySeat, drawPhaseCount(g, mySeat));
+      return g;
+    }
+    const card=judge(g);
+    if(!card){ finishShuangxiongJudge(g, mySeat, null); return g; }
+    if(maybeGuicai(g, mySeat, card, {kind:'shuangxiongJudge', seat:mySeat})==='pending') return g;
+    finishShuangxiongJudge(g, mySeat, card);
+    return g;
+  });
+}
 // respondTuxi: 张辽【突袭】——摸牌阶段放弃摸牌,改为从 1~2 名其他存活玩家的手牌里各随机拿一张。
 // targets 是 1~2 个座位号(不含自己、不重复、都要存活);校验不过直接不生效(状态不变)。
 // 选到没手牌的目标不算错误,只是拿不到牌,记一条日志说明,不阻断其余目标的结算。
@@ -818,7 +867,7 @@ const CARD_PLAYS = {
   },
   '决斗': {
     target:true,
-    canPlay:(g,me,card)=> card.name==='决斗',
+    canPlay:(g,me,card)=> canUseAs(me,card,'决斗'),
     // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【决斗】的目标。决斗本身无距离限制,
     // 所以这里不像杀那样叠加 canReachSha,只单独处理这一条限制。
     canTarget:(g,me,card,targetSeat)=>{
@@ -827,7 +876,8 @@ const CARD_PLAYS = {
       return true;
     },
     effect:(g,me,card,targetSeat)=>{
-      g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【决斗】');
+      const usedAs = card.name==='决斗' ? '使用【决斗】' : '将【'+card.name+'】当【决斗】使用';
+      g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' '+usedAs);
       triggerJiangOnTarget(g, mySeat, targetSeat, 'duel', false);
       // 先开无懈窗口；无人无懈才真正进入 duel 弃杀流程（见 resolveTrick）
       startTrick(g, {trick:'决斗', from:mySeat, to:targetSeat, sourceCard:card});
@@ -2378,7 +2428,9 @@ function duelResponse(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
-      g.shaUsed=true; // 官方FAQ:决斗中打出杀同样破坏吕蒙【克己】,不能只在"主动使用杀"时置位,"打出"(应战)也算
+      // 决斗中打出杀会破坏出牌者自己的【克己】;只有出牌者正好是当前回合玩家时,
+      // 才能写入本回合的 g.shaUsed。否则会误污染真正回合玩家的出杀次数/克己判断。
+      if(mySeat===g.turn) g.shaUsed=true;
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(card.name==='杀'?' 打出【杀】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       markCardSound(g, '杀');
@@ -3291,6 +3343,7 @@ function startTurn(g, seat){
   } else {
     g.roundSeatsActed.push(seat);
   }
+  g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
   g.turn=seat; g.shaUsed=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   continueGuanxingCheck(g, seat);
@@ -3316,7 +3369,11 @@ function enterDrawPhase(g){
   }
 }
 function continueEnterDrawPhase(g){
-  if(hasCap(g.players[g.turn], 'luoyi')){
+  if(hasCap(g.players[g.turn], 'shuangxiong')){
+    g.pending={type:'shuangxiongAsk', seat:g.turn};
+    g.phase='shuangxiongAsk';
+    g.log=pushLog(g.log, g.players[g.turn].name+' 是否发动【双雄】,放弃摸牌并进行一次判定…');
+  } else if(hasCap(g.players[g.turn], 'luoyi')){
     g.pending={type:'luoyiAsk', seat:g.turn};
     g.phase='luoyiAsk';
     g.log=pushLog(g.log, g.players[g.turn].name+' 是否发动【裸衣】,少摸1张牌换取本回合伤害加成…');
