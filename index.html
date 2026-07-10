@@ -69,11 +69,15 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
   .row>div{flex:1;min-width:120px;}
 
-  /* ===== 座位环形布局(第2步:JS 现算槽位 class + CSS 命名区域精确定位)=====
+  /* ===== 座位环绕布局(feature/table-ui 第1步:只改定位,不改 seatSlot 语义/renderControls/
+     任何动作函数)=====
      容器按"对手数量"(总座位数-1,开局后不随存活人数变化)分两套列模板:
-     .opp1(2人局,1个对手)只有居中的 top 一列;.opp2(3人局,2个对手)左右各一列(tl/tr),
-     不再像第1步那样用 auto-fit 让浏览器"猜"该分几列——现在 render.js 的 seatSlot() 已经
-     算好每个座位具体该在哪个命名区域,这里只需要把区域摆对位置。
+     .opp1(2人局,1个对手)只有居中的 top 一列;.opp2(3人局,2个对手)左右各一列(tl/tr)——
+     这部分沿用第2步就定下的分区方式,render.js 的 seatSlot() 逻辑本身不需要跟着改。
+     这一步新增的是中间一条不放置任何座位的 "table" 行——对手环绕在上方、"我"固定在
+     下方居中,中间用这条空行让出一块视觉上的牌桌空区(下一步中央出牌区/动画会用到这块
+     空间,这一步只预留尺寸,不放任何内容)。grid-template-areas 里出现但没有任何元素
+     认领的区域名,浏览器仍会按 grid-template-rows 给它保留对应的行高,不需要额外占位元素。
      阵亡不重排:.dead 只变暗/去色,不改变 grid 位置(避免布局跳动打断"有人死了"这条信息的消化)。 */
   .seats{
     display:grid;
@@ -89,11 +93,13 @@
      直接对齐成640px,让 .seat.me 自己的 max-width 变回真正起作用的那道限制。 */
   .seats.opp1{
     grid-template-columns:minmax(150px,640px);
-    grid-template-areas:"top" "me";
+    grid-template-rows:auto minmax(56px,120px) auto;
+    grid-template-areas:"top" "table" "me";
   }
   .seats.opp2{
     grid-template-columns:minmax(120px,1fr) minmax(120px,1fr);
-    grid-template-areas:"tl tr" "me me";
+    grid-template-rows:auto minmax(56px,120px) auto;
+    grid-template-areas:"tl tr" "table table" "me me";
   }
   /* ===== 座位卡片:头像居左+信息居右(第7步,取代第6步的"头像铺底"方案)=====
      第6步试过"头像铺满卡片上半部分",结果框的宽高比(如桌面638x300≈2.1:1)远比素材本身
@@ -419,8 +425,8 @@
   /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
   @media (max-width:640px){
     .seats{gap:8px;}
-    .seats.opp1{grid-template-columns:minmax(120px,1fr);}
-    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);}
+    .seats.opp1{grid-template-columns:minmax(120px,1fr);grid-template-rows:auto minmax(36px,72px) auto;}
+    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);grid-template-rows:auto minmax(36px,72px) auto;}
     .seat{padding:9px 10px;}
     .seat.me{max-width:100%;padding:12px 14px;}
     /* 窄屏头像框收紧尺寸(仍严格保持3:4比例,不引入裁切)。 */
@@ -460,7 +466,8 @@
        正常手机(640px 断点覆盖的范围)仍然维持左右分列。 */
     .seats.opp2{
       grid-template-columns:minmax(0,1fr);
-      grid-template-areas:"tl" "tr" "me";
+      grid-template-rows:auto auto minmax(28px,48px) auto;
+      grid-template-areas:"tl" "tr" "table" "me";
     }
     .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
       跟着 --badge 自动缩小,不用逐处对齐;.card-title 字号同上由 fitFontSize 实测,
@@ -605,9 +612,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=99"></script>
-<script src="data.js?v=99"></script>
-<script src="game.js?v=99"></script>
-<script src="render.js?v=99"></script>
+<script src="config.js?v=100"></script>
+<script src="data.js?v=100"></script>
+<script src="game.js?v=100"></script>
+<script src="render.js?v=100"></script>
 </body>
 </html>
