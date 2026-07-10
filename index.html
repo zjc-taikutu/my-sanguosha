@@ -96,12 +96,12 @@
      直接对齐成640px,让 .seat.me 自己的 max-width 变回真正起作用的那道限制。 */
   .seats.opp1{
     grid-template-columns:minmax(150px,640px);
-    grid-template-rows:auto minmax(56px,120px) auto;
+    grid-template-rows:auto minmax(56px,180px) auto;
     grid-template-areas:"top" "table" "me";
   }
   .seats.opp2{
     grid-template-columns:minmax(120px,1fr) minmax(120px,1fr);
-    grid-template-rows:auto minmax(56px,120px) auto;
+    grid-template-rows:auto minmax(56px,180px) auto;
     grid-template-areas:"tl tr" "table table" "me me";
   }
   /* ===== 中央出牌区(feature/table-ui 第2步):落在第1步留出的 table 网格空区里,不是
@@ -135,10 +135,10 @@
   /* 交换进行中(南蛮入侵应战链/决斗连续出杀):#tableCard 切换成横向排列多张卡片,不使用
      单次出牌那套淡入淡出动画(.exchange-mode 时不触发 tableCardFade,靠 game.js 清空数组
      来结束显示,不是靠时间)。 */
-  .table-card.exchange-mode{animation:none;opacity:1;display:flex;gap:6px;flex-wrap:wrap;
-    justify-content:center;align-items:flex-start;}
+  .table-card.exchange-mode{animation:none;opacity:1;display:flex;flex-direction:row;gap:6px;
+    flex-wrap:wrap;justify-content:center;align-items:flex-start;}
   .exchange-card{background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
-    padding:4px 8px;font-size:12px;}
+    padding:4px 8px;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:2px;}
   /* 中央出牌区的迷你卡牌:复用 .card/.card-art-box/.corner/.no-art 已有的插画+角标+降级样式,
      只覆盖尺寸——比手牌小一号,不需要手牌那套按视口自适应字号的逻辑(中央区没有标题栏文字,
      牌名已经单独用 .table-card-name 显示在上方)。cursor:default 且不绑定 onclick,纯展示。 */
@@ -496,8 +496,8 @@
   /* ===== 手机断点(仍是同一套 opp1/opp2 命名区域,只收紧列宽下限/间距/字号,不改结构) ===== */
   @media (max-width:640px){
     .seats{gap:8px;}
-    .seats.opp1{grid-template-columns:minmax(120px,1fr);grid-template-rows:auto minmax(36px,72px) auto;}
-    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);grid-template-rows:auto minmax(36px,72px) auto;}
+    .seats.opp1{grid-template-columns:minmax(120px,1fr);grid-template-rows:auto minmax(36px,108px) auto;}
+    .seats.opp2{grid-template-columns:minmax(100px,1fr) minmax(100px,1fr);grid-template-rows:auto minmax(36px,108px) auto;}
     .seat{padding:9px 10px;}
     .seat.me{max-width:100%;padding:12px 14px;}
     /* 窄屏头像框收紧尺寸(仍严格保持3:4比例,不引入裁切)。 */
@@ -540,7 +540,7 @@
        正常手机(640px 断点覆盖的范围)仍然维持左右分列。 */
     .seats.opp2{
       grid-template-columns:minmax(0,1fr);
-      grid-template-rows:auto auto minmax(28px,48px) auto;
+      grid-template-rows:auto auto minmax(42px,72px) auto;
       grid-template-areas:"tl" "tr" "table" "me";
     }
     .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
@@ -689,9 +689,9 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=106"></script>
-<script src="data.js?v=106"></script>
-<script src="game.js?v=106"></script>
-<script src="render.js?v=106"></script>
+<script src="config.js?v=107"></script>
+<script src="data.js?v=107"></script>
+<script src="game.js?v=107"></script>
+<script src="render.js?v=107"></script>
 </body>
 </html>

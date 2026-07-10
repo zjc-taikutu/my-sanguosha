@@ -106,6 +106,17 @@ function normalize(g){
   if(g.lastCardSound===undefined) g.lastCardSound=null;
   if(g.tableCard===undefined) g.tableCard=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
+  // 兜底清空:交换展示只应该在"正处于 aoe 结算 或 决斗中"时非空(和 markCardSound 里判断要不要
+  // 追加用的是同一条件)。已经证实存在多条"交换动作结束了但忘记显式清空"的路径(南蛮入侵/万箭
+  // 齐发把人打死、决斗把人打死,都会经过 dying 流程,若这一下同时触发 checkWin,aoeRespond/
+  // finishDying 里的 if(checkWin(g)) return 会跳过原本负责清空的 aoeAdvance/resumeAfterInterrupt
+  // 分支,导致 g.exchangeCards 永久卡住、桌面上的牌好几轮都清不掉——这是真实复现过的 bug,不是
+  // 假设)。与其追着每一条新路径逐个补显式清空(已经证明会漏),不如在这里做一条兜底:只要判断
+  // 出"现在已经不在交换中了",不管是通过哪条路径结束的,一律清空,不依赖某个特定分支有没有
+  // 记得调用清空逻辑。
+  if(Array.isArray(g.exchangeCards) && g.exchangeCards.length>0 && !g.aoe && g.phase!=='duel'){
+    g.exchangeCards=[];
+  }
   if(g.tableCard && g.tableCard.targets!=null && !Array.isArray(g.tableCard.targets)) g.tableCard.targets=null;
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
@@ -2045,6 +2056,7 @@ function resumeAfterInterrupt(g, resume, seat){
   } else if(resume.type==='zhengyi'){
     resumeAfterInterrupt(g, resume.originalResume, resume.originalSeat);
   } else if(resume.type==='duel'){
+    g.exchangeCards=[]; // 决斗把人打进濒死、脱离/阵亡后接回:决斗已经结束,清空交换展示
     if(!g.players[g.turn].alive){
       startTurn(g, nextAlive(g, g.turn));
     } else {
@@ -2534,6 +2546,14 @@ function resolveTrick(g, info){
     g.pending={type:'duel', from:info.from, to:info.to, active:info.to};
     if(info.sourceCard!==undefined) g.pending.sourceCard=info.sourceCard;
     g.phase='duel';
+    if(info.sourceCard){
+      // 决斗发起牌本身:markCardSound 在 playCard 主入口触发那一刻 phase 还是 'wuxie'(无懈可击
+      // 询问窗口),不满足 g.phase==='duel' 的追加条件,永远进不了交换队列——这里在 phase 真正
+      // 变成 'duel' 的这一刻手动补一条,让决斗过程的展示从发起牌开始就完整,不是从第一次应战杀
+      // 才开始出现。
+      if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
+      g.exchangeCards.push({ name:'决斗', seat:info.from, card:info.sourceCard, seq:(g.tableCard&&g.tableCard.seq)||0 });
+    }
     g.log=pushLog(g.log, '【决斗】开始,'+tgt.name+' 先出杀');
     return; // duel 流程自身不再触发无懈
   }
