@@ -922,7 +922,14 @@ const CARD_PLAYS = {
   '顺手牵羊': {
     target:true,
     canPlay:(g,me,card)=> card.name==='顺手牵羊',
-    canTarget:(g,me,card,targetSeat)=> distance(g, mySeat, targetSeat) <= 1,
+    canTarget:(g,me,card,targetSeat)=> {
+      const target = g.players[targetSeat];
+      if(!target || !target.alive) return false;
+      if(distance(g, mySeat, targetSeat) > 1) return false;
+      // 陆逊【谦逊】:不能成为顺手牵羊的目标
+      if(hasCap(target,'qianxun')) return false;
+      return true;
+    },
     effect:(g,me,card,targetSeat)=>{
       g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【顺手牵羊】');
       startTrick(g, {trick:'顺手牵羊', from:mySeat, to:targetSeat});
@@ -962,6 +969,8 @@ const delayTrickPlay = {
     if(spec.onlySelf){ if(targetSeat!==mySeat) return false; }
     else { if(targetSeat===mySeat) return false; }
     if(card.name==='兵粮寸断' && distance(g, mySeat, targetSeat) > 1) return false;
+    // 陆逊【谦逊】:不能成为乐不思蜀的目标
+    if(card.name==='乐不思蜀' && hasCap(g.players[targetSeat],'qianxun')) return false;
     // 官方规则:同一判定区不能有两张同名的延时类锦囊牌——之前只在闪电判定失败后的自动
     // 传递里做了这个检查,玩家主动打出时完全没校验,导致能对同一目标连续打两张同名延时锦囊。
     const tgt=g.players[targetSeat];
@@ -1053,6 +1062,8 @@ function playCard(cardIdx, actionId, targetSeat){
     }
     me.hand.splice(cardIdx,1);
     if(!spec.noDiscard) g.discard.push(card); // 装备牌 noDiscard:不进弃牌堆,由 effect 放进装备区
+    // 陆逊【连营】:检查是否触发连营（失去最后1张手牌时）
+    maybeStartLianying(g, mySeat, 1);
     spec.effect(g, me, card, targetSeat);
     if(hasCap(me,'jizhi') && isTrickCardName(actionId)){
       drawN(g, mySeat, 1);
@@ -1146,7 +1157,10 @@ function respondJiedao(useSha){
     if(useSha){
       const idx=findUsableAs(A.hand, A, '杀');
       if(idx<0) return g; // 没有可用的杀:不生效(按钮本就不该渲染)
-      const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=A.hand.splice(idx,1)[0];
+      // 陆逊【连营】:检查是否触发连营
+      maybeStartLianying(g, mySeat, 1);
+      g.discard.push(card);
       g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(isShaName(card.name)?'【'+card.name+'】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
       markCardSound(g, '杀', mySeat, card, seatB);
       if(card.name!=='杀'){ if(hasCap(A,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(A,'wusheng')) markSkillSound(g,'武圣'); }
@@ -1529,7 +1543,10 @@ function respondDying(useTao, jijiuChoice){
       } else {
         const idx=findUsableAs(me.hand, me, '桃'); // 复用 canUseAs/findUsableAs seam,不硬编码牌名
         if(idx<0) return g; // 没有桃:状态不变(双重保险,按钮本就不该出现)
-        card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+        card=me.hand.splice(idx,1)[0];
+        // 陆逊【连营】:检查是否触发连营
+        maybeStartLianying(g, mySeat, 1);
+        g.discard.push(card);
       }
       dyingP.hp++;
       const asTao = jijiuChoice ? '当【桃】' : '';
@@ -1802,7 +1819,10 @@ function duelResponse(useSha){
     if(useSha){
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
-      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=me.hand.splice(idx,1)[0];
+      // 陆逊【连营】:检查是否触发连营
+      maybeStartLianying(g, mySeat, 1);
+      g.discard.push(card);
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(isShaName(card.name)?' 打出【'+card.name+'】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       markCardSound(g, '杀', mySeat, card, opp);
@@ -2025,6 +2045,9 @@ function applyTrickOnHand(g, info){
   const me=g.players[info.from], tgt=g.players[info.to];
   const j=Math.floor(Math.random()*tgt.hand.length);
   const card=tgt.hand.splice(j,1)[0];
+  // 陆逊【连营】:检查目标玩家是否触发连营
+  const tgtSeat = g.players.indexOf(tgt);
+  maybeStartLianying(g, tgtSeat, 1);
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 从 '+tgt.name+' 拿走一张手牌'); }
   else { g.discard.push(card); g.log=pushLog(g.log, me.name+' 弃掉 '+tgt.name+' 一张手牌'); }
 }
@@ -2084,6 +2107,8 @@ function respondWuxie(useWuxie){
       const idx=me.hand.findIndex(c=>c.name==='无懈可击');
       if(idx<0) return g; // 没牌:状态不变,仍停在本人这一轮(界面按钮保留)
       const card = me.hand.splice(idx,1)[0];
+      // 陆逊【连营】:检查是否触发连营
+      maybeStartLianying(g, mySeat, 1);
       g.discard.push(card);
       // depth===0(反制原锦囊)措辞不同于 depth>=1(反制上一次无懈可击)
       const target = g.pending.depth>0 ? g.players[g.pending.exclude].name+' 的【无懈可击】' : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
@@ -2158,7 +2183,10 @@ function aoeRespond(useCard){
     if(useCard){
       const idx=findUsableAs(me.hand,me,need); // 龙胆:杀/闪可互转,优先用本名牌
       if(idx<0) return g; // 没牌:界面按钮保留,等其改点"不出"
-      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=me.hand.splice(idx,1)[0];
+      // 陆逊【连营】:检查是否触发连营
+      maybeStartLianying(g, mySeat, 1);
+      g.discard.push(card);
       const label = card.name===need ? '打出【'+need+'】' : '打出【'+card.name+'】当【'+need+'】';
       g.log=pushLog(g.log, me.name+' '+label+',抵消【'+g.aoe.trick+'】');
       markCardSound(g, need, mySeat, card);
@@ -2190,7 +2218,10 @@ function respondShan(useShan){
       if(g.pending.noShan) return g; // 马超【铁骑】判红:此杀不可被闪抵消,服务端兜底(UI 本就不该渲染这个按钮)
       const idx=findUsableAs(me.hand,me,'闪'); // 龙胆:杀可当闪,优先用本名闪
       if(idx<0) return g;
-      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=me.hand.splice(idx,1)[0];
+      // 陆逊【连营】:检查是否触发连营
+      maybeStartLianying(g, mySeat, 1);
+      g.discard.push(card);
       const played=(g.pending.shanCount||0)+1;
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       markCardSound(g, '闪', mySeat, card);
@@ -2248,7 +2279,10 @@ function discardCard(cardIdx){
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
     if(me.hand.length<=me.hp) return g;
-    const card=me.hand.splice(cardIdx,1)[0]; g.discard.push(card);
+    const card=me.hand.splice(cardIdx,1)[0];
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
+    g.discard.push(card);
     if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
       g.liRangRecord.discarded = g.liRangRecord.discarded || [];
       g.liRangRecord.discarded.push(card);
@@ -2276,6 +2310,8 @@ function discardCards(cardIdxList){
     const sorted = [...uniqueIdx].sort((a,b)=>b-a);
     const discarded = sorted.map(i=>me.hand.splice(i,1)[0]);
     g.discard.push(...discarded);
+    // 陆逊【连营】:检查是否触发连营（一次性检查整个操作后的手牌数）
+    if(discarded.length > 0) maybeStartLianying(g, mySeat, discarded.length);
     // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
     // (礼让回收的是"本弃牌阶段弃置的全部牌",不能因为改成批量提交就漏记)。
     if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
@@ -2523,5 +2559,50 @@ function finishLuoshenJudge(g, seat, card){
     g.pending={type:'luoshen', seat};
     g.phase='luoshen';
   }
+}
+
+// 陆逊【连营】:当玩家失去最后1张手牌时,若其拥有连营技能,可摸1张牌。
+// 这个函数需要在每次玩家失去手牌后调用,检查是否满足触发条件。
+// 参数: g - 游戏状态, seat - 失去手牌的玩家座位号, cardsLost - 本次失去的牌数量(通常为1)
+// 返回: 若触发连营并成功挂起询问,返回true;否则返回false
+function maybeStartLianying(g, seat, cardsLost=1){
+  const p = g.players[seat];
+  if(!p || !p.alive || !hasCap(p,'lianying')) return false;
+  
+  // 连营的触发条件:失去手牌前恰好有1张手牌,且本次失去的牌导致手牌变为0张
+  // 由于cardsLost通常为1,我们检查:失去前的手牌数 = cardsLost,失去后的手牌数 = 0
+  const handAfter = (p.hand || []).length;
+  const handBefore = handAfter + cardsLost;
+  
+  // 只有当失去前有1张手牌,且失去后变成0张时才触发
+  if(handBefore === 1 && handAfter === 0 && cardsLost >= 1){
+    // 挂起询问是否发动连营
+    g.pending = { type:'lianyingAsk', seat, resume:{type:'lianyingAsk'} };
+    g.phase = 'lianyingAsk';
+    g.log = pushLog(g.log, p.name+' 是否发动【连营】,摸1张牌…');
+    return true;
+  }
+  return false;
+}
+
+// respondLianying: 响应连营询问
+function respondLianying(activate){
+  tx(g=>{
+    if(g.phase!=='lianyingAsk'||!g.pending||g.pending.type!=='lianyingAsk'||g.pending.seat!==mySeat) return g;
+    const seat = mySeat;
+    const p = g.players[seat];
+    if(!p || !p.alive || !hasCap(p,'lianying')) return g;
+    
+    if(activate){
+      drawN(g, seat, 1);
+      g.log = pushLog(g.log, p.name+' 发动【连营】,摸一张牌');
+      markSkillSound(g, '连营');
+    } else {
+      g.log = pushLog(g.log, p.name+'：不发动【连营】');
+    }
+    g.pending = null;
+    g.phase = 'play';
+    return g;
+  });
 }
 
