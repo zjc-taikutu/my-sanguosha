@@ -132,17 +132,34 @@
   .table-card-who{font-size:13px;color:var(--paper-dim);}
   .table-card-name{font-size:22px;font-weight:700;color:var(--gold);letter-spacing:.06em;}
   .table-card-face{font-size:17px;margin-top:2px;}
+  /* 横排/竖排布局只取决于"这批牌有几张",和链有没有结束(idle/是否在淡出)完全无关——
+     这是一次真实bug修复后的结论,原来布局属性(display:flex;flex-direction:row;...)挂在
+     .exchange-mode 上、由 render-table.js 的 idle 判断切换 class 来控制,而 hasNewEntry
+     (有没有新牌加入)和 idle(链是否结束)可能在同一次调用里同时触发(最简单的例子:出杀
+     后对方打闪抵消,"闪被推入exchangeCards"和"链判定为已结束"是同一次tx/render)——这种
+     情况下 exchange-mode 被同一时刻移除,容器退回默认的 flex-direction:column,两张牌在
+     竖排布局下一起淡出,而不是横排。用 :has() 选择器直接按子元素数量决定布局,不再依赖
+     JS 切换的 class,从根源解耦"布局"和"该不该淡出"这两件互不相关的事——用相邻兄弟选择器
+     .exchange-card + .exchange-card 精确匹配"至少2张",1张牌时不触发,保持原来单张牌的
+     竖排展示不受影响。 */
+  .table-card:has(.exchange-card + .exchange-card){
+    display:flex;flex-direction:row;gap:6px;flex-wrap:wrap;
+    justify-content:center;align-items:flex-start;
+  }
   /* 结算链进行中(不限于南蛮入侵/万箭齐发的应战链、决斗的连续出杀——任何还没结束的结算链
-     都算,由 render-table.js 按 !g.pending&&!g.aoe 判断):#tableCard 横向排列这条链目前
-     打出的每一张牌,不淡出(exchange-mode 时 animation:none,静态常驻)。链结束的那一刻
-     (render-table.js 检测到空闲)才切成 .show 触发一次性的整体淡出——exchange-mode 和
-     show 由 render-table.js 保证互斥,不会同时出现在同一个元素上;数据本身(g.exchangeCards)
-     何时被清空是完全独立的另一件事,由 game.js 的 pruneExchangeCards(tx写入路径专属,不在
-     render路径的normalize里)负责,不影响这里的
-     视觉动画节奏(淡出动画播完之后,数据可能还没被清、也可能已经被清,视觉上都是"不可见",
-     不需要两者同步)。 */
-  .table-card.exchange-mode{animation:none;opacity:1;display:flex;flex-direction:row;gap:6px;
-    flex-wrap:wrap;justify-content:center;align-items:flex-start;}
+     都算,由 render-table.js 按 !g.pending&&!g.aoe 判断):不淡出(exchange-mode 时
+     animation:none,静态常驻)。链结束的那一刻(render-table.js 检测到空闲)才切成 .show
+     触发一次性的整体淡出——exchange-mode 现在只剩这一个职责(布局已经交给上面的 :has()
+     规则,不再声明 display/flex-direction 等布局属性),但 render-table.js 里"idle 时移除
+     exchange-mode"这一步仍然保留,原因不是布局(布局现在不受影响),而是 animation 属性本身
+     的优先级冲突:.exchange-mode{animation:none} 和 .show{animation:tableCardFade...}
+     选择器优先级相同(都是 .table-card 加一个类,(0,2,0)),源码顺序上 exchange-mode 写在
+     show 后面,如果两个 class 同时挂着,exchange-mode 的 animation:none 会按后来居上的规则
+     赢过 show,导致淡出动画整个不播放——这条互斥移除是为了避开这个真实存在的属性冲突,不是
+     心血来潮的"看起来该有";数据本身(g.exchangeCards)何时被清空是完全独立的另一件事,由
+     game.js 的 pruneExchangeCards(tx写入路径专属,不在 render路径的normalize里)负责,
+     不影响这里的视觉动画节奏。 */
+  .table-card.exchange-mode{animation:none;opacity:1;}
   .exchange-card{background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
     padding:4px 8px;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:2px;}
   /* 中央出牌区的迷你卡牌:复用 .card/.card-art-box/.corner/.no-art 已有的插画+角标+降级样式,
@@ -695,16 +712,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=117"></script>
-<script src="data.js?v=117"></script>
-<script src="room-lifecycle.js?v=117"></script>
-<script src="game.js?v=117"></script>
-<script src="weapons.js?v=117"></script>
-<script src="skills.js?v=117"></script>
-<script src="render.js?v=117"></script>
-<script src="render-table.js?v=117"></script>
-<script src="render-hand.js?v=117"></script>
-<script src="render-controls.js?v=117"></script>
-<script src="render-log.js?v=117"></script>
+<script src="config.js?v=118"></script>
+<script src="data.js?v=118"></script>
+<script src="room-lifecycle.js?v=118"></script>
+<script src="game.js?v=118"></script>
+<script src="weapons.js?v=118"></script>
+<script src="skills.js?v=118"></script>
+<script src="render.js?v=118"></script>
+<script src="render-table.js?v=118"></script>
+<script src="render-hand.js?v=118"></script>
+<script src="render-controls.js?v=118"></script>
+<script src="render-log.js?v=118"></script>
 </body>
 </html>
