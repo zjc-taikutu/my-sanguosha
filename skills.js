@@ -1162,3 +1162,44 @@ function respondTiaoxinChoice(useSha){
     return g;
   });
 }
+
+// ===== 李典【恂恂】 =====
+// respondXunxun: 李典【恂恂】,选择获得哪些牌后提交。
+// keepIdxs: 要获得的牌在 g.pending.cards 中的下标数组,长度必须等于 g.pending.takeN
+// bottomOrder: 其余牌的下标数组（按任意顺序置于牌堆底）
+// 约定: keepIdxs 和 bottomOrder 合起来必须恰好覆盖每个下标一次,没有重复和遗漏
+function respondXunxun(keepIdxs, bottomOrder){
+  tx(g=>{
+    if(g.phase!=='xunxunPick'||!g.pending||g.pending.type!=='xunxunPick'||g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me, 'xunxun')) return g;
+    
+    const cards = g.pending.cards;
+    const takeN = g.pending.takeN;
+    
+    // 校验: keepIdxs 必须是数组,长度等于 takeN
+    if(!Array.isArray(keepIdxs) || keepIdxs.length !== takeN) return g;
+    
+    // 所有下标合并
+    const allIdx = [...(keepIdxs||[]), ...(bottomOrder||[])];
+    
+    // 校验:两个数组合起来必须恰好是cards的每个下标各出现一次
+    if(allIdx.length!==cards.length || new Set(allIdx).size!==cards.length || !allIdx.every(i=>Number.isInteger(i)&&i>=0&&i<cards.length)) return g;
+    
+    // 获得选择的牌
+    const keepCards = keepIdxs.map(i => cards[i]);
+    me.hand.push(...keepCards);
+    
+    // 其余牌按指定顺序置于牌堆底（数组最前面）
+    const bottomCards = bottomOrder.map(i => cards[i]);
+    g.deck = [...bottomCards, ...g.deck];
+    
+    g.pending = null;
+    g.log = pushLog(g.log, me.name+' 【恂恂】结算,获得'+keepCards.length+'张牌,其余'+bottomCards.length+'张牌置于牌堆底');
+    markSkillSound(g, '恂恂');
+    
+    // 进入出牌阶段（跳过摸牌阶段）
+    g.phase = 'play';
+    return g;
+  });
+}

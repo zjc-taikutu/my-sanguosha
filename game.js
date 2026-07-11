@@ -119,6 +119,15 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 李典【忘隙】询问阶段:seat/otherSeat 应是数字座位号且对应玩家存活;amount应为正整数;任一不对就整体判无效
+  if(g.pending && g.pending.type==='wangxiAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.otherSeat!=='number' || !Number.isInteger(d.amount) || d.amount<=0 
+       || !g.players[d.seat] || !g.players[d.seat].alive || !g.players[d.otherSeat] || !g.players[d.otherSeat].alive
+       || !d.resume || typeof d.resume.type!=='string'){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 杀被抵消后的效果选择阶段:from/to 应是数字且存活;available 应是非空数组且元素合法
   if(g.pending && g.pending.type==='shaOffsetChoice'){
     const d=g.pending;
@@ -319,6 +328,15 @@ function normalize(g){
   if(g.pending && g.pending.type==='guanxingReview'){
     const gp=g.pending.seat;
     if(typeof gp!=='number' || !g.players[gp] || !g.players[gp].alive || !Array.isArray(g.pending.cards)){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 李典【恂恂】阶段:seat 应是数字座位号且对应玩家存活,cards 应是数组,takeN 应是正整数;不满足整体判无效
+  if(g.pending && g.pending.type==='xunxunPick'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive 
+       || !Array.isArray(d.cards) || d.cards.length===0 
+       || !Number.isInteger(d.takeN) || d.takeN<=0 || d.takeN>d.cards.length){
       g.pending=null; g.phase='play';
     }
   }
@@ -1740,8 +1758,8 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
   if(p.hp<=0){
-    startDying(g, seat, srcType);
-    return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解决时统一处理)
+    startDying(g, seat, srcType, sourceSeat, amount);
+    return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解算时统一处理)
   }
   if(!skipChain && propagateChainedDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   // 实际受伤且存活 -> 触发"受到伤害后"钩子(如郭嘉【遗计】)。srcType 标识伤害来源类型('sha'/'duel'/'aoe'/'delay'/'xiaoguo'),
@@ -1760,16 +1778,38 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(sourceCard!==undefined) ctx.sourceCard=sourceCard;
     triggerHook(g, seat, 'onDamaged', ctx);
     if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
+    
+    // 李典【忘隙】造成侧：sourceSeat 是李典且 seat != sourceSeat 且非致命时挂起
+    if(typeof sourceSeat==='number' && sourceSeat !== seat && sourceSeat < g.players.length){
+      const attacker = g.players[sourceSeat];
+      const victim = g.players[seat];
+      if(attacker && attacker.alive && victim && victim.alive && generalHasCap(attacker, 'wangxi')){
+        g.pending = { 
+          type:'wangxiAsk', 
+          seat: sourceSeat,  // 李典是攻击者
+          otherSeat: seat,   // 受害者
+          death: false,
+          amount: amount,
+          resume:{type:srcType}
+        };
+        g.phase='wangxiAsk';
+        g.log=pushLog(g.log, attacker.name+' 是否发动【忘隙】…');
+        return true;
+      }
+    }
   }
   return false;
 }
 // ===== 濒死求桃:血量<=0 不立刻死亡,按座位顺序逐个询问是否打出【桃】救援 =====
 // startDying: 由 dealDamage 在 hp<=0 时调用。从濒死者本人开始问(可自救),
 // resume 记下"濒死解决后该接回哪条流程的尾巴"(取值就是调用方本来就在传的 srcType)。
-function startDying(g, seat, resumeType){
+function startDying(g, seat, resumeType, sourceSeat, amount){
   const p=g.players[seat];
   p.dying=true;
-  g.pending={type:'dying', seat, asking:seat, resume:{type:resumeType}};
+  const resume = {type:resumeType};
+  if(typeof sourceSeat==='number') resume.sourceSeat=sourceSeat;
+  if(typeof amount==='number') resume.amount=amount;
+  g.pending={type:'dying', seat, asking:seat, resume};
   g.phase='dying';
   g.log=pushLog(g.log, p.name+' 濒死！询问 '+p.name+' 是否使用【桃】自救…');
 }
@@ -1883,6 +1923,24 @@ function finishDying(g, actuallyDied){
     g.log=pushLog(g.log, p.name+' 无人使用【桃】救援,阵亡！'+(parts.length?'（'+parts.join('，')+'）':''));
     // 阵亡弃装备刻意【不】触发 onLoseEquip 失去装备钩子(如枭姬):人已死,死亡结算不再发动常规技能。
     // ⚠️ 日后新增「主动卸载装备」入口时,记得在那里接入 triggerHook(g, seat, 'onLoseEquip', {count}),别漏了枭姬。
+    
+    // 李典【忘隙】致死造成侧：若 sourceSeat 是李典且 amount>0，在死亡结算后挂起 wangxiAsk
+    if(typeof resume.sourceSeat==='number' && typeof resume.amount==='number' && resume.amount>0){
+      const sourceP = g.players[resume.sourceSeat];
+      if(sourceP && sourceP.alive && generalHasCap(sourceP, 'wangxi') && resume.sourceSeat !== seat){
+        g.pending = { 
+          type:'wangxiAsk', 
+          seat: resume.sourceSeat,  // 李典是攻击者
+          otherSeat: seat,          // 阵亡者
+          death: true,               // 标记为致死情形
+          amount: resume.amount,
+          resume: {type: resume.type}
+        };
+        g.phase='wangxiAsk';
+        g.log=pushLog(g.log, sourceP.name+' 是否发动【忘隙】…');
+        return; // 返回，跳过后续的 resumeAfterInterrupt，等忘隙结算后再接回
+      }
+    }
   } else {
     g.log=pushLog(g.log, p.name+' 脱离濒死！');
   }
@@ -1890,6 +1948,50 @@ function finishDying(g, actuallyDied){
   if(checkWin(g)) return;
   resumeAfterInterrupt(g, resume, seat);
 }
+// respondWangxi: 李典【忘隙】技能的响应函数
+// activate=true: 发动，双方各摸 amount 张（若 death=false）或仅李典摸（若 death=true）
+// activate=false: 不发动，接回 resume 流程
+function respondWangxi(activate){
+  tx(g=>{
+    if(g.phase!=='wangxiAsk'||!g.pending||g.pending.type!=='wangxiAsk') return g;
+    if(g.pending.seat!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive) return g;
+    
+    const {seat, otherSeat, death, amount, resume}=g.pending;
+    const otherP = g.players[otherSeat];
+    
+    if(activate){
+      g.log=pushLog(g.log, me.name+' 发动【忘隙】');
+      markSkillSound(g, '忘隙');
+      
+      // 若 death=false: 双方各摸 amount 张
+      if(!death && otherP && otherP.alive){
+        drawN(g, seat, amount);
+        drawN(g, otherSeat, amount);
+        g.log=pushLog(g.log, me.name+' 和 '+otherP.name+' 各摸了'+amount+'张牌');
+      }
+      // 若 death=true: 仅李典（seat）摸 amount 张
+      else if(death && me.alive){
+        drawN(g, seat, amount);
+        g.log=pushLog(g.log, me.name+' 摸了'+amount+'张牌');
+      }
+      
+      g.pending=null;
+      if(checkWin(g)) return g;
+      resumeAfterInterrupt(g, resume, seat);
+      return g;
+    }
+    
+    // 不发动
+    g.log=pushLog(g.log, me.name+'：不发动【忘隙】');
+    g.pending=null;
+    if(checkWin(g)) return g;
+    resumeAfterInterrupt(g, resume, seat);
+    return g;
+  });
+}
+
 // resumeAfterInterrupt: "临时打断了原有流程、事后要接回被打断那条流程尾巴"这类场景的统一
 // 出口——目前有两个来源会走到这里:①濒死解决(finishDying,可能真死也可能被救回);
 // ②郭嘉【遗计】的可选发动结算完毕(不会死人,但同样需要接回被打断的流程)。两者的 resume
@@ -2674,10 +2776,50 @@ function continueEnterDrawPhase(g){
     g.pending={type:'luoyiAsk', seat:g.turn};
     g.phase='luoyiAsk';
     g.log=pushLog(g.log, g.players[g.turn].name+' 是否发动【裸衣】,少摸1张牌换取本回合伤害加成…');
+  } else if(hasCap(g.players[g.turn], 'xunxun')){
+    // 李典【恂恂】: 摸牌阶段,放弃摸牌,改为亮出牌堆顶至多4张牌
+    const p = g.players[g.turn];
+    if(ensureDeck(g) && g.deck.length > 0){
+      const n = Math.min(4, g.deck.length);
+      const cards = g.deck.splice(g.deck.length - n, n);
+      g.pending = { type:'xunxunPick', seat: g.turn, cards, takeN: Math.min(2, n) };
+      g.phase = 'xunxunPick';
+      g.log = pushLog(g.log, p.name+' 发动【恂恂】,亮出牌堆顶'+n+'张牌…');
+      return;
+    } else {
+      // 牌堆为空,无法发动恂恂,直接进入摸牌阶段
+      g.log = pushLog(g.log, p.name+' 尝试发动【恂恂】,但牌堆为空,无法发动');
+      g.phase='draw';
+    }
   } else {
     g.phase='draw';
   }
 }
+
+// respondXunxunStart: 李典【恂恂】手动启动（当在draw阶段点击"发动【恂恂】"按钮）
+// 服务端会检查 phase===draw && hasCap(mySeat,'xunxun') && deck.length>0
+function respondXunxunStart(){
+  tx(g=>{
+    if(g.phase!=='draw') return g;
+    if(g.turn!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'xunxun')) return g;
+    if((g.deck||[]).length === 0) return g;
+    
+    // 启动恂恂：亮出牌堆顶至多4张牌
+    if(ensureDeck(g) && g.deck.length > 0){
+      const n = Math.min(4, g.deck.length);
+      const cards = g.deck.splice(g.deck.length - n, n);
+      g.pending = { type:'xunxunPick', seat: mySeat, cards, takeN: Math.min(2, n) };
+      g.phase = 'xunxunPick';
+      g.log = pushLog(g.log, me.name+' 发动【恂恂】,亮出牌堆顶'+n+'张牌…');
+      markSkillSound(g, '恂恂');
+      return g;
+    }
+    return g;
+  });
+}
+
 // advancePastPlay/advancePastDiscard: 出牌阶段、弃牌阶段各自"这个阶段是否被跳过"的统一判断,
 // 从 enterDrawPhase(跳过摸牌阶段直接来到这里)、doDraw(正常摸完牌来到这里)、endPlay(正常结束
 // 出牌来到这里)三处共用——之前 skipPlay 的消费点分散写在 enterDrawPhase/doDraw 两处、各自内嵌

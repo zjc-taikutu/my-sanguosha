@@ -138,6 +138,11 @@ function resetQiaobian(){ qiaobianMode=false; qiaobianCardIdx=null; qiaobianPhas
 let guanxingTop = [];
 let guanxingBottom = [];
 function resetGuanxing(){ guanxingTop=[]; guanxingBottom=[]; }
+// 李典【恂恂】: 选择获得哪些牌和置于底部的顺序。和观星类似,但语义不同:
+// xunxunKeep = 要获得的牌的下标数组, xunxunBottom = 其余牌置于底部的顺序
+let xunxunKeep = [];
+let xunxunBottom = [];
+function resetXunxun(){ xunxunKeep=[]; xunxunBottom=[]; }
 // 借刀杀人:两步选目标(先选 A:有武器的角色,再选 B:A 攻击范围内的其他角色),与常规单目标出牌
 // 走的 selectedCardIdx 通用块互斥(见 render 里 isJiedaoSel 的排除条件)。jiedaoSeatA===null 时选 A,
 // 选中后 jiedaoSeatA 存座位号,再点一次选 B 才真正提交。
@@ -254,6 +259,96 @@ function renderGuanxing(g, c){
     c.appendChild(ok);
   }
 }
+// renderXunxun: 李典【恂恂】选择阶段的UI。类似观星,但语义不同:
+// - 需要选择 takeN 张牌获得（按 UI 点击顺序,最后点的最后获得）
+// - 剩余的牌按玩家指定的顺序置于牌堆底（xunxunBottom 存下标,按点击顺序,先点=更靠近牌堆底）
+function renderXunxun(g, c){
+  const seat = g.pending.seat;
+  const cards = g.pending.cards || [];
+  const takeN = g.pending.takeN || 2;
+  const isMe = seat===mySeat;
+  
+  if(!isMe){
+    // 公开亮牌：所有玩家都能看到亮出的牌
+    setBanner(escapeHtml(g.players[seat].name)+' 发动【恂恂】,亮出的牌:');
+    const list=document.createElement('div'); list.className='general-pick-list';
+    cards.forEach((card,idx)=>{
+      const row=document.createElement('div'); row.className='general-pick-card';
+      row.style.cursor='default';
+      row.innerHTML =
+        '<div class="general-pick-info">'
+          +'<div class="general-pick-name">'+(cardFace(card)||'')+' '+escapeHtml(card.name)+'</div>'
+          +'<div class="general-pick-desc">公开亮牌</div>'
+        +'</div>';
+      list.appendChild(row);
+    });
+    c.appendChild(list);
+    return;
+  }
+  
+  setBanner('【恂恂】已亮出牌堆顶'+cards.length+'张牌,请选择获得其中'+takeN+'张,其余牌将按指定顺序置于牌堆底');
+  const list=document.createElement('div'); list.className='general-pick-list';
+  
+  cards.forEach((card,idx)=>{
+    const inKeep = xunxunKeep.includes(idx);
+    const inBottom = xunxunBottom.includes(idx);
+    const row=document.createElement('div'); row.className='general-pick-card';
+    row.style.cursor='default';
+    
+    const keepPos = inKeep ? (xunxunKeep.indexOf(idx)+1) : null;
+    const bottomPos = inBottom ? (xunxunBottom.indexOf(idx)+1) : null;
+    
+    row.innerHTML =
+      '<div class="general-pick-info">'
+        +'<div class="general-pick-name">'+(cardFace(card)||'')+' '+escapeHtml(card.name)+'</div>'
+        +'<div class="general-pick-desc">'+(inKeep?'已选择获得（第'+keepPos+'张）':inBottom?'已选择置底（第'+bottomPos+'个）':'尚未选择')+'</div>'
+      +'</div>';
+    
+    const btnBox=document.createElement('div'); btnBox.style.display='flex'; btnBox.style.gap='8px';
+    
+    if(!inKeep && !inBottom){
+      // 如果还没选择够takeN张,可以选择获得
+      if(xunxunKeep.length < takeN){
+        const bKeep=document.createElement('button'); bKeep.className='primary';
+        bKeep.textContent='获得';
+        bKeep.onclick=(e)=>{ e.stopPropagation(); xunxunKeep.push(idx); render(g); };
+        btnBox.appendChild(bKeep);
+      }
+      // 可以选择置底
+      const bBottom=document.createElement('button'); bBottom.className='ghost';
+      bBottom.textContent='置底';
+      bBottom.onclick=(e)=>{ e.stopPropagation(); xunxunBottom.push(idx); render(g); };
+      btnBox.appendChild(bBottom);
+    } else {
+      const bUndo=document.createElement('button'); bUndo.className='ghost'; bUndo.textContent='移出重选';
+      bUndo.onclick=(e)=>{ e.stopPropagation(); 
+        xunxunKeep=xunxunKeep.filter(x=>x!==idx); 
+        xunxunBottom=xunxunBottom.filter(x=>x!==idx); 
+        render(g); 
+      };
+      btnBox.appendChild(bUndo);
+    }
+    
+    row.appendChild(btnBox);
+    list.appendChild(row);
+  });
+  c.appendChild(list);
+  
+  // 检查是否所有牌都已经分配完毕
+  if(xunxunKeep.length + xunxunBottom.length === cards.length && cards.length>0 && xunxunKeep.length===takeN){
+    const ok=document.createElement('button'); ok.className='primary';
+    ok.textContent='确认';
+    // 恂恂的语义: keepIdxs 是获得的牌的下标（按玩家点击顺序,服务端会 reverse 处理）
+    // bottomOrder 是置底的牌的下标（按玩家点击顺序,先点=更靠近牌堆底）
+    ok.onclick=()=>{
+      const keepIdxs=[...xunxunKeep], bottomOrder=[...xunxunBottom];
+      resetXunxun();
+      respondXunxun(keepIdxs, bottomOrder);
+    };
+    c.appendChild(ok);
+  }
+}
+
 function renderPickGeneral(g, c){
   const me = g.players[mySeat];
   if(!me){ setBanner('选将阶段…'); return; }
@@ -653,6 +748,29 @@ function renderControls(g){
     setBanner('【刚烈】判定不为红桃,等待 '+escapeHtml(source?source.name:'伤害来源')+' 选择弃牌或受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害…');
     return;
   }
+  // 李典【忘隙】:伤害后可选发动,双方各摸牌
+  if(g.phase==='wangxiAsk' && g.pending && g.pending.type==='wangxiAsk' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【忘隙】'; b1.onclick=()=>respondWangxi(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondWangxi(false);
+    c.appendChild(b2);
+    const otherP = g.players[g.pending.otherSeat];
+    const amount = g.pending.amount || 1;
+    if(g.pending.death){
+      setBanner('你造成了致命伤害,是否发动【忘隙】?你将摸'+amount+'张牌。');
+    } else {
+      const desc = otherP ? '你与 '+escapeHtml(otherP.name) : '你与伤害来源';
+      setBanner(desc+' 各摸'+amount+'张牌,是否发动【忘隙】?');
+    }
+    return;
+  }
+  if(g.phase==='wangxiAsk' && g.pending && g.pending.type==='wangxiAsk'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'李典', '忘隙');
+    return;
+  }
   if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk' && g.pending.seat===mySeat){
     const b1=document.createElement('button'); b1.className='primary';
     b1.textContent='发动【裸衣】'; b1.onclick=()=>respondLuoyi(true);
@@ -666,6 +784,11 @@ function renderControls(g){
   if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk'){
     const p=g.players[g.pending.seat];
     waitAskBanner(p?p.name:'许褚', '裸衣');
+    return;
+  }
+  // 李典【恂恂】选择阶段:选择获得的牌和置底顺序
+  if(g.phase==='xunxunPick' && g.pending && g.pending.type==='xunxunPick'){
+    renderXunxun(g, c);
     return;
   }
   if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat){
@@ -1369,10 +1492,16 @@ function renderControls(g){
     } else {
       const b=document.createElement('button'); b.className='primary';
       b.textContent='摸两张牌'; b.onclick=doDraw; c.appendChild(b);
+      const xunxunAvailable = hasCap(me,'xunxun') && (g.deck||[]).length > 0;
       if(tuxiAvailable){
         const tb=document.createElement('button'); tb.className='ghost';
         tb.textContent='发动【突袭】'; tb.onclick=()=>{ tuxiMode=true; tuxiPicks=[]; render(g); };
         c.appendChild(tb);
+      }
+      if(xunxunAvailable){
+        const xb=document.createElement('button'); xb.className='ghost';
+        xb.textContent='发动【恂恂】'; xb.onclick=()=>respondXunxunStart();
+        c.appendChild(xb);
       }
       setBanner('轮到你,摸牌阶段。');
     }

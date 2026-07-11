@@ -201,6 +201,34 @@ const GENERALS = {
   machao:        { id:'machao',        name:'马超',   gender:'male', maxHp:4, skill:'马术/铁骑',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。铁骑:当你使用【杀】指定一名角色为目标后,你可以进行判定,若结果为红色,此【杀】不可被【闪】抵消(含视为闪的效果,如八卦阵)。',
     caps:{ extraMinus1:true, tieqi:true } },
+  lidian:        { id:'lidian',        name:'李典',   gender:'male', maxHp:3, skill:'恂恂/忘隙',
+    desc:'恂恂:摸牌阶段,你可以放弃摸牌,改为亮出牌堆顶至多4张牌,获得其中2张,其余按任意顺序置于牌堆底。忘隙:每当一名其他角色对你造成1点伤害后,或你对其他角色造成1点伤害后,你与其各摸1张牌(每点伤害触发一次,可选发动)。',
+    caps:{ xunxun:true, wangxi:true },
+    hooks:{
+      onDamaged: function(g, seat, ctx){
+        const p=g.players[seat];
+        if(!p || !p.alive) return;
+        // 非致命/合法来源/非自杀才挂起
+        const sourceSeat = ctx && ctx.sourceSeat;
+        if(typeof sourceSeat !== 'number' || sourceSeat === seat) return; // 无来源/是自己 -> 静默跳过
+        if(ctx.amount <= 0) return; // amount 必须 > 0
+        
+        // 仅非致命时触发受伤侧（致命时在 finishDying 处理造成侧）
+        if(p.hp <= 0) return; // 已经致命，跳过
+        
+        g.pending = { 
+          type:'wangxiAsk', 
+          seat, 
+          otherSeat: sourceSeat,
+          death: false,
+          amount: ctx.amount,
+          resume:{type:ctx.srcType}
+        };
+        g.phase='wangxiAsk';
+        g.log=pushLog(g.log, p.name+' 是否发动【忘隙】…');
+      }
+    }
+  },
   pangde:        { id:'pangde',        name:'庞德',   gender:'male', maxHp:4, skill:'马术/猛进',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。猛进:当你使用的【杀】被目标角色的【闪】抵消时,你可以弃置其一张牌。',
     caps:{ extraMinus1:true, mengjin:true } },
