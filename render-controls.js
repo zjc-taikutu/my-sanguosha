@@ -428,8 +428,23 @@ function renderControls(g){
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【青龙偃月刀】…');
     return;
   }
+  // 陆逊【连营】:失去最后1张手牌时是否发动
+  if(g.phase==='lianyingAsk' && g.pending && g.pending.type==='lianyingAsk' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【连营】'; b1.onclick=()=>respondLianying(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondLianying(false);
+    c.appendChild(b2);
+    setBanner('你失去了最后一张手牌,是否发动【连营】,摸1张牌…');
+    return;
+  }
+  if(g.phase==='lianyingAsk' && g.pending && g.pending.type==='lianyingAsk'){
+    const p=g.players[g.pending.seat];
+    setBanner((p?p.name:'?')+' 是否发动【连营】…');
+    return;
+  }
   // 贯石斧:杀被闪抵消,装备者(攻击者)可弃自己2张牌(手牌/装备混合toggle多选)令这张杀依然
-  // 造成伤害。恰好选够2项才出现"确认发动";同屏始终有"不发动"。
   if(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat){
     const to=g.players[g.pending.to].name;
     const opts=guanshifuOptions(g.players[mySeat]);

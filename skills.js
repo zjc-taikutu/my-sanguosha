@@ -56,7 +56,10 @@ function respondTuxi(targets){
       const tgt=g.players[t];
       if((tgt.hand||[]).length>0){
         const j=Math.floor(Math.random()*tgt.hand.length);
-        me.hand.push(tgt.hand.splice(j,1)[0]);
+        const card = tgt.hand.splice(j,1)[0];
+        me.hand.push(card);
+        // 陆逊【连营】:检查目标玩家是否触发连营
+        maybeStartLianying(g, t, 1);
         g.log=pushLog(g.log, me.name+' 发动【突袭】,从 '+tgt.name+' 拿走一张手牌');
       } else {
         g.log=pushLog(g.log, me.name+' 发动【突袭】,但 '+tgt.name+' 没有手牌');
@@ -97,6 +100,8 @@ function jieDaoShaRen(cardIdx, seatA, seatB){
     // 目标同样生效),不能因为这条路径不走 CARD_PLAYS['杀'].canTarget 就漏了这层保护。
     if(hasCap(B,'kongcheng') && (B.hand||[]).length===0) return g;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 对 '+A.name+' 使用【借刀杀人】,目标 '+B.name);
     markCardSound(g, '借刀杀人', mySeat, card, seatA); // 借刀杀人不走 playCard 统一出口(两步选目标的独立函数),单独补一次
@@ -125,6 +130,8 @@ function duanLiang(cardIdx, targetSeat){
     if(distance(g, mySeat, targetSeat) > 2) return g;
     g.duanliangUsed=true;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
     markCardSound(g, '兵粮寸断', mySeat, card, targetSeat); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
     startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:card});
@@ -150,6 +157,8 @@ function qiXi(cardIdx, targetSeat){
       || (target.delays||[]).length>0;
     if(!hasTargetCard) return g;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【过河拆桥】使用,发动【奇袭】,目标 '+target.name);
     markSkillSound(g, '奇袭');
@@ -171,6 +180,8 @@ function guoSe(cardIdx, targetSeat){
     target.delays = target.delays || [];
     if(target.delays.some(c=>c && c.name==='乐不思蜀')) return g;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     const trickCard={...card, name:'乐不思蜀', originalName:card.name};
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【乐不思蜀】使用,发动【国色】,目标 '+target.name);
     markSkillSound(g, '国色');
@@ -195,6 +206,8 @@ function liJian(cardIdx, fromSeat, toSeat){
     if(fromSeat===toSeat || !from || !to || !from.alive || !to.alive || !isMale(from) || !isMale(to)) return g;
     if(maleSeats(g).length<2) return g;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     g.discard.push(card);
     g.liJianUsed=true;
     g.log=pushLog(g.log, me.name+' 弃置一张牌发动【离间】,令 '+from.name+' 视为对 '+to.name+' 使用【决斗】');
@@ -574,6 +587,8 @@ function quHu(cardIdx, targetSeat){
     const card=me.hand[cardIdx];
     if(!card) return g;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     g.discard.push(card);
     g.quHuUsed=true;
     g.pending={type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card};
@@ -832,6 +847,8 @@ function zhiHeng(cardIdxs){
     unique.forEach(i=>{ moved.push(me.hand.splice(i,1)[0]); });
     moved.forEach(c=>{ if(c) g.discard.push(c); });
     g.zhihengUsed=true;
+    // 陆逊【连营】:检查是否触发连营（一次性检查整个操作后的手牌数）
+    if(moved.length > 0) maybeStartLianying(g, mySeat, moved.length);
     drawN(g, mySeat, moved.length);
     g.log=pushLog(g.log, me.name+' 发动【制衡】,弃'+moved.length+'张牌并摸'+moved.length+'张牌');
     markSkillSound(g, '制衡');
@@ -875,6 +892,8 @@ function qingNang(cardIdx, targetSeat){
     if(!tgt || !tgt.alive || tgt.hp>=tgt.maxHp) return g;
     g.qingNangUsed=true;
     me.hand.splice(cardIdx,1);
+    // 陆逊【连营】:检查是否触发连营
+    maybeStartLianying(g, mySeat, 1);
     g.discard.push(card);
     tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【青囊】,令 '+tgt.name+' 回复1点体力');
@@ -1017,4 +1036,6 @@ function respondXiaoguoChoice(choice){
     advanceXiaoguo(g, endingSeat, from);
     return g;
   });
+
+
 }
