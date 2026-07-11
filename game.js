@@ -12,62 +12,7 @@ let myClientId = (function(){
 
 // ---------- join ----------
 document.getElementById('joinBtn').onclick = joinRoom;
-function joinRoom(){
-  const errEl = document.getElementById('lobbyErr');
-  errEl.textContent = '';
-  if (NOT_CONFIGURED){ errEl.textContent = '请先在文件里填入 Firebase 配置再部署。'; return; }
-  const room = document.getElementById('roomInput').value.trim();
-  const name = document.getElementById('nameInput').value.trim();
-  if(!room){ errEl.textContent='请填房间号'; return; }
-  // bug1:房间号被拼进 Firebase 路径,key 不允许 . # $ [ ] / 等字符,只放行字母/数字/-/_
-  if(!/^[A-Za-z0-9_-]+$/.test(room)){ errEl.textContent='房间号只能用字母、数字、- 和 _'; return; }
-  if(!name){ errEl.textContent='请填名字'; return; }
-  roomId = room;
-  gameRef = db.ref('rooms/'+roomId+'/game');
 
-  let joinError = null; // 在事务里设置,事务外提示
-
-  gameRef.transaction(g => {
-    joinError = null;
-    if(g === null){
-      g = { started:false, players:[], turn:0, phase:'lobby', deck:[], discard:[],
-            pending:null, shaUsed:false, roundNum:1, roundSeatsActed:[], lastCardSound:null,
-            lastSkillSound:null,
-            log:['房间已创建,等待玩家加入'] };
-    }
-    g.players = g.players || [];
-    // bug2:先按本地标识找"我自己"(刷新重连),能回到原座位
-    const mine = g.players.findIndex(p=>p && p.cid===myClientId);
-    if(mine>=0){ mySeat = mine; return g; }
-    // 名字被房间里"别人"(不同 cid)占用 -> 拒绝,不复用座位
-    const nameTaken = g.players.some(p=>p && p.name===name && p.cid!==myClientId);
-    if(nameTaken){ joinError='这个名字已被占用,请换一个'; return g; }
-    if(g.started){ return g; } // 这局已开始,且不是原座位的人 -> 事务外提示
-    if(g.players.length >= SEATS) return g; // full
-    mySeat = g.players.length;
-    g.players.push({ name, cid:myClientId, hp:MAX_HP, maxHp:MAX_HP, hand:[], alive:true });
-    g.log = pushLog(g.log, name+' 加入了房间（座位'+(mySeat+1)+'）');
-    return g;
-  }, (err, committed, snap)=>{
-    if(err){ errEl.textContent='连接出错: '+err.message; return; }
-    if(joinError){ errEl.textContent=joinError; return; }
-    const g = snap.val();
-    if(mySeat===null && (g.players||[]).length>=SEATS && !g.started){
-      errEl.textContent='房间已满（已有3人）。'; return;
-    }
-    if(mySeat===null && g.started){
-      errEl.textContent='这局已经开始了,换个房间号或等下一局。'; return;
-    }
-    enterGame();
-  });
-}
-
-function enterGame(){
-  document.getElementById('lobby').classList.add('hidden');
-  document.getElementById('configWarn').classList.add('hidden');
-  document.getElementById('game').classList.remove('hidden');
-  gameRef.on('value', snap => render(snap.val()));
-}
 
 // ---------- helpers ----------
 // Firebase drops empty arrays/objects -> they come back undefined. Restore defaults.
@@ -573,18 +518,6 @@ function judge(g){
   g.log=pushLog(g.log, '判定牌:'+card.suit+rankText(card.rank));
   return card;
 }
-// revealPool: 批量亮出牌堆顶 n 张牌,只放进一个数组返回(不进弃牌堆、不记判定日志)——
-// 和 judge() 语义不同:judge 是"翻一张+立刻进弃牌堆+判定日志",这里是"批量暂存到公共池,
-// 之后可能被人挑走进手牌、也可能被无懈/挑完剩余弃入弃牌堆",五谷丰登专用。
-// 牌堆(含重洗弃牌堆)不够 n 张时,能亮多少算多少(不报错、不阻断)。
-function revealPool(g, n){
-  const pool=[];
-  for(let i=0;i<n;i++){
-    if(!ensureDeck(g)) break;
-    pool.push(g.deck.pop());
-  }
-  return pool;
-}
 // 八卦阵:被要求出【闪】时先判定,红=视为打出一张【闪】(免这次伤害),黑=判定失败(仍走正常出闪/受伤)。
 // 只在「需要出闪」的响应点调用。能力来源=装备(cap:'bagua'),走 hasCap 不硬编码牌名。
 // 返回三态:true=判定成功(红)、false=判定失败(黑/无牌)、'pending'=挂起等待【鬼才】改判决定
@@ -769,109 +702,6 @@ function stripUndefined(obj){
 }
 function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); return stripUndefined(fn(g) || g); }); }
 
-// startGame(mode): 'random'(随机分配,允许原来的重复逻辑被"不放回抽样"取代,天然不重复)
-// 或 'pick'(三选一)。两种模式都在真正开局前用不放回抽样从全部武将里锁定"这局会用到哪些
-// 武将",不需要处理"两人抢同一个武将"这类实时并发冲突——抽样这一步和后续所有分配都在同一次
-// tx 事务里原子完成。
-// 守卫条件必须同时检查 g.phase==='pickingGeneral',不能只查 g.started——pick 模式下选将阶段
-// g.started 仍是 false,如果几个玩家几乎同时点了不同的开始按钮(比如一人先点"三选一"已经建立
-// 好候选状态,另一人紧接着点"随机武将"),只查 g.started 会让后到的那次调用照样通过守卫、把
-// 刚建立好的选将状态覆盖掉。Firebase 的 tx() 事务保证这些调用严格按到达服务器的先后顺序依次
-// 执行(不会真正并发、不会数据损坏),补上这条守卫后"先到先得,后面的都是 no-op"就是完全正确
-// 的行为,不需要额外加锁或更复杂的仲裁逻辑。
-function startGame(mode){
-  tx(g=>{
-    if(g.started || g.phase==='pickingGeneral' || g.players.length<MIN_PLAYERS) return g;
-    if(mode!=='random' && mode!=='pick') return g;
-    g.generalMode = mode;
-    const n = g.players.length;
-    const allIds = Object.keys(GENERALS);
-    const shuffled = [...allIds].sort(()=>Math.random()-0.5); // 不放回抽样,保证不重复
-
-    if(mode==='pick'){
-      const perPlayer = 3;
-      const needed = n*perPlayer;
-      if(shuffled.length < needed){
-        // 武将数不够撑起三选一(每人3个候选且互不重复),安全退化为直接随机分配,不报错不卡死
-        g.players.forEach((p,i)=>{ p.general = shuffled[i % shuffled.length]; });
-        finishGeneralAssign(g);
-        return g;
-      }
-      const pool = shuffled.slice(0, needed);
-      g.players.forEach((p,i)=>{
-        p.generalChoices = pool.slice(i*perPlayer, (i+1)*perPlayer);
-        p.general = null;
-      });
-      g.phase = 'pickingGeneral';
-      g.log = pushLog(g.log, '选将阶段:请各位玩家从候选中选择一名武将');
-      return g;
-    }
-
-    // random 模式:直接不重复分配,走原有开局收尾
-    g.players.forEach((p,i)=>{ p.general = shuffled[i]; });
-    finishGeneralAssign(g);
-    return g;
-  });
-}
-// finishGeneralAssign: 武将确定之后的开局收尾。原样对照迁移自原 startGame 函数体"分配完武将
-// 之后"的全部逻辑(buildDeck/每人发牌堆状态/drawN初始手牌/g.started/g.pending/开局日志/
-// startTurn(g,0)),一步不少。注意:原函数从未手写 g.phase(完全交给 startTurn 内部的
-// continueQiaobianCheck 链路决定该进入哪个阶段),这里同样不手写 g.phase,维持原有行为
-// ——这正是"开局第一回合甄姬洛神不触发"那个bug当年的教训(见下面 startTurn 调用处的注释),
-// 不能因为这次改动顺手引入新的手写 g.phase。
-function finishGeneralAssign(g){
-  g.deck = buildDeck(); g.discard=[];
-  g.players.forEach((p,i)=>{
-    p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
-    p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.delays=[];
-    p.equips = emptyEquips();                // 装备区:开局四槽全空
-    drawN(g,i,START_HAND);
-  });
-  g.started=true; g.pending=null;
-  g.log = pushLog(g.log, '游戏开始！');
-  // 第一回合也要走 startTurn(不能手写 g.turn/g.phase),否则会跳过判定区处理和洛神触发链路
-  // ——这正是"开局第一回合甄姬洛神不触发"这个 bug 的根因,第二回合起走 endTurn→startTurn 就正常。
-  startTurn(g, 0);
-}
-// respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
-function respondPickGeneral(generalId){
-  tx(g=>{
-    if(g.phase!=='pickingGeneral') return g;
-    const me=g.players[mySeat];
-    if(!me || me.general || !Array.isArray(me.generalChoices) || !me.generalChoices.includes(generalId)) return g;
-    me.general = generalId;
-    me.generalChoices = null;
-    // 日志刻意不写具体武将名字——候选和最终选择在正式开局(finishGeneralAssign)前都是
-    // 隐藏信息,g.log 是所有玩家共享同步的字段(配合"新日志自动弹toast提醒所有人"机制),
-    // 写具体牌名会让所有人立刻收到暴露选择的弹窗提示。
-    g.log = pushLog(g.log, me.name+' 已选定武将,等待其他玩家…');
-    if(g.players.every(p=>p && p.general)){
-      finishGeneralAssign(g); // 全部选完,自动进入正式开局
-    }
-    return g;
-  });
-}
-// debugPickGeneral: 仅供测试用的调试入口——不受 p.generalChoices(三选一候选池)限制,可以
-// 直接指定任意已实现的武将。**刻意不检查"武将是否已被其他玩家选择过"这条唯一性限制**——
-// 正式对局(respondPickGeneral)靠开局前不放回抽样天然保证同局武将互不重复,但测试场景下
-// 经常需要让多人都选到同一个武将来单独反复验证某个技能,不应该受人数/候选池随机性影响,
-// 所以这里放宽这条规则,允许重复选择同一个武将。这不代表正式对局允许重复,只是测试专用的
-// 例外通道,和 render.js 里明显标注"仅供调试测试使用"的 UI 入口配套。
-function debugPickGeneral(generalId){
-  tx(g=>{
-    if(g.phase!=='pickingGeneral') return g;
-    const me=g.players[mySeat];
-    if(!me || me.general) return g; // 已经选过了不能重复选,和正式respondPickGeneral保持同样的基本约束
-    if(!GENERALS[generalId]) return g; // 必须是真实存在的武将id
-    me.general = generalId;
-    me.generalChoices = null;
-    g.log = pushLog(g.log, me.name+' (调试模式)选择了武将【'+GENERALS[generalId].name+'】');
-    if(g.players.every(p=>p && p.general)){
-      finishGeneralAssign(g);
-    }
-    return g;
-  });
-}
 function doDraw(){
   tx(g=>{
     if(g.phase!=='draw'||g.turn!==mySeat) return g;
@@ -961,49 +791,6 @@ function respondShuangxiong(activate){
     finishShuangxiongJudge(g, mySeat, card);
     return g;
   });
-}
-// respondTuxi: 张辽【突袭】——摸牌阶段放弃摸牌,改为从 1~2 名其他存活玩家的手牌里各随机拿一张。
-// targets 是 1~2 个座位号(不含自己、不重复、都要存活);校验不过直接不生效(状态不变)。
-// 选到没手牌的目标不算错误,只是拿不到牌,记一条日志说明,不阻断其余目标的结算。
-// 和顺手牵羊不同:这是摸牌阶段的替代行为,不是出牌阶段的锦囊,不开无懈可击窗口,同步直接结算。
-function respondTuxi(targets){
-  tx(g=>{
-    if(g.phase!=='draw'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!hasCap(me,'tuxi')) return g;
-    if(!Array.isArray(targets) || targets.length<1 || targets.length>2) return g;
-    const seen=new Set();
-    for(const t of targets){
-      if(typeof t!=='number' || t===mySeat || !g.players[t] || !g.players[t].alive || seen.has(t)) return g;
-      seen.add(t);
-    }
-    targets.forEach(t=>{
-      const tgt=g.players[t];
-      if((tgt.hand||[]).length>0){
-        const j=Math.floor(Math.random()*tgt.hand.length);
-        me.hand.push(tgt.hand.splice(j,1)[0]);
-        g.log=pushLog(g.log, me.name+' 发动【突袭】,从 '+tgt.name+' 拿走一张手牌');
-      } else {
-        g.log=pushLog(g.log, me.name+' 发动【突袭】,但 '+tgt.name+' 没有手牌');
-      }
-    });
-    g.phase='play';
-    return g;
-  });
-}
-function triggerJiangOnTarget(g, fromSeat, targetSeat, kind, isRedSha){
-  const from=g.players[fromSeat], target=g.players[targetSeat];
-  if(kind!=='duel' && !(kind==='sha' && isRedSha)) return;
-  if(from && from.alive && hasCap(from,'jiang')){
-    drawN(g, fromSeat, 1);
-    g.log=pushLog(g.log, from.name+' 发动【激昂】,摸一张牌');
-    markSkillSound(g, '激昂');
-  }
-  if(target && target.alive && hasCap(target,'jiang')){
-    drawN(g, targetSeat, 1);
-    g.log=pushLog(g.log, target.name+' 发动【激昂】,摸一张牌');
-    markSkillSound(g, '激昂');
-  }
 }
 // ===== 统一出牌入口:出牌阶段所有牌共用样板,各牌独特部分在 CARD_PLAYS 表里 =====
 // actionId:除"杀"外都等于 card.name;杀固定为 '杀'(赵云的闪也走杀,物理牌名可能是'闪')。
@@ -1327,28 +1114,6 @@ function respondLiegong(activate){
     return g;
   });
 }
-// jieDaoShaRen: 使用者选定 A(有武器)、B(在 A 攻击范围内,不是 A 自己)后提交,弃牌+开无懈窗口。
-// 距离校验(B 是否在 A 范围内)就在这一步做,A 后续出杀时不再重复校验(见 respondJiedao 注释)。
-function jieDaoShaRen(cardIdx, seatA, seatB){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    const card=me.hand[cardIdx];
-    if(!card || card.name!=='借刀杀人') return g;
-    const A=g.players[seatA], B=g.players[seatB];
-    if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
-    if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
-    // 诸葛亮【空城】:借刀杀人的B同样是"被指定为这张杀的目标"(官方FAQ明确空城对借刀杀人的B
-    // 目标同样生效),不能因为这条路径不走 CARD_PLAYS['杀'].canTarget 就漏了这层保护。
-    if(hasCap(B,'kongcheng') && (B.hand||[]).length===0) return g;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    g.log=pushLog(g.log, me.name+' 对 '+A.name+' 使用【借刀杀人】,目标 '+B.name);
-    markCardSound(g, '借刀杀人', mySeat, card, seatA); // 借刀杀人不走 playCard 统一出口(两步选目标的独立函数),单独补一次
-    startTrick(g, {trick:'借刀杀人', from:mySeat, to:seatA, seatB});
-    return g;
-  });
-}
 // respondJiedao: 仅 A(pending.seatA)可响应。选杀:走 resolveShaUse(复用铁骑/烈弓/毅重等判定),
 // 但故意不设 g.shaUsed——这张"借来的杀"不占用任何人(包括 A 自己、当前回合玩家)的次数限制,
 // 也不重复校验距离(B 是否在 A 范围内,已经在 jieDaoShaRen 选目标那一步校验过)。
@@ -1520,78 +1285,6 @@ function playShaFangtian(cardIdx, targets){
     return g;
   });
 }
-// duanLiang: 徐晃【断粮】——出牌阶段限一次,将一张黑色基本牌或黑色装备牌当【兵粮寸断】
-// 使用,距离2以内。官方规则不是"弃任意牌"(此前的实现有误);选中的这张真实牌直接传给
-// startTrick 的 info.card,走和真实兵粮寸断完全一样的 startTrick/resolveTrick/回合开始判定
-// 流程(可被无懈可击抵消)——resolveTrick 按 info.trick 字段('兵粮寸断')分派,discardOrVanish
-// 只看 card.virtual 标记,两者都跟牌的真实身份无关,不需要构造虚拟对象,判定完直接以真实
-// 身份进弃牌堆即可。距离校验复用和杀同一套 distance(g,mySeat,targetSeat)<=2。
-function duanLiang(cardIdx, targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!hasCap(me,'duanliang') || g.duanliangUsed) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
-    const isBlack = card.suit==='♠' || card.suit==='♣';
-    const isBasicOrEquip = BASIC_CARDS.includes(card.name) || !!getEquip(card.name);
-    if(!isBlack || !isBasicOrEquip) return g;
-    if(targetSeat===mySeat || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
-    if(distance(g, mySeat, targetSeat) > 2) return g;
-    g.duanliangUsed=true;
-    me.hand.splice(cardIdx,1);
-    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
-    markCardSound(g, '兵粮寸断', mySeat, card, targetSeat); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
-    startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:card});
-    return g;
-  });
-}
-// qiXi: 甘宁【奇袭】——将任意一张黑色手牌当【过河拆桥】使用。
-// 和徐晃【断粮】一样走独立技能动作:真实手牌先离手并进弃牌堆,再按过河拆桥开启无懈窗口。
-function qiXi(cardIdx, targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!hasCap(me,'qixi')) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
-    const isBlack = card.suit==='♠' || card.suit==='♣';
-    if(!isBlack) return g;
-    const target=g.players[targetSeat];
-    if(targetSeat===mySeat || !target || !target.alive) return g;
-    const hasTargetCard = (target.hand||[]).length>0
-      || EQUIP_SLOTS.some(s=>target.equips && target.equips[s])
-      || (target.delays||[]).length>0;
-    if(!hasTargetCard) return g;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【过河拆桥】使用,发动【奇袭】,目标 '+target.name);
-    markSkillSound(g, '奇袭');
-    markCardSound(g, '过河拆桥', mySeat, card, targetSeat);
-    startTrick(g, {trick:'过河拆桥', from:mySeat, to:targetSeat});
-    return g;
-  });
-}
-function guoSe(cardIdx, targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!hasCap(me,'guose')) return g;
-    const card=me.hand[cardIdx];
-    if(!card || card.suit!=='♦') return g;
-    const target=g.players[targetSeat];
-    if(targetSeat===mySeat || !target || !target.alive) return g;
-    target.delays = target.delays || [];
-    if(target.delays.some(c=>c && c.name==='乐不思蜀')) return g;
-    me.hand.splice(cardIdx,1);
-    const trickCard={...card, name:'乐不思蜀', originalName:card.name};
-    g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【乐不思蜀】使用,发动【国色】,目标 '+target.name);
-    markSkillSound(g, '国色');
-    markCardSound(g, '乐不思蜀', mySeat, card, targetSeat);
-    startTrick(g, {trick:'乐不思蜀', from:mySeat, to:targetSeat, card:trickCard});
-    return g;
-  });
-}
 function lianHuan(cardIdx, targetSeat){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
@@ -1609,85 +1302,6 @@ function lianHuan(cardIdx, targetSeat){
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【铁索连环】使用,目标 '+targets.map(seat=>g.players[seat].name).join('、'));
     markSkillSound(g, '连环');
     startTieSuoTargets(g, mySeat, targets);
-    return g;
-  });
-}
-function maleSeats(g){
-  return g.players.map((p,i)=>({p,i})).filter(o=>o.p && o.p.alive && isMale(o.p)).map(o=>o.i);
-}
-function liJian(cardIdx, fromSeat, toSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'lijian') || g.liJianUsed) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
-    const from=g.players[fromSeat], to=g.players[toSeat];
-    if(fromSeat===toSeat || !from || !to || !from.alive || !to.alive || !isMale(from) || !isMale(to)) return g;
-    if(maleSeats(g).length<2) return g;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    g.liJianUsed=true;
-    g.log=pushLog(g.log, me.name+' 弃置一张牌发动【离间】,令 '+from.name+' 视为对 '+to.name+' 使用【决斗】');
-    markSkillSound(g, '离间');
-    triggerJiangOnTarget(g, fromSeat, toSeat, 'duel', false);
-    startTrick(g, {trick:'决斗', from:fromSeat, to:toSeat});
-    return g;
-  });
-}
-function fanJian(targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat], target=g.players[targetSeat];
-    if(!me || !target || !me.alive || !target.alive || targetSeat===mySeat) return g;
-    if(!hasCap(me,'fanjian') || g.fanJianUsed || (me.hand||[]).length===0) return g;
-    g.fanJianUsed=true;
-    g.pending={type:'fanjianSuit', seat:mySeat, targetSeat};
-    g.phase='fanjianSuit';
-    g.log=pushLog(g.log, me.name+' 对 '+target.name+' 发动【反间】,令其选择一种花色');
-    markSkillSound(g, '反间');
-    return g;
-  });
-}
-function respondFanjianSuit(suit){
-  tx(g=>{
-    if(g.phase!=='fanjianSuit'||!g.pending||g.pending.type!=='fanjianSuit'||g.pending.targetSeat!==mySeat) return g;
-    if(!['♠','♥','♣','♦'].includes(suit)) return g;
-    const {seat, targetSeat}=g.pending;
-    const zhou=g.players[seat], target=g.players[targetSeat];
-    if(!zhou || !target || !zhou.alive || !target.alive || (zhou.hand||[]).length===0){ g.pending=null; g.phase='play'; return g; }
-    const idx=Math.floor(Math.random()*zhou.hand.length);
-    const card=zhou.hand.splice(idx,1)[0];
-    target.hand.push(card);
-    const same=card.suit===suit;
-    g.log=pushLog(g.log, target.name+' 为【反间】选择 '+suit+',获得并展示 '+card.suit+rankText(card.rank)+'【'+card.name+'】');
-    g.pending=null;
-    if(!same){
-      const interrupted=dealDamage(g, targetSeat, 1, seat, '【反间】', 'fanjian');
-      if(interrupted){
-        if(g.pending) g.pending.resume={type:'fanjian'};
-        return g;
-      }
-      if(checkWin(g)) return g;
-    } else {
-      g.log=pushLog(g.log, '花色相同,'+target.name+' 不受到【反间】伤害');
-    }
-    g.phase='play';
-    return g;
-  });
-}
-function recastLianHuan(cardIdx){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'lianhuan')) return g;
-    const card=me.hand[cardIdx];
-    if(!card || card.suit!=='♣') return g;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    drawN(g, mySeat, 1);
-    g.log=pushLog(g.log, me.name+' 重铸【'+card.name+'】发动【连环】,摸一张牌');
-    markSkillSound(g, '连环');
     return g;
   });
 }
@@ -1773,83 +1387,6 @@ function respondLiuli(choice, newTargetSeat){
     return g;
   });
 }
-// ===== 张郃【巧变】完整版:回合开始时一次性决策"是否发动"+"跳过判定/摸牌/出牌/弃牌
-// 阶段之一"(一回合限一次),仅选"出牌阶段"才附带"移动一张装备/判定牌"这个后续效果
-// (官方原文:"你可以弃置一张手牌并跳过一个阶段(准备阶段和结束阶段除外),若为:摸牌阶段,
-// 你可以获得至多两名角色各一张手牌;出牌阶段,你可以移动场上一张牌。"——这个项目目前
-// 只实现"跳过阶段"+"出牌阶段可移动装备/判定牌"这部分,"摸牌阶段可获得两名角色各一张
-// 手牌"这个官方原文里的额外效果暂不实现,是简化,不是遗漏,见 CLAUDE.md 记录)。
-//
-// continueQiaobianCheck: startTurn 里紧接着"声明轮到谁"之后调用,必须在 resolveDelayTricks
-// (真正的判定阶段)之前问,因为"跳过判定阶段"这个选项要求判定阶段还没发生。没有这个能力
-// 或没有手牌(付不起弃牌的代价)则直接放行到原有链路,不放行的人完全不受这次改动影响。
-// continueGuanxingCheck: 诸葛亮【观星】,回合开始时紧跟着"声明轮到谁"之后调用,比
-// continueQiaobianCheck 更早——观星是"准备阶段"的交互,巧变是"回合开始时(判定阶段之前)"
-// 的交互,准备阶段本来就在判定阶段之前,所以观星要插在链路里更靠前的位置。没有这个能力
-// 或牌堆(含重洗弃牌堆)一张都没有则直接放行到原有链路(继续走巧变检查),不受这次改动影响。
-function continueGuanxingCheck(g, seat){
-  const p=g.players[seat];
-  if(hasCap(p,'guanxing')){
-    const aliveN = g.players.filter(pp=>pp&&pp.alive).length;
-    const n = Math.min(5, aliveN);
-    if(ensureDeck(g) && g.deck.length>0){
-      const actualN = Math.min(n, g.deck.length); // 牌堆不够X张时,有多少看多少,不报错不卡死
-      // g.deck 数组尾部代表"牌堆顶"(judge()/drawN() 都用 g.deck.pop() 取牌),这里从数组末尾
-      // 切出 actualN 张——cards 里下标越大的牌离"牌堆顶"越近,cards[actualN-1] 就是原本
-      // 会被最先翻到的那张。
-      const cards = g.deck.splice(g.deck.length-actualN, actualN);
-      g.pending = { type:'guanxingReview', seat, cards };
-      g.phase = 'guanxingReview';
-      g.log = pushLog(g.log, p.name+' 发动【观星】,正在查看牌堆顶…'); // 不写牌面,私密信息
-      return;
-    }
-  }
-  continueQiaobianCheck(g, seat);
-}
-// respondGuanxing: 观星发动者提交排序结果。topOrder/bottomOrder 是 g.pending.cards 的下标
-// 数组(两者合起来必须恰好覆盖每个下标一次)。约定:topOrder 数组的**最后一个元素**对应的
-// 那张牌,是"放回牌堆顶之后最先会被翻到的那张"(和 judge() 用 pop() 从数组末尾取牌的方向
-// 严格对齐——这是最容易弄反的地方,前端UI组装 topOrder 时必须遵守这个约定,不能想当然按
-// "数组第一个=最先翻到"来传)。bottomOrder 里的牌整体放到牌堆最底部(数组最前面),牌堆见底
-// 前基本不会被摸到/判定到,顺序本身影响很小。
-function respondGuanxing(topOrder, bottomOrder){
-  tx(g=>{
-    if(g.phase!=='guanxingReview'||!g.pending||g.pending.type!=='guanxingReview'||g.pending.seat!==mySeat) return g;
-    const cards = g.pending.cards;
-    const allIdx = [...(topOrder||[]), ...(bottomOrder||[])];
-    // 校验:两个数组合起来必须恰好是cards的每个下标各出现一次,不能多选/漏选/重复选
-    if(allIdx.length!==cards.length || new Set(allIdx).size!==cards.length || !allIdx.every(i=>Number.isInteger(i)&&i>=0&&i<cards.length)) return g;
-    const topCards = topOrder.map(i=>cards[i]);
-    const bottomCards = bottomOrder.map(i=>cards[i]);
-    g.deck = [...bottomCards, ...g.deck, ...topCards];
-    g.pending = null;
-    g.log = pushLog(g.log, g.players[mySeat].name+' 【观星】结束'); // 不写具体怎么排的,私密信息
-    continueQiaobianCheck(g, mySeat); // 继续走向巧变检查->判定阶段,原有链路不变
-    return g;
-  });
-}
-function continueQiaobianCheck(g, seat){
-  const p=g.players[seat];
-  if(hasCap(p,'qiaobian') && (p.hand||[]).length>0){
-    g.pending={type:'qiaobianTurnStart', seat};
-    g.phase='qiaobianTurnStart';
-    g.log=pushLog(g.log, p.name+' 是否发动【巧变】…');
-    return;
-  }
-  continueDelayResolution(g, seat);
-}
-// qiaobianDecline: 仅 pending.seat 本人可响应,"不发动"才需要真正提交(会改变共享状态,
-// 放行到原有链路)。"发动"不需要单独一次网络往返——点"发动"只是让客户端进入"选牌+选阶段"
-// 的本地界面(和徐晃断粮同款,选择过程纯客户端状态),真正生效的提交是 qiaobianDeclare。
-function qiaobianDecline(){
-  tx(g=>{
-    if(g.phase!=='qiaobianTurnStart'||!g.pending||g.pending.type!=='qiaobianTurnStart'||g.pending.seat!==mySeat) return g;
-    g.log=pushLog(g.log, g.players[mySeat].name+'：不发动【巧变】');
-    g.pending=null;
-    continueDelayResolution(g, mySeat);
-    return g;
-  });
-}
 // qiaobianDeclare: 真正弃牌+跳过阶段生效的提交。phaseChoice 是 'judge'/'draw'/'play'/'discard' 之一。
 // - 'judge':判定阶段还没发生,直接跳过 resolveDelayTricks 这一次调用,判定区的牌原样保留,
 //   留到下回合真正轮到判定阶段时再处理(不清空不作废)。
@@ -1891,134 +1428,6 @@ function qiaobianDeclare(cardIdx, phaseChoice){
     return g;
   });
 }
-// respondQiaobianMove: 仅 pending.seat 本人可响应。move 为 null(不移动)或 {kind,srcSeat,
-// slot/idx,dstSeat}(复用 doQiaobianMove 校验+执行)。移动是否合法/是否发生,都不影响
-// "跳过出牌阶段"这个已经生效的效果——最后统一设 skipPlay 并继续原有链路。
-function respondQiaobianMove(move){
-  tx(g=>{
-    if(g.phase!=='qiaobianMove'||!g.pending||g.pending.type!=='qiaobianMove'||g.pending.seat!==mySeat) return g;
-    if(move) doQiaobianMove(g, move);
-    g.pending=null;
-    g.skipPlay=true;
-    continueDelayResolution(g, mySeat);
-    return g;
-  });
-}
-// doQiaobianMove: 独立重新校验合法性后执行移动;不合法就安静跳过(巧变本身——弃牌+跳过
-// 阶段——已经生效,不受影响,只是这次没有移动发生)。装备移动触发 onLoseEquip(和拆装备/
-// 换装同性质,源玩家视为失去这件装备);延时锦囊移动不触发任何钩子(项目里没有对应的
-// "失去判定牌"钩子)。
-function doQiaobianMove(g, move){
-  const src=g.players[move.srcSeat], dst=g.players[move.dstSeat];
-  if(!src || !dst || !src.alive || !dst.alive || move.srcSeat===move.dstSeat) return;
-  if(move.kind==='equip'){
-    const slot=move.slot;
-    if(!EQUIP_SLOTS.includes(slot)) return;
-    const card=src.equips[slot];
-    if(!card || dst.equips[slot]) return; // 源槽为空,或目标同类型槽已被占用
-    src.equips[slot]=null;
-    dst.equips[slot]=card;
-    g.log=pushLog(g.log, '【巧变】把 '+src.name+' 的装备【'+card.name+'】移到了 '+dst.name);
-    triggerHook(g, move.srcSeat, 'onLoseEquip', {count:1});
-  } else if(move.kind==='delay'){
-    const idx=move.idx;
-    const card=(src.delays||[])[idx];
-    if(!card) return;
-    dst.delays = dst.delays || [];
-    if(dst.delays.some(c=>c.name===card.name)) return; // 目标判定区已有同名延时锦囊
-    src.delays.splice(idx,1);
-    dst.delays.push(card);
-    g.log=pushLog(g.log, '【巧变】把 '+src.name+' 判定区的【'+card.name+'】移到了 '+dst.name+' 的判定区');
-  }
-}
-// ===== 伤害 / 胜负 统一处理(为日后武将技能铺路) =====
-// dealDamage: 只负责扣血 + 死亡判定挂起 + 相关日志,不推进阶段、不判胜负。
-// 返回值语义:是否已挂起进入濒死流程(true = 调用方应立即 return,后续收尾延后到 finishDying 处理;
-// 不代表最终真死——濒死可能被桃救回)。sourceSeat 暂存伤害来源,供日后技能使用。
-function tianxiangHeartOptions(p){
-  const list=[];
-  (p.hand||[]).forEach((card, idx)=>{
-    if(cardSuitForPlayer(p, card)==='♥') list.push({idx, card});
-  });
-  return list;
-}
-function tianxiangTargets(g, seat){
-  return g.players.map((p,i)=>({p,i})).filter(o=>o.p && o.p.alive && o.i!==seat).map(o=>o.i);
-}
-function maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard){
-  const p=g.players[seat];
-  if(!p || !p.alive || !hasCap(p,'tianxiang')) return false;
-  const hearts=tianxiangHeartOptions(p);
-  const targets=tianxiangTargets(g, seat);
-  if(hearts.length===0 || targets.length===0) return false;
-  g.pending={type:'tianxiang', seat, amount, sourceSeat, reason, srcType, targets, resume:{type:srcType}};
-  if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
-  g.phase='tianxiang';
-  g.log=pushLog(g.log, p.name+' 是否发动【天香】,弃置一张红桃手牌转移此次伤害…');
-  return true;
-}
-function zhengyiRecipient(g, seat){
-  const p=g.players[seat];
-  const r=g.liRangRecord;
-  if(!p || !p.alive || !hasCap(p,'zhengyi') || !r || r.round!==g.roundNum || r.from!==seat) return null;
-  const target=g.players[r.to];
-  if(!target || !target.alive || r.to===seat) return null;
-  return r.to;
-}
-function maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard){
-  const p=g.players[seat];
-  if(!p || !p.alive || !hasCap(p,'zhengyi')) return false;
-  if(p.zhengyiTurn===g.turn) return false;
-  const asking=zhengyiRecipient(g, seat);
-  if(asking===null) return false;
-  p.zhengyiTurn=g.turn;
-  g.pending={type:'zhengyi', seat, asking, amount, sourceSeat, reason, srcType, resume:{type:srcType}};
-  if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
-  g.phase='zhengyi';
-  g.log=pushLog(g.log, p.name+' 本回合首次受到伤害,询问 '+g.players[asking].name+' 是否发动【争义】替其承受…');
-  return true;
-}
-function finishTianxiangTransfer(g, originalResume, originalSeat, drawSeat){
-  const target=g.players[drawSeat];
-  if(target && target.alive){
-    const lost=Math.max(0, target.maxHp-target.hp);
-    if(lost>0){
-      drawN(g, drawSeat, lost);
-      g.log=pushLog(g.log, target.name+' 因【天香】摸'+lost+'张牌');
-    } else {
-      g.log=pushLog(g.log, target.name+' 未损失体力,【天香】不摸牌');
-    }
-  }
-  resumeAfterInterrupt(g, originalResume, originalSeat);
-}
-function wrapPendingForTianxiang(g, originalResume, originalSeat, drawSeat){
-  if(g.pending && g.pending.resume){
-    g.pending.resume={type:'tianxiang', inner:g.pending.resume, originalResume, originalSeat, drawSeat};
-  }
-}
-function chainedDamageTargets(g, seat){
-  return (g.players||[])
-    .map((p,i)=>({p,i}))
-    .filter(o=>o.i!==seat && o.p && o.p.alive && o.p.chained)
-    .map(o=>o.i);
-}
-function propagateChainedDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard){
-  const nature=cardDamageNature(sourceCard);
-  const p=g.players[seat];
-  if(!nature || !p || !p.chained || amount<=0) return false;
-  const targets=chainedDamageTargets(g, seat);
-  p.chained=false;
-  g.log=pushLog(g.log, p.name+' 解除连环状态');
-  for(const targetSeat of targets){
-    const target=g.players[targetSeat];
-    if(!target || !target.alive || !target.chained) continue;
-    target.chained=false;
-    g.log=pushLog(g.log, target.name+' 被连环传导,解除连环状态');
-    const interrupted=dealDamage(g, targetSeat, amount, sourceSeat, '连环传导'+(damageNatureText(nature)?'('+damageNatureText(nature)+')':''), srcType, sourceCard, false, false, true);
-    if(interrupted) return true;
-  }
-  return false;
-}
 function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, skipTianxiang, skipZhengyi, skipChain){
   const p=g.players[seat];
   if(!p) return false;
@@ -2050,69 +1459,6 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
   }
   return false;
-}
-function respondTianxiang(choice, targetSeat){
-  tx(g=>{
-    if(g.phase!=='tianxiang'||!g.pending||g.pending.type!=='tianxiang'||g.pending.seat!==mySeat) return g;
-    const d=g.pending;
-    const me=g.players[mySeat];
-    if(!me || !me.alive) return g;
-    const originalResume=d.resume || {type:d.srcType};
-    if(!choice){
-      g.pending=null;
-      const interrupted=dealDamage(g, d.seat, d.amount, d.sourceSeat, d.reason, d.srcType, d.sourceCard, true);
-      if(interrupted) return g;
-      resumeAfterInterrupt(g, originalResume, d.seat);
-      return g;
-    }
-    const target=g.players[targetSeat];
-    if(!target || !target.alive || targetSeat===d.seat || !(d.targets||[]).includes(targetSeat)) return g;
-    const card=me.hand[choice.idx];
-    if(!card || cardSuitForPlayer(me, card)!=='♥') return g;
-    me.hand.splice(choice.idx,1);
-    g.discard.push(card);
-    g.pending=null;
-    g.log=pushLog(g.log, me.name+' 弃置【'+card.name+'】发动【天香】,将此次伤害转移给 '+target.name);
-    markSkillSound(g, '天香');
-    const interrupted=dealDamage(g, targetSeat, d.amount, d.sourceSeat, d.reason || '【天香】转移', d.srcType, d.sourceCard, true);
-    if(interrupted){
-      wrapPendingForTianxiang(g, originalResume, d.seat, targetSeat);
-      return g;
-    }
-    finishTianxiangTransfer(g, originalResume, d.seat, targetSeat);
-    return g;
-  });
-}
-function wrapPendingForZhengyi(g, originalResume, originalSeat){
-  if(g.pending && g.pending.resume){
-    g.pending.resume={type:'zhengyi', inner:g.pending.resume, originalResume, originalSeat};
-  }
-}
-function respondZhengyi(activate){
-  tx(g=>{
-    if(g.phase!=='zhengyi'||!g.pending||g.pending.type!=='zhengyi'||g.pending.asking!==mySeat) return g;
-    const d=g.pending;
-    const kong=g.players[d.seat], me=g.players[mySeat];
-    if(!kong || !kong.alive || !me || !me.alive) return g;
-    const originalResume=d.resume || {type:d.srcType};
-    g.pending=null;
-    if(!activate){
-      g.log=pushLog(g.log, me.name+'：不发动【争义】');
-      const interrupted=dealDamage(g, d.seat, d.amount, d.sourceSeat, d.reason, d.srcType, d.sourceCard, false, true);
-      if(interrupted) return g;
-      resumeAfterInterrupt(g, originalResume, d.seat);
-      return g;
-    }
-    g.log=pushLog(g.log, me.name+' 发动【争义】,替 '+kong.name+' 承受此次伤害');
-    markSkillSound(g, '争义');
-    const interrupted=dealDamage(g, mySeat, d.amount, d.sourceSeat, d.reason || '【争义】转移', d.srcType, d.sourceCard, false, true);
-    if(interrupted){
-      wrapPendingForZhengyi(g, originalResume, d.seat);
-      return g;
-    }
-    resumeAfterInterrupt(g, originalResume, d.seat);
-    return g;
-  });
 }
 // ===== 濒死求桃:血量<=0 不立刻死亡,按座位顺序逐个询问是否打出【桃】救援 =====
 // startDying: 由 dealDamage 在 hp<=0 时调用。从濒死者本人开始问(可自救),
@@ -2292,125 +1638,6 @@ function resumeAfterInterrupt(g, resume, seat){
     if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
   }
 }
-// ===== 荀彧【驱虎/节命】:拼点与受伤后补牌 =====
-function pointText(card){ return card ? card.suit+rankText(card.rank)+'【'+card.name+'】' : '?'; }
-function quhuDamageTargets(g, targetSeat){
-  return g.players.map((p,i)=>({p,i}))
-    .filter(o=>o.p && o.p.alive && o.i!==targetSeat && canReachSha(g, targetSeat, o.i))
-    .map(o=>o.i);
-}
-function finishQuhu(g){
-  g.pending=null;
-  if(checkWin(g)) return;
-  g.phase='play';
-}
-function quHu(cardIdx, targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat], target=g.players[targetSeat];
-    if(!me || !target || !me.alive || !target.alive || !hasCap(me,'quhu') || g.quHuUsed) return g;
-    if(targetSeat===mySeat || target.hp<=me.hp || (me.hand||[]).length===0 || (target.hand||[]).length===0) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    g.quHuUsed=true;
-    g.pending={type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card};
-    g.phase='quhuRespond';
-    g.log=pushLog(g.log, me.name+' 发动【驱虎】,与 '+target.name+' 拼点');
-    markSkillSound(g, '驱虎');
-    return g;
-  });
-}
-function respondQuhu(cardIdx){
-  tx(g=>{
-    if(g.phase!=='quhuRespond'||!g.pending||g.pending.type!=='quhuRespond'||g.pending.targetSeat!==mySeat) return g;
-    const {seat, targetSeat, selfCard}=g.pending;
-    const xun=g.players[seat], target=g.players[targetSeat];
-    if(!xun || !target || !xun.alive || !target.alive){ finishQuhu(g); return g; }
-    const card=target.hand[cardIdx];
-    if(!card) return g;
-    target.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    const quhuWin = (selfCard.rank||0) > (card.rank||0);
-    g.log=pushLog(g.log, xun.name+' 出 '+pointText(selfCard)+',对方 '+target.name+' 出 '+pointText(card)+',拼点'+(quhuWin?'荀彧赢':'荀彧没赢'));
-    if(quhuWin){
-      const targets=quhuDamageTargets(g, targetSeat);
-      if(targets.length===0){
-        g.log=pushLog(g.log, '但 '+target.name+' 攻击范围内没有可伤害目标');
-        finishQuhu(g);
-        return g;
-      }
-      g.pending={type:'quhuDamageChoice', seat, targetSeat, targets};
-      g.phase='quhuDamageChoice';
-      g.log=pushLog(g.log, '选择 '+target.name+' 攻击范围内一名角色受到1点伤害');
-      return g;
-    }
-    g.log=pushLog(g.log, target.name+' 对其造成1点伤害');
-    g.pending=null;
-    const interrupted=dealDamage(g, seat, 1, targetSeat, '【驱虎】', 'quhu');
-    if(interrupted){
-      if(g.pending) g.pending.resume={type:'quhu'};
-      return g;
-    }
-    if(checkWin(g)) return g;
-    g.phase='play';
-    return g;
-  });
-}
-function respondQuhuDamage(targetSeat){
-  tx(g=>{
-    if(g.phase!=='quhuDamageChoice'||!g.pending||g.pending.type!=='quhuDamageChoice'||g.pending.seat!==mySeat) return g;
-    const {targetSeat:sourceSeat, targets}=g.pending;
-    if(!Array.isArray(targets) || !targets.includes(targetSeat)) return g;
-    const source=g.players[sourceSeat], target=g.players[targetSeat];
-    if(!source || !target || !source.alive || !target.alive){ finishQuhu(g); return g; }
-    g.pending=null;
-    const interrupted=dealDamage(g, targetSeat, 1, sourceSeat, '【驱虎】', 'quhu');
-    if(interrupted){
-      if(g.pending) g.pending.resume={type:'quhu'};
-      return g;
-    }
-    if(checkWin(g)) return g;
-    g.phase='play';
-    return g;
-  });
-}
-function finishJieming(g, resume, seat){
-  g.pending=null;
-  if(checkWin(g)) return;
-  resumeAfterInterrupt(g, resume, seat);
-}
-function continueJieming(g, seat, remaining, resume){
-  if(remaining>0 && g.players[seat] && g.players[seat].alive){
-    g.pending={type:'jiemingAsk', seat, remaining, resume};
-    g.phase='jiemingAsk';
-    g.log=pushLog(g.log, g.players[seat].name+' 是否继续发动【节命】('+remaining+'次)…');
-  } else {
-    finishJieming(g, resume, seat);
-  }
-}
-function respondJieming(targetSeat){
-  tx(g=>{
-    if(g.phase!=='jiemingAsk'||!g.pending||g.pending.type!=='jiemingAsk'||g.pending.seat!==mySeat) return g;
-    const {seat, remaining, resume}=g.pending;
-    const self=g.players[seat];
-    if(targetSeat===null || targetSeat===undefined){
-      g.log=pushLog(g.log, self.name+'：不发动【节命】');
-      continueJieming(g, seat, remaining-1, resume);
-      return g;
-    }
-    const target=g.players[targetSeat];
-    if(!target || !target.alive) return g;
-    const limit=Math.min(target.maxHp, 5);
-    const n=Math.max(0, limit-(target.hand||[]).length);
-    if(n>0) drawN(g, targetSeat, n);
-    g.log=pushLog(g.log, self.name+' 发动【节命】,令 '+target.name+(n>0?' 摸'+n+'张牌':' 手牌已达上限,不摸牌'));
-    markSkillSound(g, '节命');
-    continueJieming(g, seat, remaining-1, resume);
-    return g;
-  });
-}
 // ===== 夏侯惇【刚烈】:受伤后可选判定,非红桃则伤害来源弃2手牌或受1点伤害 =====
 function finishGanglie(g, resume, seat){
   g.pending=null;
@@ -2502,56 +1729,6 @@ function respondGanglieChoice(action, picks){
     return g;
   });
 }
-// ===== 郭嘉【遗计】:受伤后可选发动,看牌堆顶2张、分给任意角色(含自己) =====
-// respondYijiAsk: 仅本人(pending.seat)可响应。不发动/发动都要用 resumeAfterInterrupt 接回被
-// 打断的流程(resume 是 onDamaged 钩子里存的 {type:srcType,...},和濒死解决同一套约定)——
-// 不能像最初设想那样硬编码 phase='play',因为遗计可能在决斗/AOE/延时锦囊判定/骁果等非
-// "出牌阶段互殴"的场景中触发,这些场景各自需要接回不同的尾巴。
-function respondYijiAsk(activate){
-  tx(g=>{
-    if(g.phase!=='yijiAsk'||!g.pending||g.pending.type!=='yijiAsk'||g.pending.seat!==mySeat) return g;
-    const seat=mySeat, resume=g.pending.resume;
-    if(!activate){
-      g.log=pushLog(g.log, g.players[seat].name+'：不发动【遗计】');
-      g.pending=null;
-      if(checkWin(g)) return g;
-      resumeAfterInterrupt(g, resume, seat);
-      return g;
-    }
-    const n = Math.min(2, (g.deck||[]).length);
-    if(n===0){ // 双重保险,理论上 onDamaged 已经拦过(牌堆空时钩子根本不会挂起这个 pending)
-      g.pending=null;
-      if(checkWin(g)) return g;
-      resumeAfterInterrupt(g, resume, seat);
-      return g;
-    }
-    const cards = g.deck.splice(0, n); // 从牌堆顶取,不进日志(私密信息)
-    g.pending = { type:'yijiAssign', seat, cards, resume };
-    g.phase='yijiAssign';
-    g.log=pushLog(g.log, g.players[seat].name+' 发动【遗计】,正在分配牌…'); // 不写牌面
-    markSkillSound(g, '遗计');
-    return g;
-  });
-}
-// respondYijiAssign: 仅本人可响应。assignments 是长度等于 cards.length 的座位号数组(cards[i]
-// 交给 assignments[i]),可以重复(都给自己/都给同一人/分给不同人都合法)。
-function respondYijiAssign(assignments){
-  tx(g=>{
-    if(g.phase!=='yijiAssign'||!g.pending||g.pending.type!=='yijiAssign'||g.pending.seat!==mySeat) return g;
-    const {cards, resume}=g.pending;
-    if(!Array.isArray(assignments) || assignments.length!==cards.length) return g;
-    for(const seat of assignments){
-      const tgt=g.players[seat];
-      if(!tgt || !tgt.alive) return g; // 任一目标非法/已阵亡,整体拒绝,状态不变(双重保险)
-    }
-    assignments.forEach((seat, i)=>{ g.players[seat].hand.push(cards[i]); });
-    g.log=pushLog(g.log, g.players[mySeat].name+' 【遗计】分配了'+cards.length+'张牌给 '+assignments.map(s=>g.players[s].name).join('、'));
-    g.pending=null;
-    if(checkWin(g)) return g;
-    resumeAfterInterrupt(g, resume, mySeat);
-    return g;
-  });
-}
 // ===== 方天画戟:队列驱动的多目标杀,共用出口 =====
 // finishSingleShaTarget: 一个目标的杀响应/判定彻底结束时统一走这里(毅重/仁王盾无效、八卦阵/鬼才改判
 // 红色抵消、respondShan 出闪或命中受伤后的共用尾巴,均改走这个出口)——先 checkWin,再看 g.fangtianQueue
@@ -2569,43 +1746,6 @@ function advanceFangtianQueue(g){
   while(q.idx<q.targets.length && (!g.players[q.targets[q.idx]] || !g.players[q.targets[q.idx]].alive)) q.idx++;
   if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.phase='play'; return; }
   resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard);
-}
-// 麒麟弓:杀造成伤害且目标存活时,弃目标一匹坐骑。0匹→无效果;1匹→直接弃;2匹→开选马子阶段(攻击者选)。
-// 返回 true 表示已开选马子阶段(调用方应提前返回、不做收尾)。仅由「杀造成伤害」处调用(srcType==='sha')。
-function maybeStartQilin(g, attackerSeat, victimSeat){
-  const attacker=g.players[attackerSeat], victim=g.players[victimSeat];
-  if(!attacker || !victim || !victim.alive || !hasCap(attacker,'qilin')) return false;
-  const hasP = !!(victim.equips && victim.equips.plus1);
-  const hasM = !!(victim.equips && victim.equips.minus1);
-  if(!hasP && !hasM) return false;                 // 目标无坐骑:无额外效果
-  if(hasP && hasM){                                // 两匹:开子阶段,由攻击者选弃哪匹
-    g.pending={type:'qilin', from:attackerSeat, to:victimSeat};
-    g.phase='qilin';
-    g.log=pushLog(g.log, attacker.name+' 的【麒麟弓】发动,选择弃置 '+victim.name+' 的哪匹坐骑…');
-    return true;
-  }
-  discardMount(g, victimSeat, hasP?'plus1':'minus1', attacker.name);  // 一匹:直接弃
-  return false;
-}
-// 弃置某玩家一匹坐骑进弃牌堆 + 触发失去装备钩子(枭姬等)。坐骑公开,日志写牌名。
-function discardMount(g, seat, slot, attackerName){
-  const p=g.players[seat], card=p.equips[slot]; if(!card) return;
-  p.equips[slot]=null; g.discard.push(card);
-  g.log=pushLog(g.log, (attackerName?attackerName+' 的':'')+'【麒麟弓】弃置了 '+p.name+' 的坐骑【'+card.name+'】');
-  triggerHook(g, seat, 'onLoseEquip', { count:1 });
-}
-// qilinResolve: 麒麟弓选马子阶段结算。仅攻击者(pending.from)可操作;slot='plus1'|'minus1';失效项安全回 play 防软锁。
-function qilinResolve(slot){
-  tx(g=>{
-    if(g.phase!=='qilin'||!g.pending||g.pending.type!=='qilin'||g.pending.from!==mySeat) return g;
-    const victimSeat=g.pending.to, victim=g.players[victimSeat], attacker=g.players[g.pending.from];
-    if(!victim || !victim.alive || (slot!=='plus1'&&slot!=='minus1') || !victim.equips[slot]){
-      g.pending=null; g.phase='play'; return g; // 失效兜底
-    }
-    discardMount(g, victimSeat, slot, attacker?attacker.name:'');
-    g.pending=null; g.phase='play';
-    return g;
-  });
 }
 // checkWin: 存活<=1 则结束游戏(置 over/winner、清理 pending/aoe、记日志),返回 true;否则 false。
 function checkWin(g){
@@ -2847,53 +1987,6 @@ function resolveTrick(g, info){
   g.phase='pick';
   g.log=pushLog(g.log, '等待 '+g.players[info.from].name+' 选择对 '+tgt.name+' 拿/拆哪张牌…');
 }
-function respondHuogongReveal(cardIdx){
-  tx(g=>{
-    if(g.phase!=='huogongReveal'||!g.pending||g.pending.type!=='huogongReveal'||g.pending.to!==mySeat) return g;
-    const d=g.pending;
-    const target=g.players[mySeat], user=g.players[d.from];
-    if(!target || !target.alive || !user || !user.alive){ g.pending=null; g.phase='play'; return g; }
-    const revealed=(target.hand||[])[cardIdx];
-    if(!revealed) return g;
-    const suit=cardSuitForPlayer(target, revealed);
-    g.log=pushLog(g.log, target.name+' 展示 '+suit+rankText(revealed.rank)+'【'+revealed.name+'】');
-    const hasSame=(user.hand||[]).some(c=>c && cardSuitForPlayer(user, c)===suit);
-    if(!hasSame){
-      g.pending=null; g.phase='play';
-      g.log=pushLog(g.log, user.name+' 没有同花色手牌,【火攻】不造成伤害');
-      return g;
-    }
-    g.pending={type:'huogong', from:d.from, to:mySeat, suit, sourceCard:d.sourceCard};
-    g.phase='huogong';
-    g.log=pushLog(g.log, user.name+' 可弃置一张'+suit+'手牌,令 '+target.name+' 受到1点火属性伤害');
-    return g;
-  });
-}
-function respondHuogong(activate, cardIdx){
-  tx(g=>{
-    if(g.phase!=='huogong'||!g.pending||g.pending.type!=='huogong'||g.pending.from!==mySeat) return g;
-    const d=g.pending;
-    const me=g.players[mySeat], target=g.players[d.to];
-    if(!me || !me.alive || !target || !target.alive){ g.pending=null; g.phase='play'; return g; }
-    if(!activate){
-      g.log=pushLog(g.log, me.name+'：不弃牌,【火攻】不造成伤害');
-      g.pending=null; g.phase='play';
-      return g;
-    }
-    const card=me.hand[cardIdx];
-    if(!card || cardSuitForPlayer(me, card)!==d.suit) return g;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    const sourceCard=d.sourceCard;
-    g.log=pushLog(g.log, me.name+' 弃置 '+d.suit+'【'+card.name+'】,【火攻】生效');
-    g.pending=null;
-    const dying=dealDamage(g, d.to, 1, mySeat, '【火攻】', 'huogong', sourceCard);
-    if(dying) return g;
-    if(checkWin(g)) return g;
-    g.phase='play';
-    return g;
-  });
-}
 // applyTrickOnHand: 随机拿/弃目标一张手牌。手牌是隐藏信息 -> 日志不写牌名。
 function applyTrickOnHand(g, info){
   const me=g.players[info.from], tgt=g.players[info.to];
@@ -2945,106 +2038,6 @@ function pickResolve(choice){
     return g;
   });
 }
-// ===== 寒冰剑:杀命中造成伤害之前,攻击者可选择防止伤害、改为弃置目标两张牌 =====
-// hanbingDiscardCount: 目标手牌+装备区加起来还有几张牌可弃(0~n)。respondShan 里用来判断
-// "目标完全没有牌可弃"这种不能发动的边界,不能弹出一个没什么可弃的空询问。
-function hanbingDiscardCount(p){ return (p.hand||[]).length + EQUIP_SLOTS.filter(s=>p.equips&&p.equips[s]).length; }
-// respondHanbingAsk: 仅 pending.from(装备寒冰剑的攻击者)可响应。不发动:补上正常伤害流程
-// (和 respondShan 的"不闪"分支完全一致的一套收尾,只是挪到这个新函数里,因为已经隔了一次
-// 网络往返,不能再指望原来那个 tx 调用里的共用尾巴)。发动:不造成任何伤害,直接进入弃牌
-// 循环(startHanbingRound,round 从 0 开始)。
-function respondHanbingAsk(activate){
-  tx(g=>{
-    if(g.phase!=='hanbingAsk'||!g.pending||g.pending.type!=='hanbingAsk'||g.pending.from!==mySeat) return g;
-    const from=mySeat, to=g.pending.to;
-    if(!activate){
-      g.log=pushLog(g.log, g.players[from].name+'：不发动【寒冰剑】');
-      const sourceCard=g.pending.sourceCard;
-      g.pending=null;
-      const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha'), from, '不闪', 'sha', sourceCard);
-      if(dying) return g;
-      if(maybeStartQilin(g, from, to)) return g;
-      if(checkWin(g)) return g;
-      g.phase='play';
-      return g;
-    }
-    g.log=pushLog(g.log, g.players[from].name+' 发动【寒冰剑】,防止伤害,改为弃置 '+g.players[to].name+' 的牌');
-    g.pending=null;
-    startHanbingRound(g, from, to, 0);
-    return g;
-  });
-}
-// startHanbingRound: (重新)计算目标这一刻还有什么可弃——0个直接收尾(不管是第一轮就没有,
-// 还是弃完第一张后目标没牌了);1个免弹窗自动弃这一个(和 pick 阶段"唯一选择直接结算"
-// 同一个惯例),弃完继续问下一轮;2个以上才真正开 pending 问攻击者选。round 到 2 就收尾——
-// "对方2张以上必须弃满两轮,不足两张弃光为止",不存在"弃1张就不弃了"这个中途停下的选项。
-function startHanbingRound(g, from, to, round){
-  const tgt=g.players[to];
-  if(!tgt || !tgt.alive || round>=2){ finishHanbing(g); return; }
-  const handCount=(tgt.hand||[]).length;
-  const equipSlots=EQUIP_SLOTS.filter(s=>tgt.equips[s]);
-  const optCount=(handCount>0?1:0)+equipSlots.length;
-  if(optCount===0){ finishHanbing(g); return; }
-  if(optCount===1){
-    const info={trick:'寒冰剑', from, to};
-    if(handCount>0) applyTrickOnHand(g, info); else applyTrickOnEquip(g, info, equipSlots[0]);
-    startHanbingRound(g, from, to, round+1);
-    return;
-  }
-  g.pending={type:'hanbing', from, to, round};
-  g.phase='hanbing';
-  g.log=pushLog(g.log, '等待 '+g.players[from].name+' 选择弃置 '+tgt.name+' 的第'+(round+1)+'张牌…');
-}
-function finishHanbing(g){
-  g.pending=null;
-  if(checkWin(g)) return;
-  g.phase='play';
-}
-// hanbingPick: 弃牌子阶段结算。choice='hand' 或槽名,复用 applyTrickOnHand/applyTrickOnEquip
-// (info.trick='寒冰剑' 不等于'顺手牵羊',天然落到"弃入弃牌堆"分支,这两个函数不用改一行)。
-// 仅使用者(pending.from)可操作;失效项(手牌已空/槽已空)安全收尾防软锁。弃完这一张后继续
-// 调用 startHanbingRound 进入下一轮(可能自动弃/可能再问/可能直接收尾)。
-function hanbingPick(choice){
-  tx(g=>{
-    if(g.phase!=='hanbing'||!g.pending||g.pending.type!=='hanbing'||g.pending.from!==mySeat) return g;
-    const {from,to,round}=g.pending;
-    const tgt=g.players[to];
-    if(!tgt || !tgt.alive){ finishHanbing(g); return g; }
-    const info={trick:'寒冰剑', from, to};
-    if(choice==='hand'){
-      if((tgt.hand||[]).length===0){ finishHanbing(g); return g; } // 失效兜底
-      applyTrickOnHand(g, info);
-    } else {
-      if(!EQUIP_SLOTS.includes(choice) || !tgt.equips[choice]){ finishHanbing(g); return g; } // 失效兜底
-      applyTrickOnEquip(g, info, choice);
-    }
-    startHanbingRound(g, from, to, round+1);
-    return g;
-  });
-}
-// wuguPick: 五谷丰登挑选。仅当前轮到的人(order[idx])可操作;poolIdx 校验后从公共池移除、
-// 收入挑选者手牌;idx 推进到下一个人,挑完一整圈(idx===order.length)则收尾——若池里还有剩牌
-// (阵亡导致 order 比 pool 短的边界),兜底弃入弃牌堆,不做复杂的重新分配,只保证不卡死。
-function wuguPick(poolIdx){
-  tx(g=>{
-    if(g.phase!=='wugu'||!g.pending||g.pending.type!=='wugu') return g;
-    const { order, idx, pool } = g.pending;
-    if(order[idx]!==mySeat) return g;
-    const card = pool[poolIdx];
-    if(!card) return g;
-    const me=g.players[mySeat];
-    pool.splice(poolIdx,1);
-    me.hand.push(card);
-    g.log=pushLog(g.log, me.name+' 从【五谷丰登】挑选了一张牌');
-    g.pending.idx = idx+1;
-    if(g.pending.idx>=order.length){
-      if(pool.length) g.discard.push(...pool); // 兜底:阵亡边界导致池未分完的剩牌
-      g.pending=null; g.phase='play';
-      g.log=pushLog(g.log, '【五谷丰登】结算完毕');
-    }
-    return g;
-  });
-}
 // respondWuxie: 仅当前被询问者(pending.asking)可响应。
 // 出且确有无懈 -> depth++、exclude=自己,开新一轮反制窗口(openWuxieRound,可不限层数继续下去);
 // 不出 -> 指针移到下一存活玩家,问完一圈(绕回 exclude)则收尾(finishWuxieRound,按 depth 奇偶判定)。
@@ -3057,12 +2050,12 @@ function respondWuxie(useWuxie){
     if(useWuxie){
       const idx=me.hand.findIndex(c=>c.name==='无懈可击');
       if(idx<0) return g; // 没牌:状态不变,仍停在本人这一轮(界面按钮保留)
-      g.discard.push(me.hand.splice(idx,1)[0]);
+      const card = me.hand.splice(idx,1)[0];
+      g.discard.push(card);
       // depth===0(反制原锦囊)措辞不同于 depth>=1(反制上一次无懈可击)
       const target = g.pending.depth>0 ? g.players[g.pending.exclude].name+' 的【无懈可击】' : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
       g.log=pushLog(g.log, me.name+' 打出【无懈可击】,抵消了'+target);
-      // 这张牌是 splice 结果直接扔进弃牌堆、没有留局部变量(不为了传参新增变量),card 留空。
-      markCardSound(g, '无懈可击', mySeat);
+      markCardSound(g, '无懈可击', mySeat, card);
       g.pending.depth++;
       g.pending.exclude=mySeat;
       openWuxieRound(g);
@@ -3204,120 +2197,6 @@ function respondShan(useShan){
     return g;
   });
 }
-// respondQinglong: 仅攻击者(pending.from,也就是青龙偃月刀的装备者)可响应。不发动:直接走
-// 和 respondShan 共用尾巴一致的收尾(清 pending、判胜负、回到出牌阶段)。发动:选一张能当杀
-// 的手牌(目标固定是原目标 pending.to,不需要重新选目标),整张走 resolveShaUse 完整流程——
-// 不占用 g.shaUsed(不计入出杀次数限制)、不做距离校验(官方原文明确无距离限制)。
-function respondQinglong(activate, cardIdx){
-  tx(g=>{
-    if(g.phase!=='qinglong'||!g.pending||g.pending.type!=='qinglong'||g.pending.from!==mySeat) return g;
-    const me=g.players[mySeat]; // 攻击者本人(装备者)
-    const targetSeat=g.pending.to;
-    if(!activate){
-      g.log=pushLog(g.log, me.name+'：不发动【青龙偃月刀】');
-      g.pending=null;
-      if(checkWin(g)) return g;
-      g.phase='play';
-      return g;
-    }
-    const card=me.hand[cardIdx];
-    if(!card || !canUseAs(me,card,'杀')) return g; // 没这张牌/不能当杀:状态不变(双重保险)
-    me.hand.splice(cardIdx,1); g.discard.push(card);
-    g.shaUsed=true; // 青龙偃月刀连续杀本质是又使用了一张杀,同样计入出杀次数限制/破坏克己
-    const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
-    g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
-    markCardSound(g, '杀', mySeat, card, targetSeat);
-    g.pending=null;
-    resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card);
-    return g;
-  });
-}
-// ===== 贯石斧:杀被闪抵消后,攻击者可弃自己2张牌(手牌/装备混合)令这张杀依然造成伤害 =====
-// guanshifuOptionCount: 攻击者自己还有多少张牌可弃(手牌张数 + 非空装备槽数,装备槽排除武器槽本身——
-// 官方FAQ"可以弃装备区里的牌,除了贯石斧本身",武器槽此刻就是贯石斧,天然要排除)。
-function guanshifuOptionCount(p){
-  const equipCount = EQUIP_SLOTS.filter(s=> s!=='weapon' && p.equips && p.equips[s]).length;
-  return (p.hand||[]).length + equipCount;
-}
-// maybeStartGuanshifu: 攻击者(fromSeat)是否要被问"是否发动贯石斧"。共用出口——不只是
-// respondShan 里目标打出实体闪这一条路径会触发"杀被闪抵消",八卦阵判红(视为出闪)是在
-// continueShaAfterTieqi/finishGuicai 里更早发生的、respondShan 根本不会被调用的另一条路径,
-// 两条路径都要给贯石斧同样的触发机会,所以抽成共用函数,三处调用点各自决定收尾方式。
-// 返回 true 表示已开 pending,调用方应立即 return、不做后续收尾。
-// maybeStartQinglong: 攻击者(fromSeat)是否要被问"是否发动青龙偃月刀,再次使用一张杀"。
-// 从 respondShan 内联判断抽出来的共用出口——和贯石斧同一个原因:八卦阵判红(视为出闪)是
-// 在 continueShaAfterTieqi/finishGuicai 里更早发生的、respondShan 根本不会被调用的另一条
-// 路径,原来只在 respondShan 里判断,导致"杀被八卦阵判红抵消"这个场景青龙偃月刀完全没有
-// 触发机会——这是排查贯石斧同类问题时顺带发现的遗留 bug(青龙偃月刀比贯石斧更早实现,当时
-// 没有意识到八卦阵判红会绕开 respondShan),这次一并修复,接入贯石斧同样的三处调用点。
-// 返回 true 表示已开 pending,调用方应立即 return、不做后续收尾。
-function maybeStartQinglong(g, fromSeat, toSeat){
-  const attacker=g.players[fromSeat];
-  if(!hasCap(attacker,'qinglong') || !(attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀'))) return false;
-  g.pending={type:'qinglong', from:fromSeat, to:toSeat};
-  g.phase='qinglong';
-  g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
-  return true;
-}
-function maybeStartGuanshifu(g, fromSeat, toSeat, sourceCard){
-  const attacker=g.players[fromSeat];
-  if(!hasCap(attacker,'guanshifu') || guanshifuOptionCount(attacker)<2) return false;
-  g.pending={type:'guanshi', from:fromSeat, to:toSeat};
-  if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
-  g.phase='guanshi';
-  g.log=pushLog(g.log, attacker.name+' 是否发动【贯石斧】,弃两张牌令此【杀】依然造成伤害…');
-  return true;
-}
-// respondGuanshi: 仅攻击者(pending.from)可响应。picks 为 null/不足2项=不发动,直接走"杀被抵消"
-// 的原有收尾;恰好2项(每项 'hand:idx' 或 'equip:slot',不含 'equip:weapon')=同时弃掉这2张,
-// 不重新走 resolveShaUse(不会再触发闪/判定/其它武器特效),直接 dealDamage 一次让这张杀命中。
-function respondGuanshi(picks){
-  tx(g=>{
-    if(g.phase!=='guanshi'||!g.pending||g.pending.type!=='guanshi'||g.pending.from!==mySeat) return g;
-    const from=mySeat, to=g.pending.to;
-    const me=g.players[from]; // 攻击者本人(装备者)
-    if(!Array.isArray(picks) || picks.length!==2){
-      g.log=pushLog(g.log, me.name+'：不发动【贯石斧】');
-      g.pending=null;
-      finishSingleShaTarget(g);
-      return g;
-    }
-    // 校验:两项不重复、都合法(手牌下标存在 / 装备槽非空且不是武器槽本身)
-    const seen=new Set();
-    for(const p of picks){
-      if(seen.has(p)) return g;
-      seen.add(p);
-      if(p.startsWith('hand:')){
-        const idx=Number(p.slice(5));
-        if(!Number.isInteger(idx) || !me.hand[idx]) return g;
-      } else if(p.startsWith('equip:')){
-        const slot=p.slice(6);
-        if(slot==='weapon' || !EQUIP_SLOTS.includes(slot) || !me.equips[slot]) return g;
-      } else return g;
-    }
-    // 弃牌:先处理装备(不受手牌下标变动影响),再处理手牌(大下标先弹,避免 splice 错位)
-    const handIdxs=[];
-    for(const p of picks){
-      if(p.startsWith('equip:')){
-        const slot=p.slice(6);
-        const card=me.equips[slot]; me.equips[slot]=null; g.discard.push(card);
-        g.log=pushLog(g.log, me.name+' 弃置装备【'+card.name+'】(贯石斧)');
-        triggerHook(g, from, 'onLoseEquip', {count:1});
-      } else {
-        handIdxs.push(Number(p.slice(5)));
-      }
-    }
-    handIdxs.sort((a,b)=>b-a).forEach(idx=>{ g.discard.push(me.hand.splice(idx,1)[0]); });
-    if(handIdxs.length) g.log=pushLog(g.log, me.name+' 弃置'+handIdxs.length+'张手牌(贯石斧)');
-    g.log=pushLog(g.log, me.name+' 发动【贯石斧】,此【杀】依然对 '+g.players[to].name+' 造成伤害');
-    const sourceCard=g.pending.sourceCard;
-    g.pending=null;
-    const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha'), from, '贯石斧强制命中', 'sha', sourceCard);
-    if(dying) return g; // 濒死流程接管
-    finishSingleShaTarget(g);
-    return g;
-  });
-}
 function endPlay(){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
@@ -3325,83 +2204,6 @@ function endPlay(){
     // 不冲突——巧变一回合限一次,选了"出牌阶段"就不会再选"弃牌阶段",但不能假设这里一定
     // 不会发生,统一走 advancePastDiscard 判断,不重复写一遍 if/else)。
     advancePastDiscard(g);
-    return g;
-  });
-}
-function kuRou(){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'kurou')) return g;
-    g.log=pushLog(g.log, me.name+' 发动【苦肉】');
-    markSkillSound(g, '苦肉');
-    const interrupted = dealDamage(g, mySeat, 1, mySeat, '【苦肉】', 'kurou');
-    if(interrupted) return g;
-    drawN(g, mySeat, 2);
-    g.log=pushLog(g.log, me.name+' 【苦肉】结算,摸两张牌');
-    g.phase='play';
-    return g;
-  });
-}
-function zhiHeng(cardIdxs){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'zhiheng') || g.zhihengUsed) return g;
-    if(!Array.isArray(cardIdxs) || cardIdxs.length<1) return g;
-    const unique=[...new Set(cardIdxs)].filter(i=>Number.isInteger(i)).sort((a,b)=>b-a);
-    if(unique.length!==cardIdxs.length) return g;
-    if(unique.some(i=>i<0 || i>=(me.hand||[]).length)) return g;
-    const moved=[];
-    unique.forEach(i=>{ moved.push(me.hand.splice(i,1)[0]); });
-    moved.forEach(c=>{ if(c) g.discard.push(c); });
-    g.zhihengUsed=true;
-    drawN(g, mySeat, moved.length);
-    g.log=pushLog(g.log, me.name+' 发动【制衡】,弃'+moved.length+'张牌并摸'+moved.length+'张牌');
-    markSkillSound(g, '制衡');
-    g.phase='play';
-    return g;
-  });
-}
-function renDe(cardIdx, targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'rende')) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
-    const target=g.players[targetSeat];
-    if(targetSeat===mySeat || !target || !target.alive) return g;
-    me.hand.splice(cardIdx,1);
-    target.hand.push(card);
-    if(!Number.isInteger(g.renDeCount)) g.renDeCount=0;
-    g.renDeCount++;
-    g.log=pushLog(g.log, me.name+' 【仁德】将一张牌交给 '+target.name);
-    if(g.renDeCount===2){
-      if(me.hp<me.maxHp) me.hp = Math.min(me.maxHp, me.hp+1);
-      g.log=pushLog(g.log, me.name+' 【仁德】发动,回复1点体力');
-      markSkillSound(g, '仁德');
-    }
-    g.phase='play';
-    return g;
-  });
-}
-function qingNang(cardIdx, targetSeat){
-  tx(g=>{
-    if(g.phase!=='play'||g.turn!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'qingnang') || g.qingNangUsed) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
-    const tgt=g.players[targetSeat];
-    if(!tgt || !tgt.alive || tgt.hp>=tgt.maxHp) return g;
-    g.qingNangUsed=true;
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
-    g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【青囊】,令 '+tgt.name+' 回复1点体力');
-    markSkillSound(g, '青囊');
-    g.phase='play';
     return g;
   });
 }
@@ -3448,53 +2250,6 @@ function discardCards(cardIdxList){
     return g;
   });
 }
-// 吕蒙【克己】(锁定技):本回合"未以任何方式打出过杀"则可跳过弃牌阶段。判据 = 未主动出杀(!shaUsed)
-// 且 未在决斗中打杀(!shaPlayedInDuel)。g.shaUsed 只由主动出杀置真、仅管出杀次数;决斗打杀走
-// g.shaPlayedInDuel,两者分离,避免决斗应战误消耗出牌阶段的出杀次数(见 duelResponse 注释)。
-function canSkipDiscard(g, seat){
-  const p=g.players[seat];
-  return !!(p && hasCap(p,'keji') && !g.shaUsed && !g.shaPlayedInDuel);
-}
-function liRangDiscardCardsInPile(g, cards){
-  return (cards||[]).filter(card=>(g.discard||[]).some(c=>c===card || (c && card && c.id!==undefined && c.id===card.id)));
-}
-function maybeStartLiRangRecover(g, endingSeat){
-  const r=g.liRangRecord;
-  if(!r || r.round!==g.roundNum || r.to!==endingSeat) return false;
-  const kong=g.players[r.from];
-  if(!kong || !kong.alive || !hasCap(kong,'lirang')) return false;
-  const cards=liRangDiscardCardsInPile(g, r.discarded);
-  if(cards.length===0) return false;
-  g.pending={type:'lirangRecover', from:r.from, to:endingSeat, cards};
-  g.phase='lirangRecover';
-  g.log=pushLog(g.log, kong.name+' 是否发动【礼让】,获得 '+g.players[endingSeat].name+' 本弃牌阶段弃置的牌…');
-  return true;
-}
-function respondLiRangRecover(activate){
-  tx(g=>{
-    if(g.phase!=='lirangRecover'||!g.pending||g.pending.type!=='lirangRecover'||g.pending.from!==mySeat) return g;
-    const from=g.pending.from, to=g.pending.to;
-    const kong=g.players[from], target=g.players[to];
-    if(!kong || !kong.alive || !target) return g;
-    if(activate){
-      const gained=[];
-      (g.pending.cards||[]).forEach(card=>{
-        const idx=(g.discard||[]).findIndex(c=>c===card || (c && card && c.id!==undefined && c.id===card.id));
-        if(idx>=0) gained.push(g.discard.splice(idx,1)[0]);
-      });
-      if(gained.length){
-        kong.hand.push(...gained);
-        g.log=pushLog(g.log, kong.name+' 发动【礼让】,获得 '+target.name+' 本弃牌阶段弃置的'+gained.length+'张牌');
-        markSkillSound(g, '礼让');
-      }
-    } else {
-      g.log=pushLog(g.log, kong.name+'：不发动【礼让】回收弃牌');
-    }
-    g.pending=null;
-    advanceXiaoguo(g, to, to);
-    return g;
-  });
-}
 function endTurn(){
   tx(g=>{
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
@@ -3517,37 +2272,6 @@ function finishTurn(g, endingSeat){
     startTurn(g, nextAlive(g, endingSeat));
   }
 }
-function respondBiyue(activate){
-  tx(g=>{
-    if(g.phase!=='biyue'||!g.pending||g.pending.type!=='biyue'||g.pending.seat!==mySeat) return g;
-    const me=g.players[mySeat];
-    if(!me || !me.alive) return g;
-    if(activate){
-      drawN(g, mySeat, 1);
-      g.log=pushLog(g.log, me.name+' 发动【闭月】,摸1张牌');
-      markSkillSound(g, '闭月');
-    } else {
-      g.log=pushLog(g.log, me.name+'：不发动【闭月】');
-    }
-    g.pending=null;
-    startTurn(g, nextAlive(g, mySeat));
-    return g;
-  });
-}
-// ===== 乐进【骁果】:其他角色的结束阶段,乐进可以弃基本牌发动,让该角色弃装备(乐进摸牌)或受伤 =====
-// nextXiaoguoAsker: 从 current 的下家起,按座位顺序找下一个"有资格发动骁果"的候选人——
-// 存活 + hasCap(p,'xiaoguo') + 手牌里有基本牌。绕回 endingSeat(即将结束回合的人,永远不会
-// 被当成候选人,天然排除"乐进对自己回合结束触发")即问完一圈,返回 null。
-function nextXiaoguoAsker(g, endingSeat, current){
-  const n=g.players.length;
-  for(let k=1;k<=n;k++){
-    const s=(current+k)%n;
-    if(s===endingSeat) return null;
-    const p=g.players[s];
-    if(p && p.alive && hasCap(p,'xiaoguo') && (p.hand||[]).some(c=>BASIC_CARDS.includes(c.name))) return s;
-  }
-  return null;
-}
 // advanceXiaoguo: (重新)找下一个有资格的候选人问;问完(或从一开始就没人有资格)则真正切换回合。
 // 每个候选人发动或不发动之后都会调这个函数继续找下一个,直到问完一圈——理论上支持多个乐进都发动。
 function advanceXiaoguo(g, endingSeat, current){
@@ -3556,55 +2280,6 @@ function advanceXiaoguo(g, endingSeat, current){
   g.pending={type:'xiaoguo', endingSeat, asking:asker};
   g.phase='xiaoguo';
   g.log=pushLog(g.log, '结束阶段:询问 '+g.players[asker].name+' 是否发动【骁果】…');
-}
-// respondXiaoguo: 仅当前被问的人(pending.asking)可响应。不发动:推进到下一个候选人;
-// 发动:弃一张基本牌(校验 BASIC_CARDS),交给目标(endingSeat)二选一。
-function respondXiaoguo(activate, cardIdx){
-  tx(g=>{
-    if(g.phase!=='xiaoguo'||!g.pending||g.pending.type!=='xiaoguo'||g.pending.asking!==mySeat) return g;
-    const endingSeat=g.pending.endingSeat;
-    if(!activate){
-      advanceXiaoguo(g, endingSeat, mySeat);
-      return g;
-    }
-    const me=g.players[mySeat];
-    const card=me.hand[cardIdx];
-    if(!card || !BASIC_CARDS.includes(card.name)) return g; // 不是基本牌:不生效,状态不变
-    me.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    g.log=pushLog(g.log, me.name+' 弃置一张【'+card.name+'】,发动【骁果】,询问 '+g.players[endingSeat].name+' 弃装备或受到1点伤害…');
-    g.pending={type:'xiaoguoChoice', from:mySeat, endingSeat, to:endingSeat};
-    g.phase='xiaoguoChoice';
-    return g;
-  });
-}
-// respondXiaoguoChoice: 仅目标(pending.to,即 endingSeat 本人)可响应。choice 是装备槽名
-// (EQUIP_SLOTS 之一)= 弃该装备、乐进摸一张;choice==='damage' = 受到乐进 1 点伤害
-// (可能连锁触发濒死,见 finishDying 的 resume.type==='xiaoguo' 分支)。
-function respondXiaoguoChoice(choice){
-  tx(g=>{
-    if(g.phase!=='xiaoguoChoice'||!g.pending||g.pending.type!=='xiaoguoChoice'||g.pending.to!==mySeat) return g;
-    const from=g.pending.from, endingSeat=g.pending.endingSeat;
-    const target=g.players[endingSeat], asker=g.players[from];
-    if(choice==='damage'){
-      const dying=dealDamage(g, endingSeat, 1, from, '【骁果】', 'xiaoguo');
-      if(dying){ g.pending.resume={type:'xiaoguo', endingSeat, lastAsker:from}; return g; }
-      g.pending=null;
-      if(checkWin(g)) return g;
-      advanceXiaoguo(g, endingSeat, from);
-      return g;
-    }
-    if(!EQUIP_SLOTS.includes(choice) || !target.equips[choice]) return g; // 非法/槽已空
-    const card=target.equips[choice];
-    target.equips[choice]=null;
-    g.discard.push(card);
-    g.log=pushLog(g.log, target.name+' 弃置装备【'+card.name+'】,'+asker.name+' 摸一张牌');
-    triggerHook(g, endingSeat, 'onLoseEquip', {count:1});
-    drawN(g, from, 1);
-    g.pending=null;
-    advanceXiaoguo(g, endingSeat, from);
-    return g;
-  });
 }
 // startTurn: 统一的"切到某人回合开始"入口(endTurn 正常换人、决斗/濒死里回合玩家阵亡换人 都走这里)。
 // 顺序:先声明轮到谁,再问张郃是否发动【巧变】(可能连判定阶段本身都跳过,必须在结算判定区
@@ -3813,34 +2488,4 @@ function finishLuoshenJudge(g, seat, card){
     g.phase='luoshen';
   }
 }
-function newGame(){
-  tx(g=>{
-    g.started=false; g.phase='lobby'; g.pending=null; g.winner=null; g.aoe=null;
-    g.deck=[]; g.discard=[];
-    g.players.forEach(p=>{
-      p.general = randomGeneralId();     // 每局重新随机换将
-      p.maxHp = generalMaxHp(p.general); // 异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.delays=[];
-      p.equips = emptyEquips();          // 装备区:每局重置为四槽全空
-    });
-    g.log=pushLog(g.log,'重置房间,可再次开始');
-    return g;
-  });
-}
 
-function cleanupRoom(){
-  // 常驻按钮任何阶段都能点到(见 render.js #closeRoomBtn),游戏进行中点击等于强制中断
-  // 所有人的对局且不可恢复——提示文案明确说清楚这一点,不区分"进行中"/"已结束"两套逻辑,
-  // 行为本身(删除房间数据+所有人回大厅)完全一致,只是让玩家点之前多一层警示。
-  if(!confirm('确定要关闭本房间吗?这会删除本房间数据,所有人会立即回到大厅——如果游戏正在进行中,会直接中断当前对局且无法恢复。')) return;
-  if(gameRef) gameRef.off();
-  gameRef.remove().then(backToLobby).catch(err=>{
-    alert('清理失败: '+err.message);
-  });
-}
-function backToLobby(){
-  mySeat = null; selectedCardIdx = null; resetZhangba();
-  document.getElementById('game').classList.add('hidden');
-  document.getElementById('lobby').classList.remove('hidden');
-  document.getElementById('lobbyErr').textContent = '房间已清理,可重新进入。';
-}
