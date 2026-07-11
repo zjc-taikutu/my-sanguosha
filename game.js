@@ -230,6 +230,106 @@ function normalize(g){
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
     g.pending=null; g.phase='play';
   }
+  // 群体锦囊(南蛮入侵/万箭齐发)响应阶段:from/to 都应是数字座位号且对应玩家存活;不对就整体
+  // 判无效——顺带清空 g.aoe(这条锦囊本身已不可恢复,和 aoeAdvance 结算完毕时的清空一致),
+  // 防止孤立的 aoeResp 卡住(没人能匹配上一个不存在/已阵亡的 to,永远等不到响应)。
+  if(g.pending && g.pending.type==='aoeResp'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.aoe=null; g.phase='play';
+    }
+  }
+  // 决斗阶段:from/to/active 都应是数字座位号且对应玩家存活(active 是当前该出杀的那个人);
+  // 不对就整体判无效——render.js 的旁观者 banner 直接读 g.players[active].name 没有防护,
+  // active 非法会真的抛 TypeError 崩溃,不只是卡死。
+  if(g.pending && g.pending.type==='duel'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || typeof d.active!=='number'
+       || !g.players[d.from] || !g.players[d.to] || !g.players[d.active]
+       || !g.players[d.from].alive || !g.players[d.to].alive || !g.players[d.active].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 夏侯惇【刚烈】二选一阶段:seat(判定者本人)/sourceSeat(伤害来源)都应是数字座位号且存活;不对就整体判无效
+  if(g.pending && g.pending.type==='ganglieChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.sourceSeat!=='number' || !g.players[d.seat] || !g.players[d.sourceSeat] || !g.players[d.seat].alive || !g.players[d.sourceSeat].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 贯石斧询问阶段:from/to 都应是数字座位号且存活;不对就整体判无效——render.js 的旁观者
+  // banner 直接读 g.players[from]/[to].name 没有防护,会真的崩溃。
+  if(g.pending && g.pending.type==='guanshi'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 寒冰剑弃牌子阶段:from/to 都应是数字座位号且存活;不对就整体判无效——render.js 的旁观者
+  // banner 直接读 g.players[from]/[to].name 没有防护,会真的崩溃。
+  if(g.pending && g.pending.type==='hanbing'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 寒冰剑询问阶段(是否发动):from/to 同上;不对就整体判无效——同样在 render.js 有无防护的
+  // g.players[from]/[to].name 读取。
+  if(g.pending && g.pending.type==='hanbingAsk'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 许褚【裸衣】摸牌阶段询问:和颜良文丑【双雄】(shuangxiongAsk)同一个 continueEnterDrawPhase
+  // 里互斥的分支,结构完全一样——seat 应是当前回合玩家且存活,不对就整体判无效回退到摸牌阶段。
+  if(g.pending && g.pending.type==='luoyiAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='draw';
+    }
+  }
+  // 张郃【巧变】"是否移动一张装备/判定牌"子阶段:seat 应是数字座位号且存活;不对就整体判无效。
+  // 这个子阶段发生在"已决定跳过出牌阶段、改为移动装备"之后,回退到 'play' 让该玩家正常走出牌阶段
+  // 是最安全的降级(不勉强重现"跳过出牌阶段"这个已经做出的选择)。render.js 的旁观者 banner
+  // 直接读 g.players[seat].name 没有防护,会真的崩溃。
+  if(g.pending && g.pending.type==='qiaobianMove'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 张郃【巧变】回合开始"是否发动"询问:和 shuangxiongAsk/luoyiAsk 同一类"回合开始阶段的
+  // 分支性询问",但这一步发生得更早(判定阶段之前)——无效时没有办法安全重放被跳过的判定/
+  // 摸牌逻辑,统一降级回退到摸牌阶段(和 shuangxiongAsk/luoyiAsk 一致的近似处理)。render.js
+  // 的旁观者 banner 直接读 g.players[seat].name 没有防护,会真的崩溃。
+  if(g.pending && g.pending.type==='qiaobianTurnStart'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='draw';
+    }
+  }
+  // 麒麟弓选马阶段:from/to 都应是数字座位号且存活;不对就整体判无效,防止卡死
+  // (render.js 这里已经用 ?:'?' 防护过读取,不会真崩溃,但座位失效仍会让选择永远问不到人)。
+  if(g.pending && g.pending.type==='qilin'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 青龙偃月刀连续杀询问阶段:from/to 都应是数字座位号且存活;不对就整体判无效——render.js
+  // 的旁观者 banner 直接读 g.players[from]/[to].name 没有防护,会真的崩溃。
+  if(g.pending && g.pending.type==='qinglong'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 顺手牵羊/过河拆桥的选牌子阶段(g.pending.type==='pick'):trick/from/to 全是标量
+  // (trick 是字符串锦囊名,from/to 是座位号)。这次专门审查过是否需要补防御,结论是刻意不改——
+  // 和这一批新补防御的类型同样携带座位引用,但 pick 早有既有先例(CLAUDE.md 明确记录
+  // "pending.type:'pick' 全是标量,normalize 无需改"),沿用先例不重新论证;等到真的出现过
+  // 因为它卡死/崩溃的实际案例再补,不为了"看起来对称"而添加从未验证过必要性的防御代码。
   // 颜良文丑【双雄】摸牌阶段询问:seat 应是当前回合玩家且存活。
   if(g.pending && g.pending.type==='shuangxiongAsk'){
     const d=g.pending;
