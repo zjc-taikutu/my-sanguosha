@@ -49,20 +49,12 @@ function normalize(g){
   if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
-  if(g.tableCard===undefined) g.tableCard=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
-  // 兜底清空:交换展示只应该在"正处于 aoe 结算 或 决斗中"时非空(和 markCardSound 里判断要不要
-  // 追加用的是同一条件)。已经证实存在多条"交换动作结束了但忘记显式清空"的路径(南蛮入侵/万箭
-  // 齐发把人打死、决斗把人打死,都会经过 dying 流程,若这一下同时触发 checkWin,aoeRespond/
-  // finishDying 里的 if(checkWin(g)) return 会跳过原本负责清空的 aoeAdvance/resumeAfterInterrupt
-  // 分支,导致 g.exchangeCards 永久卡住、桌面上的牌好几轮都清不掉——这是真实复现过的 bug,不是
-  // 假设)。与其追着每一条新路径逐个补显式清空(已经证明会漏),不如在这里做一条兜底:只要判断
-  // 出"现在已经不在交换中了",不管是通过哪条路径结束的,一律清空,不依赖某个特定分支有没有
-  // 记得调用清空逻辑。
-  if(Array.isArray(g.exchangeCards) && g.exchangeCards.length>0 && !g.aoe && g.phase!=='duel'){
-    g.exchangeCards=[];
-  }
-  if(g.tableCard && g.tableCard.targets!=null && !Array.isArray(g.tableCard.targets)) g.tableCard.targets=null;
+  // 每一项的 targets 字段防御(原来只在单独的 g.tableCard.targets 上做,现在 g.tableCard 已经
+  // 消灭、统一到 g.exchangeCards,防御要作用于数组里的每一项)。这条是纯粹的"数据形状防御"
+  // (类型/结构检查),读(render→normalize)写(tx→normalize)两条路径都该跑,和下面那条
+  // "状态转换"性质的兜底清空刻意分属两类、分开维护(见 pruneExchangeCards 的说明)。
+  g.exchangeCards.forEach(e=>{ if(e && e.targets!=null && !Array.isArray(e.targets)) e.targets=null; });
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   // 许褚【裸衣】:本回合伤害加成标记。回合开始重置,旧存档缺失回退 false。
@@ -426,25 +418,30 @@ function pushLog(log, msg){
 // (即 actionId/概念上的杀|闪|桃|兵粮寸断 等),不是"手里那张被转化的物理牌"——比如
 // 龙胆闪当杀使用,应该播杀的语音,和玩家/其他人听到的"这是一次杀"这个游戏事件一致。
 // markCardSound: seat/card 是可选的展示补充信息(座位号、牌面对象)——音效播放只看
-// name+seq,不受影响;中央出牌区(g.tableCard)额外用 seat/card 显示"谁打了什么牌",
-// 调用点没有现成的 seat/card 就不传,中央区退化为只显示牌名。targets 是可选的目标座位
-// 信息(单个座位号或座位号数组,如铁索连环两个目标)——座位高亮用,没有目标的牌(如无中生有、
-// 南蛮入侵这类非单目标或本步没能力提供的场景)传 null,单个座位号会被归一化成长度为1的数组。
-// markCardSound: 音效/单次展示逻辑不变(g.lastCardSound/g.tableCard 照旧,每次覆盖+按 seq 淡入淡出)。
-// 额外判断:调用这一刻如果正处于"多步骤交换"过程中(南蛮入侵/万箭齐发这类群体锦囊 g.aoe 非空,或
-// 正在决斗 g.phase==='duel'),把这张牌也追加进 g.exchangeCards 数组——这个数组不设时间上限、
-// 不被下一张覆盖,交给 renderTableCard 持续显示,直到交换动作真正结束(aoeAdvance 收尾/
-// duelResponse 分出胜负)时才清空。
+// name+seq,不受影响;中央出牌区额外用 seat/card 显示"谁打了什么牌",调用点没有现成的
+// seat/card 就不传,中央区退化为只显示牌名。targets 是可选的目标座位信息(单个座位号或
+// 座位号数组,如铁索连环两个目标)——座位高亮用,没有目标的牌(如无中生有、南蛮入侵这类
+// 非单目标或本步没能力提供的场景)传 null,单个座位号会被归一化成长度为1的数组。
+//
+// markCardSound: 中央出牌区不再区分"单次展示"和"交换展示"两套机制——曾经的 g.tableCard
+// (单槽位,每次覆盖)和 g.exchangeCards(追加数组,只在 g.aoe||phase==='duel' 时才追加)
+// 是并存的两条路径,靠"枚举场景"判断该用哪一条,这正是"顺手牵羊→无懈可击→反制无懈可击"
+// 这类链条会漏掉中央展示的根源(不满足 aoe/duel 任一条件)。现在统一成一套:g.tableCard
+// 已消灭,只保留 g.exchangeCards,每次调用无条件 push 一条完整记录(含 targets)。
+//
+// 何时该清空重开、何时该接着累积,不需要这里判断——tx(fn) 的结构是
+// gameRef.transaction(g=>{ normalize(g); return fn(g); }),normalize(g) 处理的是"上一次
+// 真正提交的状态",在这次 fn(g)(也就是这次调用 markCardSound 的这个动作本身)跑之前。
+// 只要 normalize 里的兜底清空规则(见其注释)判断上一次提交时游戏是空闲的(上一条链已经
+// 结束),就会在这次 fn 跑之前把数组清成 [];这次 push 自然成为新链条的第一项。如果上一次
+// 提交时游戏还没空闲(链条还在进行),normalize 不清空,这次 push 自然接着累积。
 function markCardSound(g, cardName, seat, card, targets){
   const seq = (g.lastCardSound && g.lastCardSound.seq) ? g.lastCardSound.seq : 0;
   g.lastCardSound = { name: cardName, seq: seq+1 };
   const normTargets = targets==null ? null
     : (Array.isArray(targets) ? targets.filter(Number.isInteger) : (Number.isInteger(targets) ? [targets] : null));
-  g.tableCard = { name: cardName, seq: seq+1, seat: (Number.isInteger(seat) ? seat : null), card: card || null, targets: normTargets };
-  if(g.aoe || g.phase==='duel'){
-    if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
-    g.exchangeCards.push({ name: cardName, seat: (Number.isInteger(seat) ? seat : null), card: card || null, seq: seq+1 });
-  }
+  if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
+  g.exchangeCards.push({ name: cardName, seq: seq+1, seat: (Number.isInteger(seat) ? seat : null), card: card || null, targets: normTargets });
 }
 // markSkillSound: 和 markCardSound 同一模式,独立字段(lastSkillSound),记录"这次真正发动了
 // 哪个技能"这个语音播放事件,供 render.js 的 maybePlaySkillSound 检测并播放对应语音
@@ -700,7 +697,30 @@ function stripUndefined(obj){
   }
   return obj;
 }
-function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); return stripUndefined(fn(g) || g); }); }
+// pruneExchangeCards: "上一条结算链是否已经彻底结束、该不该在这次新动作开始前清空"——这是
+// 状态转换性质的判断(该不该把陈旧的一批牌从数据里抹掉,给即将开始的这次新动作腾出空位),
+// 和 normalize 里那条 targets 字段的"数据形状防御"是两类不同性质的事,刻意不放进 normalize
+// 内部、只在 tx() 的写入路径调用一次,不在 render() 的读取路径调用。
+//
+// 这是一个真实踩过的坑:最初这条清空规则也写在 normalize 里,render() 每次都会调用
+// normalize(g)——而 render() 几乎在每一次 tx() 提交后都会被 Firebase 的 value 监听器立刻
+// 触发一次,传入的正是刚提交的这份"链已结束"的最终状态。如果清空规则也在这条 render 路径的
+// normalize 里跑,它会在 renderTableCard 真正有机会显示"这批牌"之前,就先把数组在客户端内存
+// 里清空——renderTableCard 拿到的永远是已经被清空的空数组,链结束那一刻的整批淡出动画根本
+// 没有机会播放,直接从"链进行中的静态展示"跳到"什么都没有",和最初设计的"链结束后先完整
+// 展示一轮再统一淡出"完全相悖。Playwright 端到端测试第一次跑就复现了这个问题(exchangeCards
+// 在链结束的同一次渲染里就已经是空的,`show`/`exchange-mode` 两个 class 都不带、innerHTML
+// 也是空的),才发现"normalize 在读写两条路径都跑"这条既有约定,对"数据形状防御"这类事情
+// 完全正确、必须两条路径都跑,但对"某个状态转换该不该发生"这类事情是错的——转换只应该发生
+// 一次,伴随着某次真正的写入(下一次真实的游戏动作),不应该在纯粹的读取/重新渲染时被
+// 提前触发。判定条件本身(!g.pending && !g.aoe)和之前设计的一样没有变,只是调用位置从
+// normalize 内部搬到这里、只在 tx() 里跑这一处改变了。
+function pruneExchangeCards(g){
+  if(Array.isArray(g.exchangeCards) && g.exchangeCards.length>0 && !g.pending && !g.aoe){
+    g.exchangeCards=[];
+  }
+}
+function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); pruneExchangeCards(g); return stripUndefined(fn(g) || g); }); }
 
 function doDraw(){
   tx(g=>{
@@ -1599,7 +1619,16 @@ function resumeAfterInterrupt(g, resume, seat){
   } else if(resume.type==='zhengyi'){
     resumeAfterInterrupt(g, resume.originalResume, resume.originalSeat);
   } else if(resume.type==='duel'){
-    g.exchangeCards=[]; // 决斗把人打进濒死、脱离/阵亡后接回:决斗已经结束,清空交换展示
+    // 这一行显式清空【不能】删掉、不能只依赖 pruneExchangeCards 的通用兜底规则(!pending&&!aoe)——
+    // 已经用真实场景实测验证过:如果这里死的正是当前回合玩家(g.turn),下面 startTurn(nextAlive)
+    // 换到下家时,如果下家恰好有许褚【裸衣】(luoyi 能力),startTurn 内部的
+    // continueEnterDrawPhase 会在【同一个 tx 里】紧接着给下家开一个新的 luoyiAsk 询问——
+    // 也就是说,这次 tx 提交时 g.pending 已经又变成非空(luoyiAsk,和这场决斗毫无关系)。
+    // 通用兜底规则只看"现在全局是否空闲",这种情况下会判断"还没空闲"而不清空,导致已经结束的
+    // 决斗展示会残留到下家的裸衣询问也问完为止——粒度太粗,抓不住"这条链具体在哪一刻结束"这个
+    // 更精确的时机。这行放在 startTurn 调用之前,保证清空发生在"决斗真正结束"这一刻,不受
+    // 它之后可能紧跟着冒出来的、完全不相关的新询问影响。
+    g.exchangeCards=[];
     if(!g.players[g.turn].alive){
       startTurn(g, nextAlive(g, g.turn));
     } else {
@@ -1790,7 +1819,14 @@ function duelResponse(useSha){
     const dying = dealDamage(g, mySeat, damageAmount(g, opp, 1, 'duel'), opp, '不出【杀】', 'duel', g.pending.sourceCard);
     if(dying) return g; // 濒死流程接管,后续(轮转/阶段)延后到 finishDying 处理
     g.pending=null;
-    g.exchangeCards=[]; // 决斗结束(认输一方受伤):清空持续展示,恢复单次出牌的原有淡入淡出
+    // 这行显式清空同样不能删——和 resumeAfterInterrupt 的 'duel' 分支是结构一致的风险:
+    // 这里同样可能在 checkWin 之后走到 startTurn(nextAlive(...)),如果换到的下家恰好也有
+    // 需要在回合开始时被问一次的能力(许褚裸衣等),同一个 tx 里会紧接着重新给 g.pending 赋值,
+    // 让通用兜底规则(!pending&&!aoe)暂时失效。目前看这个分支需要"回合玩家在非致命伤害后
+    // 仍处于阵亡状态"才会触及 startTurn,按现有调用链路(死亡统一走 startDying→finishDying→
+    // resumeAfterInterrupt,不会绕回这里)基本不可达,但删掉它没有任何收益、保留没有任何代价,
+    // 不确定就不删——理由和上面 resumeAfterInterrupt 那处完全一致,一并保留。
+    g.exchangeCards=[];
     if(checkWin(g)) return g;
     // 若回合玩家在决斗中阵亡,直接换下家;否则回合玩家继续出牌阶段
     if(!g.players[g.turn].alive){
@@ -1880,14 +1916,11 @@ function resolveTrick(g, info){
     g.pending={type:'duel', from:info.from, to:info.to, active:info.to};
     if(info.sourceCard!==undefined) g.pending.sourceCard=info.sourceCard;
     g.phase='duel';
-    if(info.sourceCard){
-      // 决斗发起牌本身:markCardSound 在 playCard 主入口触发那一刻 phase 还是 'wuxie'(无懈可击
-      // 询问窗口),不满足 g.phase==='duel' 的追加条件,永远进不了交换队列——这里在 phase 真正
-      // 变成 'duel' 的这一刻手动补一条,让决斗过程的展示从发起牌开始就完整,不是从第一次应战杀
-      // 才开始出现。
-      if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
-      g.exchangeCards.push({ name:'决斗', seat:info.from, card:info.sourceCard, seq:(g.tableCard&&g.tableCard.seq)||0 });
-    }
+    // 决斗发起牌本身不需要在这里手动补插:markCardSound 现在无条件 push(不再按阶段枚举
+    // 判断该不该追加),playCard 主入口那次调用(此刻 phase 还是 'wuxie' 无懈询问窗口)已经
+    // 把这张决斗发起牌记进 g.exchangeCards 了。这里如果再手动 push 一次,会造成同一张决斗
+    // 发起牌被记录两次(重复出现在中央展示区)——这是 markCardSound 改成无条件 push 之后
+    // 唯一需要一并删除的旧补丁,已核实并写了回归测试锁定。
     g.log=pushLog(g.log, '【决斗】开始,'+tgt.name+' 先出杀');
     return; // duel 流程自身不再触发无懈
   }
@@ -2084,7 +2117,10 @@ function aoeAdvance(g, prevSeat){
   const next=nextAskee(g, from, prevSeat);
   if(next===null){
     g.aoe=null; g.pending=null; g.phase='play';
-    g.exchangeCards=[]; // 交换动作结束:清空持续展示,之后新的单次出牌恢复原来的单槽位淡入淡出
+    // 这里不需要再手动清空 g.exchangeCards:pending/aoe 已经在上一行同时清空,这个分支到此
+    // 为止不会再有后续代码在同一个 tx 里重新给 pending 赋值——pruneExchangeCards(见其定义
+    // 处的说明)的通用兜底规则(!pending&&!aoe)在下一次 tx 开始时必然会命中并清空,手动清
+    // 一次是纯粹的重复。这一点已经用真实场景实测验证过,不是凭"看起来应该没问题"就删的。
     g.log=pushLog(g.log, '【群体锦囊】结算完毕');
     return;
   }

@@ -132,9 +132,15 @@
   .table-card-who{font-size:13px;color:var(--paper-dim);}
   .table-card-name{font-size:22px;font-weight:700;color:var(--gold);letter-spacing:.06em;}
   .table-card-face{font-size:17px;margin-top:2px;}
-  /* 交换进行中(南蛮入侵应战链/决斗连续出杀):#tableCard 切换成横向排列多张卡片,不使用
-     单次出牌那套淡入淡出动画(.exchange-mode 时不触发 tableCardFade,靠 game.js 清空数组
-     来结束显示,不是靠时间)。 */
+  /* 结算链进行中(不限于南蛮入侵/万箭齐发的应战链、决斗的连续出杀——任何还没结束的结算链
+     都算,由 render-table.js 按 !g.pending&&!g.aoe 判断):#tableCard 横向排列这条链目前
+     打出的每一张牌,不淡出(exchange-mode 时 animation:none,静态常驻)。链结束的那一刻
+     (render-table.js 检测到空闲)才切成 .show 触发一次性的整体淡出——exchange-mode 和
+     show 由 render-table.js 保证互斥,不会同时出现在同一个元素上;数据本身(g.exchangeCards)
+     何时被清空是完全独立的另一件事,由 game.js 的 pruneExchangeCards(tx写入路径专属,不在
+     render路径的normalize里)负责,不影响这里的
+     视觉动画节奏(淡出动画播完之后,数据可能还没被清、也可能已经被清,视觉上都是"不可见",
+     不需要两者同步)。 */
   .table-card.exchange-mode{animation:none;opacity:1;display:flex;flex-direction:row;gap:6px;
     flex-wrap:wrap;justify-content:center;align-items:flex-start;}
   .exchange-card{background:var(--ink-soft);border:1px solid var(--gold);border-radius:8px;
@@ -689,16 +695,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=116"></script>
-<script src="data.js?v=116"></script>
-<script src="room-lifecycle.js?v=116"></script>
-<script src="game.js?v=116"></script>
-<script src="weapons.js?v=116"></script>
-<script src="skills.js?v=116"></script>
-<script src="render.js?v=116"></script>
-<script src="render-table.js?v=116"></script>
-<script src="render-hand.js?v=116"></script>
-<script src="render-controls.js?v=116"></script>
-<script src="render-log.js?v=116"></script>
+<script src="config.js?v=117"></script>
+<script src="data.js?v=117"></script>
+<script src="room-lifecycle.js?v=117"></script>
+<script src="game.js?v=117"></script>
+<script src="weapons.js?v=117"></script>
+<script src="skills.js?v=117"></script>
+<script src="render.js?v=117"></script>
+<script src="render-table.js?v=117"></script>
+<script src="render-hand.js?v=117"></script>
+<script src="render-controls.js?v=117"></script>
+<script src="render-log.js?v=117"></script>
 </body>
 </html>
