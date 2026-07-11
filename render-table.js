@@ -178,10 +178,20 @@ function renderTableCard(g){
     if(lastFadedBatchSeq !== last.seq){
       lastFadedBatchSeq = last.seq;
       // 和 #logToast 同款"淡入-停留-淡出"手法:先移除 .show 强制回流,再加回去,保证 CSS
-      // 动画每次都从头重新播放。链进行中一直是 exchange-mode(静态,不淡出),这里移除它、
-      // 换成 show 触发一次性的整体淡出——这一刻数组里已经包含了这条链打出的全部牌,不会
-      // 出现"最后一张牌被瞬间清空来不及看清"的问题(清空数据是等下一条链开始时才会发生的
-      // 完全独立的另一件事,见 normalize 的兜底规则)。
+      // 动画每次都从头重新播放。这一刻数组里已经包含了这条链打出的全部牌,不会出现"最后
+      // 一张牌被瞬间清空来不及看清"的问题(清空数据是等下一条链开始时才会发生的完全独立的
+      // 另一件事,见 pruneExchangeCards)。
+      //
+      // 移除 exchange-mode 这一行不是为了控制布局(布局现在完全交给 index.html 里的
+      // .table-card:has(.exchange-card + .exchange-card) 选择器,只看子元素数量,和这里
+      // 加不加/删不删 class 完全无关——这正是这次要修的 bug 本身:hasNewEntry 和 idle 可能
+      // 在同一次调用里同时触发,原来布局属性挂在 exchange-mode 上、被这里的 idle 分支同一
+      // 时刻移除,会导致横排布局在还没来得及展示出来之前就被打回竖排,多张牌一起以竖排淡出)。
+      // 保留这行是因为 animation 属性本身有真实的优先级冲突:.exchange-mode{animation:none}
+      // 和 .show{animation:tableCardFade...} 选择器优先级相同,源码顺序 exchange-mode 在
+      // show 后面,如果不移除、两个 class 同时挂着,exchange-mode 的 animation:none 会赢过
+      // show,淡出动画整个放不出来——这是逐一核对两条 CSS 规则属性后确认的真实冲突,不是
+      // "习惯性互斥、图省事",所以只对 exchange-mode 保留互斥移除,不对布局做任何特殊处理。
       el.classList.remove('exchange-mode');
       el.classList.remove('show');
       void el.offsetWidth;
