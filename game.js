@@ -75,6 +75,10 @@ function normalize(g){
     if(typeof p.turnedOver!=='boolean') p.turnedOver=false;
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
     if(!Number.isInteger(p.zhengyiTurn)) p.zhengyiTurn=-1;
+    // 姜维【志继】觉醒标记
+    if(typeof p.zhijiAwakened!=='boolean') p.zhijiAwakened=false;
+    // 玩家动态获得的能力(如志继觉醒后获得观星)
+    if(typeof p.caps!=='object'||p.caps===null) p.caps={};
     // 判定区(延时锦囊):和 p.hand 同款防御,Firebase 吞空数组
     p.delays = p.delays || [];
   } });
@@ -89,6 +93,22 @@ function normalize(g){
   if(g.pending && g.pending.type==='dying'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.resume || typeof d.resume.type!=='string'){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 姜维【志继】选择阶段:seat 应是数字且存活
+  if(g.pending && g.pending.type==='zhijiChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 姜维【挑衅】选择阶段:from/to 应是数字且存活
+  if(g.pending && g.pending.type==='tiaoxinChoice'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive){
       g.pending=null; g.phase='play';
     }
   }
@@ -314,6 +334,8 @@ function normalize(g){
   // 吕蒙【克己】辅助标志:本回合是否在决斗中打出过杀,和 g.shaUsed 同款防御
   if(typeof g.shaPlayedInDuel!=='boolean') g.shaPlayedInDuel=false;
   if(typeof g.duanliangUsed!=='boolean') g.duanliangUsed=false;
+  // 姜维【挑衅】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
+  if(typeof g.tiaoxinUsed!=='boolean') g.tiaoxinUsed=false;
   // 孙权【制衡】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
   if(typeof g.zhihengUsed!=='boolean') g.zhihengUsed=false;
   // 刘备【仁德】:统计当前出牌阶段已交出的牌数,到第2张时强制回复一次
@@ -2605,8 +2627,22 @@ function startTurn(g, seat){
     g.roundSeatsActed.push(seat);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
+  // 姜维【志继】觉醒检查:准备阶段,若没有手牌
+  const p = g.players[seat];
+  if(p && p.alive && p.general==='jiangwei' && (p.hand||[]).length===0 && !p.zhijiAwakened){
+    p.zhijiAwakened = true;
+    p.maxHp--; // 减1点体力上限
+    // 如果当前体力超过新的体力上限，需要调整
+    if(p.hp > p.maxHp) p.hp = p.maxHp;
+    // 需要玩家选择：回复1点体力 或 摸两张牌
+    // 观星技能会在选择完成后获得
+    g.pending = { type:'zhijiChoice', seat };
+    g.phase = 'zhijiChoice';
+    g.log = pushLog(g.log, p.name + ' 发动【志继】觉醒,体力上限-1,请选择:回复1点体力或摸两张牌');
+    return; // 等待玩家选择
+  }
   continueGuanxingCheck(g, seat);
 }
 // enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、

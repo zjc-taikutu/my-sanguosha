@@ -1039,3 +1039,126 @@ function respondXiaoguoChoice(choice){
 
 
 }
+
+// ===== 姜维【志继】 =====
+// respondZhijiChoice: 姜维【志继】觉醒后的选择
+// choice: true=回复1点体力, false=摸两张牌
+function respondZhijiChoice(healOrDraw){
+  tx(g=>{
+    if(g.phase!=='zhijiChoice'||!g.pending||g.pending.type!=='zhijiChoice') return g;
+    const seat = g.pending.seat;
+    const p = g.players[seat];
+    if(!p || !p.alive) {
+      g.pending = null; g.phase = 'play';
+      return g;
+    }
+    
+    if(healOrDraw){
+      // 选择回复1点体力
+      p.hp = Math.min(p.hp + 1, p.maxHp);
+      g.log = pushLog(g.log, p.name + ' 选择回复1点体力');
+    } else {
+      // 选择摸两张牌
+      drawN(g, seat, 2);
+      g.log = pushLog(g.log, p.name + ' 选择摸两张牌');
+    }
+    
+    // 获得观星技能（在选择完成后才生效）
+    if(!p.caps) p.caps = {};
+    p.caps.guanxing = true;
+    g.log = pushLog(g.log, p.name + ' 【志继】觉醒完成,获得【观星】技能');
+    g.pending = null;
+    // 继续准备阶段的后续流程
+    continueGuanxingCheck(g, seat);
+    return g;
+  });
+}
+
+// ===== 姜维【挑衅】 =====
+// respondTiaoxin: 姜维【挑衅】,选择目标后提交。服务端在 tx 内:
+// 1. 校验:出牌阶段,本回合未使用过挑衅,目标合法
+// 2. 设 g.tiaoxinUsed=true,开 pending 询问目标角色选择:①对你使用一张杀;②让你弃置其一张牌
+function respondTiaoxin(targetSeat){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'tiaoxin')) return g;
+    if(g.tiaoxinUsed) return g; // 本回合已使用过
+    const target = g.players[targetSeat];
+    if(!target || !target.alive || targetSeat===mySeat) return g;
+    
+    g.tiaoxinUsed=true;
+    g.pending={type:'tiaoxinChoice', from:mySeat, to:targetSeat};
+    g.phase='tiaoxinChoice';
+    g.log=pushLog(g.log, me.name+' 发动【挑衅】,要求 '+target.name+' 选择:对其使用一张杀或被弃置一张牌');
+    return g;
+  });
+}
+
+// respondTiaoxinChoice: 挑衅目标的选择
+// target 选择: true=使用杀, false=被弃置一张牌
+function respondTiaoxinChoice(useSha){
+  tx(g=>{
+    if(g.phase!=='tiaoxinChoice'||!g.pending||g.pending.type!=='tiaoxinChoice') return g;
+    const from=g.pending.from, to=g.pending.to;
+    const target=g.players[to];
+    const asker=g.players[from];
+    
+    if(useSha){
+      // 目标选择对挑衅者使用一张杀
+      // 检查目标是否能出杀
+      const shaCard = findUsableAs(target.hand, target, '杀');
+      if(shaCard && shaCard.card){
+        // 使用杀 - resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard)
+        // 这里target是出杀者，from是目标
+        resolveShaUse(g, target, from, shaCard.role, singleCardShaColor(shaCard.card), shaCard.card);
+        g.pending=null; g.phase='play';
+      } else {
+        // 目标不能出杀，视为放弃使用杀，需要被弃置一张牌
+        g.log=pushLog(g.log, target.name+' 无法对 '+asker.name+' 使用杀,自动选择被弃置一张牌');
+        // 落到弃置分支
+        const discardable=[...(target.hand||[]), ...Object.values(target.equips||{}).filter(e=>e)];
+        if(discardable.length>0){
+          const idx=Math.floor(Math.random()*discardable.length);
+          const card=discardable[idx];
+          if((target.hand||[]).includes(card)){
+            const handIdx=target.hand.indexOf(card);
+            target.hand.splice(handIdx, 1);
+            g.discard.push(card);
+          } else {
+            // 是装备牌
+            const slot=Object.keys(target.equips||{}).find(s=>target.equips[s]===card);
+            if(slot) {
+              target.equips[slot]=null;
+              g.discard.push(card);
+            }
+          }
+          g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的一张牌');
+        }
+        g.pending=null; g.phase='play';
+      }
+    } else {
+      // 目标选择被弃置一张牌
+      const discardable=[...(target.hand||[]), ...Object.values(target.equips||{}).filter(e=>e)];
+      if(discardable.length>0){
+        const idx=Math.floor(Math.random()*discardable.length);
+        const card=discardable[idx];
+        if((target.hand||[]).includes(card)){
+          const handIdx=target.hand.indexOf(card);
+          target.hand.splice(handIdx, 1);
+          g.discard.push(card);
+        } else {
+          // 是装备牌
+          const slot=Object.keys(target.equips||{}).find(s=>target.equips[s]===card);
+          if(slot) {
+            target.equips[slot]=null;
+            g.discard.push(card);
+          }
+        }
+        g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的一张牌');
+      }
+      g.pending=null; g.phase='play';
+    }
+    return g;
+  });
+}

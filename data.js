@@ -282,6 +282,10 @@ const GENERALS = {
   zhuge:         { id:'zhuge',         name:'诸葛亮', gender:'male', maxHp:3, skill:'观星/空城',
     desc:'观星:准备阶段,你可以观看牌堆顶的X张牌(X为存活角色数且最多为5),以任意顺序分配至牌堆顶或牌堆底。空城:锁定技,若你没有手牌,你不能成为【杀】或【决斗】的目标。',
     caps:{ guanxing:true, kongcheng:true } },
+  jiangwei:      { id:'jiangwei',      name:'姜维',   gender:'male', maxHp:4, skill:'挑衅/志继',
+    desc:'挑衅:出牌阶段限一次,你可指定一名其他角色,令其选择一项:1.对你使用一张杀;2.令你弃置其一张牌。志继:觉醒技,准备阶段,若你没有手牌,你减1点体力上限,回复1点体力或摸两张牌,然后获得技能观星。',
+    caps:{ tiaoxin:true, zhiji:true },
+    hooks:{ } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
@@ -311,7 +315,7 @@ function equipHasCap(player, cap){
   });
 }
 // 统一能力入口:武将 caps 或 装备 cap 任一提供即算拥有。实时查询无缓存 —— 卸下/替换装备后自然失效。
-function hasCap(player, cap){ return generalHasCap(player, cap) || equipHasCap(player, cap); }
+function hasCap(player, cap){ return generalHasCap(player, cap) || equipHasCap(player, cap) || (player.caps && player.caps[cap]); }
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
 function cardSuitForPlayer(player, card){

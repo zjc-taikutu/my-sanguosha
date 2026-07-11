@@ -102,6 +102,10 @@ let lijianFromSeat = null;
 function resetLijian(){ lijianMode=false; lijianCardIdx=null; lijianFromSeat=null; }
 let fanjianMode = false;
 function resetFanjian(){ fanjianMode=false; }
+// 姜维【挑衅】:出牌阶段限一次,选一个目标角色
+let tiaoxinMode = false;
+let tiaoxinTarget = null;
+function resetTiaoxin(){ tiaoxinMode=false; tiaoxinTarget=null; }
 let lirangPicks = [];
 function resetLirang(){ lirangPicks=[]; }
 // guanshifuOptions: 攻击者自己当前可弃的项(手牌逐张 + 非空装备槽逐件,武器槽排除——那就是
@@ -953,6 +957,36 @@ function renderControls(g){
     setBanner('等待 '+escapeHtml(seatA)+' 选择对 '+escapeHtml(seatB)+' 使用【杀】或弃置武器…');
     return;
   }
+  // 姜维【志继】:觉醒后选择回复体力或摸牌
+  if(g.phase==='zhijiChoice' && g.pending && g.pending.type==='zhijiChoice' && g.pending.seat===mySeat){
+    const pName = g.players[mySeat].name;
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='回复1点体力'; b1.onclick=()=>respondZhijiChoice(true); c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='摸两张牌'; b2.onclick=()=>respondZhijiChoice(false); c.appendChild(b2);
+    setBanner(escapeHtml(pName)+' 【志继】觉醒,体力上限已-1,请选择:回复1点体力或摸两张牌');
+    return;
+  }
+  if(g.phase==='zhijiChoice' && g.pending && g.pending.type==='zhijiChoice'){
+    const pName = g.players[g.pending.seat].name;
+    setBanner('等待 '+escapeHtml(pName)+' 选择【志继】觉醒效果…');
+    return;
+  }
+  // 姜维【挑衅】:目标角色选择如何响应
+  if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat){
+    const from=g.players[g.pending.from].name, to=g.players[mySeat].name;
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='对其使用【杀】'; b1.onclick=()=>respondTiaoxinChoice(true); c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='被弃置一张牌'; b2.onclick=()=>respondTiaoxinChoice(false); c.appendChild(b2);
+    setBanner(escapeHtml(from)+' 发动【挑衅】,请选择:对其使用一张【杀】,或被弃置一张牌。');
+    return;
+  }
+  if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice'){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner('等待 '+escapeHtml(to)+' 选择对 '+escapeHtml(from)+' 使用【杀】或被弃置一张牌…');
+    return;
+  }
   if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
     const picker=g.pending.order[g.pending.idx];
     const poolDesc=g.pending.pool.map(c=>(cardFace(c)||'')+escapeHtml(c.name)).join('、');
@@ -1545,6 +1579,11 @@ function renderControls(g){
       const qb=document.createElement('button'); qb.className='ghost';
       qb.textContent='发动【奇袭】'; qb.onclick=()=>{ selectedCardIdx=null; qixiMode=true; qixiCardIdx=null; render(g); }; c.appendChild(qb);
     }
+    // 姜维【挑衅】:出牌阶段限一次,选择一个其他角色
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'tiaoxin') && !g.tiaoxinUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat)){
+      const tb=document.createElement('button'); tb.className='ghost';
+      tb.textContent='发动【挑衅】'; tb.onclick=()=>{ selectedCardIdx=null; tiaoxinMode=true; render(g); }; c.appendChild(tb);
+    }
     const hasGuoseCard = (me.hand||[]).some(c=>c && c.suit==='♦');
     const hasGuoseTarget = g.players.some((p,i)=>p && p.alive && i!==mySeat && !(p.delays||[]).some(c=>c && c.name==='乐不思蜀'));
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'guose') && hasGuoseCard && hasGuoseTarget){
@@ -1583,7 +1622,7 @@ function renderControls(g){
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
