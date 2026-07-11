@@ -134,9 +134,26 @@ function respondQinglong(activate, cardIdx){
     const targetSeat=g.pending.to;
     if(!activate){
       g.log=pushLog(g.log, me.name+'：不发动【青龙偃月刀】');
-      g.pending=null;
-      if(checkWin(g)) return g;
-      g.phase='play';
+      const sourceCard = g.pending.sourceCard;
+      g.pending = null;
+      // 存储剩余可用效果，回到调度
+      // 内联mengjinDiscardCount逻辑以避免跨文件依赖
+      const mengjinDiscardCount = p => (p.hand||[]).length + EQUIP_SLOTS.filter(s=>p.equips&&p.equips[s]).length;
+      const remainingAvailable = ['mengjin', 'guanshifu'].filter(id => {
+        if(id === 'mengjin') {
+          const attacker = g.players[from];
+          const target = g.players[targetSeat];
+          return attacker && attacker.alive && target && target.alive && 
+                 generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
+        }
+        if(id === 'guanshifu') return maybeStartGuanshifu(g, from, targetSeat, sourceCard);
+        return false;
+      });
+      if(remainingAvailable.length > 0) {
+        continueShaOffsetEffects(g, from, targetSeat, sourceCard, remainingAvailable);
+      } else {
+        finishSingleShaTarget(g);
+      }
       return g;
     }
     const card=me.hand[cardIdx];
@@ -197,8 +214,26 @@ function respondGuanshi(picks){
     const me=g.players[from]; // 攻击者本人(装备者)
     if(!Array.isArray(picks) || picks.length!==2){
       g.log=pushLog(g.log, me.name+'：不发动【贯石斧】');
-      g.pending=null;
-      finishSingleShaTarget(g);
+      const sourceCard = g.pending.sourceCard;
+      g.pending = null;
+      // 存储剩余可用效果，回到调度
+      // 内联mengjinDiscardCount逻辑以避免跨文件依赖
+      const mengjinDiscardCount = p => (p.hand||[]).length + EQUIP_SLOTS.filter(s=>p.equips&&p.equips[s]).length;
+      const remainingAvailable = ['mengjin', 'qinglong'].filter(id => {
+        if(id === 'mengjin') {
+          const attacker = g.players[from];
+          const target = g.players[to];
+          return attacker && attacker.alive && target && target.alive && 
+                 generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
+        }
+        if(id === 'qinglong') return maybeStartQinglong(g, from, to);
+        return false;
+      });
+      if(remainingAvailable.length > 0) {
+        continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
+      } else {
+        finishSingleShaTarget(g);
+      }
       return g;
     }
     // 校验:两项不重复、都合法(手牌下标存在 / 装备槽非空且不是武器槽本身)

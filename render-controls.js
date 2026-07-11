@@ -85,6 +85,7 @@ function resetQinglong(){ qinglongMode=false; }
 // ('hand:idx' / 'equip:slot'),纯客户端不入库。
 let guanshiPicks = [];
 function resetGuanshi(){ guanshiPicks=[]; }
+// 庞德【猛进】:不需要额外客户端状态,直接使用 pending
 // 郭嘉【遗计】分配阶段:yijiPicks 依次记录"第i张牌分配给哪个座位号",纯客户端不入库。
 // 每次点一个座位号就 push 进去(允许重复,如都给自己/都给同一人),攒够 cards.length 张就提交。
 let yijiPicks = [];
@@ -474,6 +475,74 @@ function renderControls(g){
   if(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【贯石斧】…');
+    return;
+  }
+  // 杀被抵消后的效果选择(猛进/青龙/贯石斧)
+  if(g.phase==='shaOffsetChoice' && g.pending && g.pending.type==='shaOffsetChoice' && g.pending.from===mySeat){
+    const {from, to, available} = g.pending;
+    const fromName = g.players[from].name;
+    const toName = g.players[to].name;
+    
+    available.forEach(effectId => {
+      const b=document.createElement('button'); b.className='primary';
+      if(effectId === 'mengjin') b.textContent='发动【猛进】';
+      else if(effectId === 'qinglong') b.textContent='发动【青龙偃月刀】';
+      else if(effectId === 'guanshifu') b.textContent='发动【贯石斧】';
+      
+      if(effectId === 'mengjin') b.onclick=()=>respondMengjin();
+      else if(effectId === 'qinglong') b.onclick=()=>respondQinglong(true);
+      else if(effectId === 'guanshifu') b.onclick=()=>{ guanshiMode=true; guanshiPicks=[]; render(g); };
+      c.appendChild(b);
+    });
+    
+    const endBtn=document.createElement('button'); endBtn.className='ghost';
+    endBtn.textContent='结束'; 
+    endBtn.onclick=()=>{ g.pending=null; finishSingleShaTarget(g); };
+    c.appendChild(endBtn);
+    
+    setBanner('你对 '+escapeHtml(toName)+' 的【杀】被【闪】抵消,选择发动效果…');
+    return;
+  }
+  if(g.phase==='shaOffsetChoice' && g.pending && g.pending.type==='shaOffsetChoice'){
+    const fromName = g.players[g.pending.from]?.name || '某玩家';
+    const toName = g.players[g.pending.to]?.name || '某玩家';
+    setBanner('等待 '+escapeHtml(fromName)+' 选择杀被抵消后的效果…');
+    return;
+  }
+  // 庞德【猛进】:选择弃置目标的牌
+  if(g.phase==='mengjin' && g.pending && g.pending.type==='mengjin' && g.pending.from===mySeat){
+    const {from, to, available} = g.pending;
+    const fromName = g.players[from].name;
+    const toName = g.players[to].name;
+    const target = g.players[to];
+    
+    // 手牌选项
+    if(available.includes('hand')){
+      const hb=document.createElement('button'); hb.className='primary';
+      hb.textContent='弃置一张手牌(随机)';
+      hb.onclick=()=>mengjinPick('hand');
+      c.appendChild(hb);
+    }
+    
+    // 装备选项
+    available.forEach(opt => {
+      if(opt !== 'hand'){
+        const eb=document.createElement('button'); eb.className='primary';
+        const equip = target.equips[opt];
+        if(equip) eb.textContent='弃置装备【'+equip.name+'】';
+        else eb.textContent='弃置装备槽('+opt+')';
+        eb.onclick=()=>mengjinPick(opt);
+        c.appendChild(eb);
+      }
+    });
+    
+    setBanner(fromName+' 发动【猛进】,选择弃置 '+toName+' 的一张牌…');
+    return;
+  }
+  if(g.phase==='mengjin' && g.pending && g.pending.type==='mengjin'){
+    const fromName = g.players[g.pending.from]?.name || '某玩家';
+    const toName = g.players[g.pending.to]?.name || '某玩家';
+    setBanner('等待 '+escapeHtml(fromName)+' 选择弃置 '+toName+' 的牌(猛进)…');
     return;
   }
   // 郭嘉【遗计】:受伤后是否发动,看牌堆顶2张(不足2张时可能只有1张)分给任意角色(含自己)。

@@ -99,6 +99,27 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 杀被抵消后的效果选择阶段:from/to 应是数字且存活;available 应是非空数组且元素合法
+  if(g.pending && g.pending.type==='shaOffsetChoice'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || 
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.available) || d.available.length===0 ||
+       !d.available.every(id => ['mengjin','qinglong','guanshifu'].includes(id))){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 猛进选择弃牌阶段:from/to 应是数字且存活;available 应是非空数组
+  if(g.pending && g.pending.type==='mengjin'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || 
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.available) || d.available.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 郭嘉【遗计】分配阶段:seat 同上;cards 应是非空数组(牌堆不足2张时会是1张,长度1或2皆合法)。
   if(g.pending && g.pending.type==='yijiAssign'){
     const d=g.pending;
@@ -652,11 +673,9 @@ function finishGuicai(g, finalCard){
   const red = finishBaguaColor(g, judgedSeat, finalCard);
   if(resume.type==='sha'){
     // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要
-    // 继续;青龙偃月刀/贯石斧同样要在这里给一次触发机会,原因见 continueShaAfterTieqi 对应
-    // 位置的注释)
+    // 继续;杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
     if(red){
-      if(maybeStartQinglong(g, resume.from, resume.to)) return;
-      if(!maybeStartGuanshifu(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
+      if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
     }
     else {
       g.pending={from:resume.from, to:resume.to};
@@ -674,6 +693,238 @@ function finishGuicai(g, finalCard){
       g.log=pushLog(g.log, '要求 '+g.players[resume.target].name+' 打出【'+g.aoe.need+'】');
     }
   }
+}
+
+// ===== 杀被抵消后的效果调度系统 =====
+// mengjinDiscardCount: 目标可弃牌数量(手牌+装备,不含判定区)
+function mengjinDiscardCount(p){ 
+  return (p.hand||[]).length + EQUIP_SLOTS.filter(s=>p.equips&&p.equips[s]).length; 
+}
+
+// maybeStartShaOffsetEffects: 检查杀被抵消后是否有可触发的效果(猛进/青龙/贯石斧)
+// 返回 true 表示已开 pending/直接处理,调用方应立即 return; false 表示无效果,继续原有流程
+function maybeStartShaOffsetEffects(g, from, to, sourceCard){
+  const available = [];
+  const attacker = g.players[from];
+  const target = g.players[to];
+  
+  // 检查猛进
+  if(attacker && attacker.alive && target && target.alive && generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0){
+    available.push('mengjin');
+  }
+  
+  // 检查青龙偃月刀
+  if(maybeStartQinglong(g, from, to)){
+    available.push('qinglong');
+    // 还原 maybeStartQinglong 的副作用
+    g.pending = null;
+    g.phase = 'play';
+  }
+  
+  // 检查贯石斧
+  if(maybeStartGuanshifu(g, from, to, sourceCard)){
+    available.push('guanshifu');
+    // 还原 maybeStartGuanshifu 的副作用
+    g.pending = null;
+    g.phase = 'play';
+  }
+  
+  if(available.length === 0) return false;
+  if(available.length === 1) {
+    startShaOffsetEffect(g, from, to, available[0], sourceCard);
+    return true;
+  }
+  
+  // 多个效果,需要选择
+  g.pending = {
+    type: 'shaOffsetChoice',
+    from: from,
+    to: to,
+    available: available
+  };
+  if(sourceCard !== undefined) g.pending.sourceCard = sourceCard;
+  g.phase = 'shaOffsetChoice';
+  return true;
+}
+
+// startShaOffsetEffect: 启动单个效果
+function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
+  const attacker = g.players[from];
+  const target = g.players[to];
+  
+  if(effectId === 'mengjin') {
+    // 启动猛进 - 直接内联实现,避免跨文件依赖
+    if(!attacker || !attacker.alive || !target || !target.alive) {
+      g.pending = null;
+      finishSingleShaTarget(g);
+      return;
+    }
+    
+    const discardCount = mengjinDiscardCount(target);
+    if(discardCount === 0) {
+      g.log = pushLog(g.log, attacker.name+' 发动【猛进】,但 '+target.name+' 没有可弃置的牌');
+      g.pending = null;
+      finishSingleShaTarget(g);
+      return;
+    }
+    
+    // 如果只有一个可弃选项,自动弃置
+    const handCount = (target.hand||[]).length;
+    const equipSlots = EQUIP_SLOTS.filter(s=>target.equips[s]);
+    const optCount = (handCount>0?1:0) + equipSlots.length;
+    
+    if(optCount === 1) {
+      // 唯一选项:自动弃置
+      const info = {trick:'猛进', from, to};
+      if(handCount > 0) {
+        applyTrickOnHand(g, info);
+      } else if(equipSlots.length > 0) {
+        applyTrickOnEquip(g, info, equipSlots[0]);
+      }
+      
+      g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' 一张牌');
+      markSkillSound(g, '猛进');
+      
+      // 处理完猛进后,检查是否还有其他效果需要处理
+      const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
+        if(id === 'qinglong') return maybeStartQinglong(g, from, to);
+        if(id === 'guanshifu') return maybeStartGuanshifu(g, from, to, sourceCard);
+        return false;
+      });
+      
+      if(remainingAvailable.length > 0) {
+        continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
+      } else {
+        g.pending = null;
+        finishSingleShaTarget(g);
+      }
+      return;
+    }
+    
+    // 多个选项:开 pending 让攻击者选择
+    g.pending = {
+      type: 'mengjin',
+      from: from,
+      to: to,
+      available: []
+    };
+    if(handCount > 0) {
+      g.pending.available.push('hand');
+    }
+    equipSlots.forEach(slot => {
+      g.pending.available.push(slot);
+    });
+    if(sourceCard !== undefined) g.pending.sourceCard = sourceCard;
+    g.phase = 'mengjin';
+    g.log = pushLog(g.log, attacker.name+' 发动【猛进】,选择弃置 '+target.name+' 的一张牌…');
+  } else if(effectId === 'qinglong') {
+    // 重新启动青龙
+    maybeStartQinglong(g, from, to);
+  } else if(effectId === 'guanshifu') {
+    // 重新启动贯石斧
+    maybeStartGuanshifu(g, from, to, sourceCard);
+  }
+}
+
+// continueShaOffsetEffects: 一个效果处理完后继续处理剩余效果
+function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
+  const attacker = g.players[from];
+  const target = g.players[to];
+  
+  // 过滤掉不再合法的效果
+  const validAvailable = remainingAvailable.filter(id => {
+    if(id === 'mengjin') {
+      return attacker && attacker.alive && target && target.alive && 
+             generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
+    } else if(id === 'qinglong') {
+      return maybeStartQinglong(g, from, to);
+    } else if(id === 'guanshifu') {
+      return maybeStartGuanshifu(g, from, to, sourceCard);
+    }
+    return false;
+  });
+  
+  if(validAvailable.length === 0) {
+    g.pending = null;
+    finishSingleShaTarget(g);
+    return true;
+  }
+  
+  if(validAvailable.length === 1) {
+    startShaOffsetEffect(g, from, to, validAvailable[0], sourceCard);
+    return true;
+  }
+  
+  // 仍然有多个可用效果
+  g.pending = {
+    type: 'shaOffsetChoice',
+    from: from,
+    to: to,
+    available: validAvailable
+  };
+  if(sourceCard !== undefined) g.pending.sourceCard = sourceCard;
+  g.phase = 'shaOffsetChoice';
+  return true;
+}
+
+// mengjinPick: 处理猛进的牌选择
+function mengjinPick(choice) {
+  tx(g=>{
+    if(g.phase!=='mengjin'||!g.pending||g.pending.type!=='mengjin'||g.pending.from!==mySeat) return g;
+    
+    const {from, to, available, sourceCard} = g.pending;
+    const attacker = g.players[from];
+    const target = g.players[to];
+    
+    if(!attacker || !attacker.alive || !target || !target.alive) {
+      g.pending = null;
+      finishSingleShaTarget(g);
+      return g;
+    }
+    
+    if(!available.includes(choice)) return g;
+    
+    const info = {trick:'猛进', from, to};
+    if(choice === 'hand') {
+      applyTrickOnHand(g, info);
+    } else {
+      applyTrickOnEquip(g, info, choice);
+    }
+    
+    g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' '+ (choice==='hand'?'一张手牌':'的装备【'+(target.equips[choice]?.name||choice)+'】'));
+    markSkillSound(g, '猛进');
+    
+    g.pending = null;
+    
+    // 处理完猛进后,检查是否还有其他效果需要处理
+    const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
+      if(id === 'qinglong') return maybeStartQinglong(g, from, to);
+      if(id === 'guanshifu') return maybeStartGuanshifu(g, from, to, sourceCard);
+      return false;
+    });
+    
+    if(remainingAvailable.length > 0) {
+      continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
+    } else {
+      finishSingleShaTarget(g);
+    }
+    
+    return g;
+  });
+}
+
+// respondMengjin: 在shaOffsetChoice阶段选择猛进后的处理
+function respondMengjin() {
+  tx(g=>{
+    if(g.phase!=='shaOffsetChoice'||!g.pending||g.pending.type!=='shaOffsetChoice'||g.pending.from!==mySeat) return g;
+    
+    const {from, to, available, sourceCard} = g.pending;
+    
+    // 从shaOffsetChoice切换到mengjin
+    g.pending = null;
+    startShaOffsetEffect(g, from, to, 'mengjin', sourceCard);
+    return g;
+  });
 }
 
 // ---------- actions (all via transaction on the whole game) ----------
@@ -1210,12 +1461,8 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard){
   if(r){
     const sourceCardForSha = g.pending && g.pending.sourceCard;
     g.pending=null;
-    // 青龙偃月刀/贯石斧:这条路径(八卦阵判红,视为出闪)和 respondShan 里目标打出实体闪是
-    // 同一件事——"这张杀被闪抵消了"——都要给这两把武器一个触发机会,不能只在 respondShan
-    // 里判断(八卦阵的判定发生在进入响应阶段之前,目标可能根本不会走到 respondShan)。两者
-    // 装在同一个武器槽、互斥,不会同时满足两个 if。
-    if(maybeStartQinglong(g, from, to)) return;
-    if(maybeStartGuanshifu(g, from, to, sourceCardForSha)) return;
+    // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
+    if(maybeStartShaOffsetEffects(g, from, to, sourceCardForSha)) return;
     finishSingleShaTarget(g);
     return;
   }
@@ -2227,16 +2474,8 @@ function respondShan(useShan){
       markCardSound(g, '闪', mySeat, card);
       if(card.name!=='闪' && hasCap(me,'longdan')) markSkillSound(g,'龙胆');
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
-      // 青龙偃月刀:杀被闪抵消,装备者(攻击者)可选择再对同一目标使用一张杀——不计入 g.shaUsed
-      // 次数限制、无距离限制(官方原文括号里明确写了),只在攻击者手里确实有能当杀的牌时才问
-      // (没有可用牌就不弹出这个询问,直接走下面原有的收尾,不会卡在一个按不动的死胡同界面)。
-      // 如果这次追加的杀又被闪抵消,会再次落到这里、再问一次——不需要额外写"连续触发"的循环
-      // 逻辑,这是同一段代码天然支持的效果,触发上限由攻击者手里还有没有牌能当杀这个客观条件封顶。
-      if(maybeStartQinglong(g, g.pending.from, mySeat)) return g;
-      // 贯石斧:杀被闪抵消(不管这个闪是实体牌/龙胆转化/倾国转化,触发条件只看"是否被闪挡下",
-      // 不是"是否用了防具"——仁王盾/毅重让杀直接判无效,根本不会走到这个分支,不需要额外排除)。
-      // 青龙偃月刀和贯石斧都装在同一个武器槽,互斥,不会同时满足两个 if。
-      if(maybeStartGuanshifu(g, g.pending.from, mySeat, g.pending.sourceCard)) return g;
+      // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
+      if(maybeStartShaOffsetEffects(g, g.pending.from, mySeat, g.pending.sourceCard)) return g;
     } else {
       // 寒冰剑:杀命中造成伤害之前,装备者(攻击者)可选择防止此伤害、改为弃置目标两张牌——
       // 目标(mySeat,这一刻要受伤的人)完全没有牌可弃时不能发动,直接走原有的正常受伤流程,
