@@ -2050,12 +2050,12 @@ function respondWuxie(useWuxie){
     if(useWuxie){
       const idx=me.hand.findIndex(c=>c.name==='无懈可击');
       if(idx<0) return g; // 没牌:状态不变,仍停在本人这一轮(界面按钮保留)
-      g.discard.push(me.hand.splice(idx,1)[0]);
+      const card = me.hand.splice(idx,1)[0];
+      g.discard.push(card);
       // depth===0(反制原锦囊)措辞不同于 depth>=1(反制上一次无懈可击)
       const target = g.pending.depth>0 ? g.players[g.pending.exclude].name+' 的【无懈可击】' : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
       g.log=pushLog(g.log, me.name+' 打出【无懈可击】,抵消了'+target);
-      // 这张牌是 splice 结果直接扔进弃牌堆、没有留局部变量(不为了传参新增变量),card 留空。
-      markCardSound(g, '无懈可击', mySeat);
+      markCardSound(g, '无懈可击', mySeat, card);
       g.pending.depth++;
       g.pending.exclude=mySeat;
       openWuxieRound(g);
