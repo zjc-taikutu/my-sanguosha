@@ -2511,6 +2511,16 @@ function respondWuxie(useWuxie){
 function aoeAdvance(g, prevSeat){
   const from=g.aoe.from;
   const next=nextAskee(g, from, prevSeat);
+  
+  // 祸首：南蛮入侵对孟获无效
+  if(next!==null && g.aoe.trick==='南蛮入侵'){
+    const nextPlayer=g.players[next];
+    if(nextPlayer && nextPlayer.alive && generalHasCap(nextPlayer,'huoshou')){
+      g.log=pushLog(g.log, nextPlayer.name+'【祸首】发动，南蛮入侵对其无效');
+      return aoeAdvance(g, next);
+    }
+  }
+  
   if(next===null){
     g.aoe=null; g.pending=null; g.phase='play';
     // 这里不需要再手动清空 g.exchangeCards:pending/aoe 已经在上一行同时清空,这个分支到此
@@ -2569,7 +2579,18 @@ function aoeRespond(useCard){
       return g;
     }
     // 不出:受到1点伤害
-    const dying = dealDamage(g, mySeat, 1, g.pending.from, '未打出【'+need+'】', 'aoe', g.aoe.sourceCard);
+    let actualSourceSeat = g.pending.from;
+    
+    // 祸首：若锦囊是南蛮入侵且场上有孟获（非当前目标），则孟获成为伤害来源
+    if(g.aoe.trick==='南蛮入侵'){
+      const huoshouSeat = g.players.findIndex(p => p && p.alive && generalHasCap(p, 'huoshou') && p !== me);
+      if(huoshouSeat !== -1){
+        actualSourceSeat = huoshouSeat;
+        g.log = pushLog(g.log, g.players[huoshouSeat].name + '【祸首】发动，成为南蛮入侵的伤害来源');
+      }
+    }
+    
+    const dying = dealDamage(g, mySeat, 1, actualSourceSeat, '未打出【'+need+'】', 'aoe', g.aoe.sourceCard);
     if(dying) return g; // 濒死流程接管,后续(aoeAdvance)延后到 finishDying 处理
     if(checkWin(g)) return g;
     aoeAdvance(g, mySeat); // 未结束才推进到下一目标

@@ -1503,6 +1503,15 @@ function renderControls(g){
         xb.textContent='发动【恂恂】'; xb.onclick=()=>respondXunxunStart();
         c.appendChild(xb);
       }
+      // 孟获【再起】
+      const zaiqiAvailable = hasCap(me,'zaiqi') && me.hp < me.maxHp && (g.deck||[]).length > 0;
+      if(zaiqiAvailable){
+        const zb=document.createElement('button'); zb.className='ghost';
+        zb.textContent='发动【再起】';
+        zb.title = `亮出牌堆顶${me.maxHp - me.hp}张牌,每张红桃回复1点体力`;
+        zb.onclick=()=>respondZaiqi();
+        c.appendChild(zb);
+      }
       setBanner('轮到你,摸牌阶段。');
     }
   } else if(g.phase==='play'){

@@ -1203,3 +1203,50 @@ function respondXunxun(keepIdxs, bottomOrder){
     return g;
   });
 }
+
+// respondZaiqi: 孟获【再起】
+// 摸牌阶段,若已受伤,可放弃摸牌:亮出牌堆顶 X 张牌(X=已损失体力),每张红桃回复1点体力,然后将这些牌置入弃牌堆
+function respondZaiqi() {
+  tx(g => {
+    if (g.phase !== 'draw' || g.turn !== mySeat) return g;
+    const me = g.players[mySeat];
+    if (!me || !me.alive) return g;
+    
+    // 检查发动条件:已受伤
+    if (me.hp >= me.maxHp) return g;
+    if (!hasCap(me, 'zaiqi')) return g;
+    
+    // 计算 X = 已损失体力值
+    const lostHp = me.maxHp - me.hp;
+    
+    // 亮出牌堆顶 X 张牌
+    const cards = revealPool(g, lostHp);
+    if (cards.length === 0) {
+      g.log = pushLog(g.log, me.name + ' 发动【再起】,但牌堆为空');
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 计算红桃数量
+    const heartCount = cards.filter(card => cardSuitForPlayer(me, card) === '♥').length;
+    
+    // 回复体力
+    const recoverAmount = Math.min(lostHp, heartCount);
+    if (recoverAmount > 0) {
+      me.hp = Math.min(me.maxHp, me.hp + recoverAmount);
+    }
+    
+    // 记录日志
+    const recoverText = recoverAmount > 0 ? `,其中${recoverAmount}张红桃,回复${recoverAmount}点体力（体力${me.hp}）** ` : ',无红桃,未回复体力';
+    g.log = pushLog(g.log, me.name + ' 发动【再起】,亮出牌堆顶' + lostHp + '张牌' + recoverText);
+    
+    // 将牌置入弃牌堆
+    g.discard.push(...cards);
+    
+    // 结束摸牌阶段,进入出牌阶段
+    g.phase = 'play';
+    markSkillSound(g, '再起');
+    
+    return g;
+  });
+}
