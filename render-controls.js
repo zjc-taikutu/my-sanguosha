@@ -19,7 +19,8 @@
 // 【留在 render.js 的三方共用函数，不在这里】showConfirm/confirmAndPlay/resolveActionId/
 // canShuangxiongDuelCard/playConfirmMsg/seatColor/setBanner——这些都被 render()/
 // renderControls/render-hand.js 三者中的至少两个共用，经核实后确认留在 core。
-// seatSlot 只被 render() 用，和 renderControls 无关，同样不在这里。
+// seatSlot(旧版环绕布局的槽位分配函数)已在骨架级重建(landscape-ui)里删除——对手行
+// 改用简单的回合顺序线性排列(见 render.js 的 oppOrder),不再需要按象限分配槽位。
 
 
 // ---------- targeting UI state ----------
