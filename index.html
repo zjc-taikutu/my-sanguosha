@@ -226,6 +226,7 @@
     border-radius:10px;position:relative;overflow:hidden;
     aspect-ratio:3/4;          /* 卡片形状跟随立绘素材比例(见上方说明) */
     flex:1 1 0;min-width:90px;max-width:200px; /* 对手行弹性收缩,见 .opp-row 的可读性下限说明 */
+    container-type:inline-size; /* 配合下方的 @container 分档,见 .seat.me 之后那一段说明 */
   }
   .seat.active{border-color:var(--jade);box-shadow:0 0 0 2px var(--jade) inset;} /* 当前行动者:绿色高亮 */
   .seat.dead{opacity:.45;filter:grayscale(.6);}
@@ -255,15 +256,37 @@
   }
   .seat-title-name{overflow:hidden;text-overflow:ellipsis;}
   .seat-title-hp{color:var(--cinnabar-bright);flex:none;}
-  /* 武将名竖排:writing-mode:vertical-rl 让字符纵向堆叠,text-orientation:upright
-     保证汉字保持正常朝向(不随竖排旋转90度)。位置在标题栏之下、贴左边,落在顶部遮罩
-     的深色区内。固定字号(非动态测量)——武将名长度上限被 GENERALS 表锁定(实测最长
-     "颜良文丑"4字)。 */
-  .seat-gen-name{
+  /* ===== 左侧一列(第4次微调):玩家名(在标题栏里,靠左) → 势力/所属占位 → 武将名竖排 → 血量 =====
+     **这四样(除玩家名在标题栏外)包成一个竖直 flex 列,不再各自写死绝对定位的 top 偏移量。**
+     这是真实踩到的坑逼出来的:武将名竖排的高度随字数变化(2字"马超" vs 4字"颜良文丑"差一倍),
+     而血量胶囊原来是"垂直居中"的绝对定位——在矮的对手卡上(SE 横屏下仅 128.66px 高),
+     3~4 字的武将名会直接和血量胶囊叠在一起。**这个重叠在上一轮 PR#20 里其实就已经存在,
+     只是当时的验证截图恰好都用了 2 字武将名(马超/大乔)而没暴露出来**;这次新增势力占位
+     把武将名往下推之后才被测试断言抓到。用 flex 列让它们自然依次往下排,字数怎么变都不会
+     撞车,也不需要任何"武将名大概多高"的魔数——和 .seat-bottom(判定区+装备条)当初解决
+     同一类问题用的是同一套办法。 */
+  .seat-left{
     position:absolute;top:20px;left:4px;
+    display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+  }
+  /* .seat-faction 是"武将所属(魏/蜀/吴/群)"的占位。**这个字段游戏数据模型里还没有**
+     (和身份局系统一样未实现),这里只预留空间、**不造假数据**,所以现在是一个不可见的
+     空壳(不画背景/边框——在立绘上凭空多一个色块只是噪点,不传达任何信息)。
+     **回填内容时必须补上不透明底衬**:它的位置落在顶部遮罩已经明显变淡的区域,按本方案
+     的硬要求(见血量胶囊那条的教训:半透明底衬在最亮立绘上对比度只有 2.30),届时不能
+     只靠 text-shadow 或半透明色块顶上去。 */
+  .seat-faction{
+    width:14px;height:14px;flex:none;   /* 预留出位置,内容为空时不可见 */
+  }
+  /* 武将名竖排:writing-mode:vertical-rl 让字符纵向堆叠,text-orientation:upright
+     保证汉字保持正常朝向(不随竖排旋转90度)。现在是 .seat-left 这个 flex 列里的一项
+     (排在势力占位之下、血量之上),不再自己写绝对定位。固定字号(非动态测量)——武将名
+     长度上限被 GENERALS 表锁定(实测最长"颜良文丑"4字)。 */
+  .seat-gen-name{
     writing-mode:vertical-rl;text-orientation:upright;
     font-size:11px;font-weight:700;color:var(--paper);letter-spacing:1px;
     text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 2px rgba(0,0,0,.8);
+    flex:none;
   }
   /* 血量:纵向堆叠,贴左侧中部。**这是唯一一个顶部/底部遮罩都够不到的文字元素**,所以
      它必须自带底衬。
@@ -275,19 +298,49 @@
      不能依赖背后的图",装备条做到了,血量这里却退回了半透明)。改成 .88 之后不透明度足够高,
      对比度基本不再随立绘变化。这条记录留在这里,是因为它精确说明了"为什么这次的方案必须
      坚持不透明底衬"——一旦某个元素破例用半透明,那个元素就会重蹈覆辙。 */
+  /* **底衬(rgba(18,12,8,.88) 近乎不透明)和配色这次一个字都没动**——这是上一轮用数据
+     钉死的结论(半透明 .42 时在最亮立绘上对比度只有 2.30,低于 WCAG AA)。这次改的只有
+     "它排在哪里":从"绝对定位垂直居中"改成"作为 .seat-left 这个 flex 列的最后一项",
+     因为居中定位会和字数变长的武将名竖排撞在一起(见 .seat-left 的说明)。 */
   .seat-hp-col{
-    position:absolute;left:4px;top:50%;transform:translateY(-40%);
     display:flex;flex-direction:column;align-items:center;gap:0;
     font-size:11px;line-height:1.15;color:#ff6a4d;
     background:rgba(18,12,8,.88);border-radius:999px;padding:3px 3px;
     text-shadow:0 1px 2px rgba(0,0,0,.9);
+    flex:none;
   }
   .seat-hp-col .empty{color:#7d6a5c;}
-  /* 身份/势力占位:数据模型里还没有这两个字段(身份局/势力系统未实现),空壳占位,不造假
-     数据。绝对定位放在右侧中部,不占文档流(整卡现在是绝对定位层叠结构)。 */
-  .seat-identity{position:absolute;right:4px;top:50%;transform:translateY(-50%);
-    font-size:9px;text-align:center;color:var(--paper);min-height:11px;
-    text-shadow:0 1px 3px rgba(0,0,0,.95);}
+  /* ===== 右上角(第4次微调):身份占位方块 → 正下方是"?"说明入口 =====
+     .seat-identity 是"身份(主公/忠臣/反贼/内奸)"的占位。**这个字段游戏数据模型里还没有**
+     (身份局系统未实现),只留**正方形**空壳、**不造假数据**,所以现在不可见(同 .seat-faction:
+     内容为空时不画背景/边框,避免在立绘上凭空多一个无意义的色块)。
+     **这是复用原有的 .seat-identity 元素**(它本来就是"身份占位"这个概念,只是之前放在
+     卡片中部右侧、且不是正方形),不新造第二个占位元素——同一个概念不应该同时存在两个占位。
+     **回填内容时必须补上不透明底衬**(理由同 .seat-faction)。 */
+  .seat-identity{
+    position:absolute;top:20px;right:4px;
+    width:16px;height:16px;   /* 正方形,内容为空时不可见 */
+  }
+  /* "?"说明入口(第4次微调:从标题栏挪到这里——右上角、身份方块的正下方)。
+     **它在这个新位置上落在顶部遮罩几乎完全透明的区域**(实测 SE 对手卡在该 y 坐标处
+     scrim alpha≈0,等于直接压在裸立绘上),所以**必须自带不透明底衬**——通用 .info-badge
+     本身已经带了 background:#1a1410(不透明十六进制色,不是 rgba 半透明)+金色描边,正好
+     满足本方案"每个可见元素都要有自己的不透明底衬、不能只靠 text-shadow/半透明色块"
+     这条硬要求。这里只覆盖尺寸和定位,**绝不能把那个不透明背景覆盖掉**(一旦改成半透明,
+     就会重蹈血量胶囊那次的覆辙:最亮立绘上对比度掉到 2.30,低于 WCAG AA)。
+     遮罩本身是 pointer-events:none,所以点击能正常穿透到这里;z-index 保证它叠在遮罩之上。 */
+  /* **选择器必须写成 .seat .seat-info-badge(而不是光秃秃的 .seat-info-badge)**——
+     通用 .info-badge 的基础规则(width:22px)在本文件里出现在**这一段之后**,两者
+     specificity 相同(都是单个类,(0,1,0)),同优先级下**源码顺序在后的赢**,于是尺寸会被
+     基础规则的 22px 盖掉、这里写多少都不生效(在 SE 窄屏上直接把小卡片撑爆——这是被
+     测试断言真实抓到的,不是理论担心)。加一层 .seat 前缀提到 (0,2,0) 才压得住。
+     CLAUDE.md 里早就记过 .info-badge 这条"基础规则写在断点之后导致断点失效"的坑,
+     这次是同一个坑的另一种表现形式。 */
+  .seat .seat-info-badge{
+    position:absolute;top:40px;right:4px;
+    width:14px;height:14px;font-size:9px;
+    z-index:2;
+  }
   /* 装备条:**沉底 + 完全不透明白底 + 深色文字**——这次方案的核心。不透明底衬意味着
      对比度和背后的立绘完全无关,不管立绘是深是浅、是花是素,装备文字都一定看得清。
      这是前两次"文字叠图片"失败时缺的那一环(那两次用的是半透明色块,依赖背后明暗)。
@@ -317,8 +370,9 @@
   .seat-delays .dchip{font-size:8px;padding:0 3px;border:1px solid #7a5fa0;border-radius:4px;
     color:#e2d6f5;background:rgba(40,25,60,.75);white-space:nowrap;
     text-shadow:0 1px 2px rgba(0,0,0,.9);}
-  /* "?"说明入口:标题栏右侧的小圆点。 */
-  .seat-title .info-badge{width:14px;height:14px;font-size:9px;flex:none;}
+  /* (第4次微调:原来这里有一条 .seat-title .info-badge 的尺寸规则,"?"已经从标题栏
+     挪到右上角、身份方块下方,改由上面的 .seat-info-badge 负责尺寸和定位,这条已删除,
+     不再保留一条永远命中不到的死规则。) */
   /* "我"的座位卡:更大、朱红高亮(区别于普通对手卡片)——布局结构完全一致(立绘铺满+
      文字叠加),只是尺寸和边框颜色不同。装备条显示全部4槽(含空槽),所以比对手的更高。 */
   .seat.me{
@@ -330,15 +384,48 @@
     flex:none;width:220px;max-width:260px;
   }
   .seat.me .seat-title{font-size:13px;padding:5px 8px;}
-  .seat.me .seat-title .info-badge{width:18px;height:18px;font-size:11px;}
-  .seat.me .seat-gen-name{font-size:13px;top:26px;left:6px;}
-  .seat.me .seat-identity{font-size:11px;}
-  .seat.me .seat-hp-col{font-size:14px;left:6px;padding:4px 3px;}
+  /* "我"的卡更大,左侧一列和右上这一套占位/"?"跟着放大、并按更高的标题栏往下让位。
+     (.seat-left 是 flex 列,里面各项不再需要各自的 top/left,只调尺寸即可。) */
+  .seat.me .seat-left{top:28px;left:6px;gap:3px;}
+  .seat.me .seat-faction{width:18px;height:18px;}
+  .seat.me .seat-gen-name{font-size:13px;}
+  .seat.me .seat-identity{top:28px;right:6px;width:22px;height:22px;}
+  .seat.me .seat-info-badge{top:54px;right:6px;width:18px;height:18px;font-size:11px;}
+  .seat.me .seat-hp-col{font-size:14px;padding:4px 3px;} /* left 已由 .seat-left 统一管,这里只调尺寸 */
   .seat.me .seat-equip-bar{font-size:10px;padding:3px 5px;line-height:1.4;}
   .seat.me .seat-delays .dchip{font-size:10px;padding:1px 5px;}
   .seat .tag{font-size:9px;letter-spacing:.08em;background:rgba(51,43,36,.85);color:var(--paper);
     border-radius:4px;padding:0 4px;text-shadow:none;}
   .seat .tag.turn{background:var(--gold);color:#1a1410;}
+  /* ===== 按"卡片自身宽度"分档(@container),不是按视口宽度(@media) =====
+     **卡片内叠加元素的尺寸必须跟着"卡片有多大"走,不能跟着"视口有多宽"走。** 这是被
+     测试真实抓到的:座位卡的宽度主要由**对手人数**决定——6 个对手时,即使视口是 667px 的
+     SE 横屏,每张卡也只有 96.5×128.66;而 @media 断点只看视口宽度,667px 根本够不到
+     640px 那一档,于是小卡片上套用的是**桌面档**的字号,左侧一列(势力占位 + 4字武将名
+     竖排 + 4颗心的血量胶囊)累计高度 122.6px > 卡片可用高度,直接溢出到卡外。
+     用 @container 按卡片自身宽度分档才对:同样一张 96px 的卡,不管它是因为"7人局"还是
+     "窄视口"而变小的,都会拿到同一套收紧后的尺寸。
+
+     **这一段必须放在上面那些 .seat-* 基础规则之后。** @container 本身不增加 specificity,
+     和基础规则同为 (0,1,0);同优先级下源码顺序在后的赢。第一版把它写在了基础规则之前,
+     结果 font-size 一直被后面的基础规则盖回 11px、分档完全不生效(实测 hp-col 仍是 11px)
+     ——和本文件里 .info-badge 那个坑是同一类问题,这里再次踩到。 */
+  @container (max-width:150px){
+    .seat-left{top:17px;gap:1px;}
+    .seat-faction{width:11px;height:11px;}
+    .seat-gen-name{font-size:9px;letter-spacing:0;}
+    .seat-hp-col{font-size:9px;padding:2px;}
+    .seat-identity{top:17px;width:13px;height:13px;}
+    .seat .seat-info-badge{top:32px;width:12px;height:12px;font-size:8px;}
+  }
+  @container (max-width:115px){
+    .seat-left{top:15px;gap:0;}
+    .seat-faction{width:9px;height:9px;}
+    .seat-gen-name{font-size:8px;letter-spacing:0;}
+    .seat-hp-col{font-size:8px;padding:1px 2px;}
+    .seat-identity{top:15px;width:11px;height:11px;}
+    .seat .seat-info-badge{top:27px;width:11px;height:11px;font-size:7px;}
+  }
   /* 三选一选将阶段:候选卡片纵向堆叠,继续用 .avatar-box/.avatar/.avatar-placeholder
      这套独立于座位卡片的头像展示(侧边固定宽度+信息在旁边),和上面 .seat-art
      (铺满整卡+文字叠加)刻意不共用——选将卡片不需要文字叠图片那一整套遮罩/底衬,
@@ -641,8 +728,16 @@
     .table-card-name{font-size:17px;}
     .table-card-face{font-size:14px;}
     .seat-title{font-size:10px;padding:2px 4px;}
-    .seat-title .info-badge{width:12px;height:12px;font-size:8px;}
-    .seat-gen-name{font-size:10px;top:18px;}
+    /* 左侧一列(.seat-left,里面是势力占位/武将名/血量)和右上(身份方块/"?")在窄屏
+       同步收紧,并按更矮的标题栏往上收。列内各项不再需要各自的 top(flex 列自动排),
+       只调整列的起点和各项尺寸。
+       "?"的选择器同样要带 .seat 前缀提高优先级,否则会被靠后的通用 .info-badge 基础
+       规则(22px)按源码顺序盖掉(见上面 .seat .seat-info-badge 的说明)。 */
+    .seat-left{top:17px;}
+    .seat-faction{width:12px;height:12px;}
+    .seat-gen-name{font-size:10px;}
+    .seat-identity{top:17px;width:13px;height:13px;}
+    .seat .seat-info-badge{top:33px;width:12px;height:12px;font-size:8px;}
     .seat-hp-col{font-size:10px;}
     .seat-equip-bar{font-size:7px;padding:2px;}
   }
@@ -656,7 +751,11 @@
     .table-card-name{font-size:14px;}
     .table-card-face{font-size:12px;}
     .seat-title{font-size:9px;}
-    .seat-gen-name{font-size:9px;top:16px;}
+    .seat-left{top:15px;}
+    .seat-faction{width:11px;height:11px;}
+    .seat-gen-name{font-size:9px;}
+    .seat-identity{top:15px;width:12px;height:12px;}
+    .seat .seat-info-badge{top:29px;width:11px;height:11px;font-size:7px;}
     .seat-hp-col{font-size:9px;}
     .seat-equip-bar{font-size:7px;}
   }
@@ -843,16 +942,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=123"></script>
-<script src="data.js?v=123"></script>
-<script src="room-lifecycle.js?v=123"></script>
-<script src="game.js?v=123"></script>
-<script src="weapons.js?v=123"></script>
-<script src="skills.js?v=123"></script>
-<script src="render.js?v=123"></script>
-<script src="render-table.js?v=123"></script>
-<script src="render-hand.js?v=123"></script>
-<script src="render-controls.js?v=123"></script>
-<script src="render-log.js?v=123"></script>
+<script src="config.js?v=124"></script>
+<script src="data.js?v=124"></script>
+<script src="room-lifecycle.js?v=124"></script>
+<script src="game.js?v=124"></script>
+<script src="weapons.js?v=124"></script>
+<script src="skills.js?v=124"></script>
+<script src="render.js?v=124"></script>
+<script src="render-table.js?v=124"></script>
+<script src="render-hand.js?v=124"></script>
+<script src="render-controls.js?v=124"></script>
+<script src="render-log.js?v=124"></script>
 </body>
 </html>

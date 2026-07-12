@@ -396,13 +396,22 @@ function renderSeatCard(g, seat, isSelf){
     (g.turn===seat&&g.started?'<span class="tag turn">回合</span>':'')+
     (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, seat))+'</span>':'')+
     (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'');
+  // 标题栏不再包含"?"说明入口(第4次微调把它挪到右上角、身份方块的正下方,见下面的
+  // infoBadge)。标题栏本身保留玩家名/状态标签/血量数字三样,布局不变。
   const titleRow =
     '<div class="seat-title">'+
       '<span class="seat-title-name" style="color:'+seatColor(seat)+'">'+escapeHtml(p.name)+'</span>'+
       tags+
       '<span class="seat-title-hp">'+(g.started?p.hp:'')+'</span>'+
-      (g.started&&gen?'<span class="info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+
     '</div>';
+  // "?"说明入口:第4次微调从标题栏挪到右上角、身份占位方块的正下方(绝对定位,见CSS)。
+  // **它在新位置上落在顶部遮罩几乎完全透明的区域(实测该处 scrim alpha≈0,等于直接压在
+  // 裸立绘上)**,所以必须自带不透明底衬——通用 .info-badge 本身就带 background:#1a1410
+  // (不透明十六进制色,不是 rgba 半透明),这条正好满足本方案"每个可见元素都要有自己的
+  // 不透明底衬、不能只靠 text-shadow/半透明色块"的硬要求,挪位置时不能把它弄丢。
+  const infoBadge = (g.started&&gen)
+    ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
+    : '';
   // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
   // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备条)。
   // 判定区和装备条一起包进 .seat-bottom(底部锚定的 flex column),这样判定区自然被
@@ -412,9 +421,29 @@ function renderSeatCard(g, seat, isSelf){
     + '<div class="seat-scrim-top"></div>'
     + '<div class="seat-scrim-bottom"></div>'
     + titleRow
-    + '<div class="seat-gen-name">'+genNameVert+'</div>'
-    + heartsHtml
-    + '<div class="seat-identity"></div>' // 身份/势力占位:数据模型里还没有这两个字段,先留空壳
+    // 左侧一列(从上往下):玩家名(在标题栏里,靠左)→ 势力/所属占位 → 武将名竖排 → 血量。
+    // **势力(魏/蜀/吴/群)这个字段游戏数据模型里还没有**(和身份局系统一样未实现,见
+    // CLAUDE.md),这里只留空壳占位、预留出位置,**不造假数据**——和 .seat-identity
+    // 一贯的处理原则一致。等以后真做了势力系统再回填内容。
+    //
+    // **这四样包成一个 .seat-left 竖直 flex 列,而不是各自写死绝对定位的 top 偏移量。**
+    // 原因是真实踩到的坑:武将名竖排的高度随字数变化(2字"马超"到4字"颜良文丑"差一倍),
+    // 而血量胶囊原本是"垂直居中"绝对定位——在矮的对手卡(SE 横屏下仅 128.66px 高)上,
+    // 3~4 字的武将名会直接和血量胶囊叠在一起(**这个重叠在上一轮 PR#20 里其实就已经存在,
+    // 只是当时的截图恰好都用了 2 字武将名而没暴露**)。用 flex 列让它们自然依次往下排,
+    // 字数怎么变都不会撞车,也不需要任何"武将名大概多高"的魔数——和 .seat-bottom
+    // (判定区+装备条)当初用同一套办法解决同一类问题。
+    + '<div class="seat-left">'
+      + '<div class="seat-faction"></div>'
+      + '<div class="seat-gen-name">'+genNameVert+'</div>'
+      + heartsHtml
+    + '</div>'
+    // 右上角:身份(主公/忠臣/反贼/内奸)占位方块 → 正下方是"?"说明入口。
+    // **身份字段同样还没有,只留正方形空壳占位,不造假数据。** 这里**复用现有的
+    // .seat-identity**(它本来就是"身份占位"这个概念,只是之前放在卡片中部右侧),
+    // 不新造第二个占位元素,避免同一个概念同时存在两个占位。
+    + '<div class="seat-identity"></div>'
+    + infoBadge
     + '<div class="seat-bottom">'+delayRow+equipBar+'</div>';
 }
 
