@@ -304,24 +304,61 @@ function setBanner(html, style){
   document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
 }
 
-// ===== renderSeatCard: 座位卡片的视觉结构(骨架级重建 landscape-ui 第1阶段) =====
-// 从原来 render() 内联的匿名代码块提炼成具名函数——这次是整段视觉结构的重写,不是纯粹
-// 的"剪切搬移零行为变化"式重构,提炼成本本来就为零(反正每一行都要重新验证),没有理由
-// 还留成一段匿名回调,详见CLAUDE.md这次改动记录。只负责"这张卡片长什么样",不管点击/
-// 目标选择这类交互逻辑(那批~15种技能各自的客户端选牌状态机变量仍留在 render() 里,
-// 和这次视觉结构无关,原则上和 render-hand.js 拆分时的取舍一致)。
-// isSelf=true 时是"我"的座位卡(更大、金色高亮,由 CSS 的 .seat.me 处理,这里只需要
-// 决定要不要显示完整4槽装备——对手卡片只显示已装备的槽位,自己的卡片显示全部4槽含空槽,
-// 沿用装备区一贯的既有原则)。
-// 身份/势力这两格这次游戏数据模型里都还没有(身份局/势力系统未实现,见CLAUDE.md),
-// 这里只画一个空壳 <div class="seat-identity"></div> 占位,不造假数据。
+// 座位卡装备行的单字缩写——刻意和 render-controls.js 的 EQUIP_SLOT_LABEL(完整词:
+// 武器/防具/防御马/进攻马,用于顺手牵羊/过河拆桥选牌列表等场景)分开维护,不能简单取
+// EQUIP_SLOT_LABEL 的首字——"防具"和"防御马"都以"防"开头,直接截取会让两个槽位的
+// 缩写撞在一起,4个字符必须两两不同。
+const EQUIP_SLOT_ABBR = { weapon:'武', armor:'防', plus1:'御', minus1:'攻' };
+
+// 座位卡装备行的花色+点数。**不能直接用 data.js 的 cardFace(card)**——它把颜色写死成
+// inline style(红 #b33 / 黑 #3a2f28),那套配色是给**浅色背景**设计的(当初装备条是不透明
+// 白底)。第5次微调把白底条换成"白字+深色渐变垫底"之后,背景变成近黑,实测这两个颜色在
+// 近黑底上的对比度只有 3.16 和 1.40,双双远低于 WCAG AA 的 4.5(黑色花色几乎完全看不见);
+// 而 inline style 优先级最高,也没法用 CSS 类覆盖掉。
+// 所以这里按 render-log.js 里 SUIT_COLOR 的**同一个思路**(红桃/方块着红、其余走正文色)
+// 重新取色,只是换成适配深色底的两个值,**不新造花色映射表**:
+//   - 红色花色 -> #ff6a4d(和本文件 .seat-hp-col 血量红心用的是同一个色值,深色底上的
+//     红色在这个项目里就用这一个,不再各处自己挑;实测近黑底上对比度 6.44)
+//   - 黑色花色 -> var(--paper)(正文白,实测 14.04)
+// 复用 data.js 已有的 isRed(card) 和 rankText(rank),不重复实现"哪些花色算红"这件事。
+function seatEquipFace(card){
+  if(!card || !card.suit) return '';
+  const color = isRed(card) ? '#ff6a4d' : 'var(--paper)';
+  return '<span class="efd" style="color:'+color+'">'+card.suit+rankText(card.rank)+'</span>';
+}
+
+// ===== renderSeatCard: 座位卡片的视觉结构 =====
+// 只负责"这张卡片长什么样",不管点击/目标选择这类交互逻辑(那批~15种技能各自的客户端
+// 选牌状态机变量仍留在 render() 里,和这次视觉结构无关)。
+//
+// 【第3次布局:头像铺满整卡 + 文字叠加在图片上层】
+// **这是本项目第三次采用"文字叠在武将立绘上"的设计,前两次(头像铺满整卡 / 头像居左
+// 固定大块)都因为"文字盖在可变内容图片上导致可读性差"而主动放弃,详见CLAUDE.md。
+// 这次是在完全知情的前提下有意识地做回来,不是不知情地重踩旧坑——能成立的关键在于
+// 换了一套前两次没用对的手法解决可读性:**保证对比度的是"文字和图片之间的那一层"
+// (backing layer),不是文字本身的描边**。前两次都试图靠半透明小色块+文字描边硬顶,
+// 在中间调/浅色的立绘上必然失效;这次每个文字元素都有自己的底衬层,且底衬的强度是按
+// **最亮的立绘**实测反推出来的,不是"看着差不多"。**
+//
+// 逐元素的可读性方案(每一项都必须有backing layer,不能只靠text-shadow):
+//   - 标题栏(玩家名/血量数字/"?"):顶部深色渐变遮罩 .seat-scrim-top 打底 + text-shadow
+//   - 武将名竖排:落在顶部遮罩的深色区内 + text-shadow
+//   - 血量竖排:位置在卡片中部,顶部/底部遮罩都够不到——所以它自带一个近乎不透明的深色
+//     胶囊底衬(.seat-hp-col 自己的 background),不依赖任何遮罩
+//   - 装备条(第5次微调):**白色文字,由 .seat-scrim-bottom 底部深色渐变垫底**(原来是
+//     不透明白底+深色字,这次换成白字叠在立绘上)。渐变强度按"最亮立绘+4行装备+最小卡片"
+//     这个最坏组合实测反推,见 index.html 里 .seat-scrim-bottom 的说明
+//   - 装备条:**完全不透明的白底**(沉底),深色文字。这是这次方案的核心——不透明底
+//     意味着背后立绘的明暗对它毫无影响,是唯一能"在任意立绘上都保证看清"的手法
+//   - 底部另有 .seat-scrim-bottom 深色渐变,作用不是给装备条打底(它自己不透明,不需要),
+//     而是让"立绘 → 白色装备条"的过渡在浅色立绘上不至于是一道生硬的白边
+//
+// isSelf=true 时装备条显示全部4槽(没装备的槽位显示"—",提示自己缺什么装备),对手只
+// 显示已装备的槽位(没装备的行完全不渲染)——**这条不对称是此前经用户明确确认保留的
+// 既有惯例,不是随手实现的默认值,不要"顺手统一"掉。**
 function renderSeatCard(g, seat, isSelf){
   const p = g.players[seat];
   const gen = getGeneral(p.general); // 可能为 null(大厅/旧数据)
-  // 大厅(未开局)武将未定,不显示具体血条格数,避免"占位4格→开局3格"的误导跳变
-  const hearts = g.started
-    ? ('❤'.repeat(Math.max(0,p.hp)) + '<span class="empty">'+'♡'.repeat(Math.max(0,p.maxHp-p.hp))+'</span>')
-    : '<span class="empty">—</span>';
   // 未正式开局时(g.started仍为false,含三选一选将阶段pickingGeneral):不能显示具体武将
   // 名字——gen 在这个玩家选完之后就已经非空了(respondPickGeneral 立即赋值,不等其他人
   // 选完),所以不能直接判断"gen是否非空"决定显示什么,要按"选没选"这个状态本身区分文案,
@@ -335,46 +372,101 @@ function renderSeatCard(g, seat, isSelf){
     ? '<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
     : '';
   const avatarPlaceholder = '<div class="avatar-placeholder"'+(avatarReady?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
-  // 装备:紧凑图标/缩写标签一行,对手只显示已装备的槽位、自己显示全部4槽(含空槽占位),
-  // 沿用既有原则,只是视觉上从"逐行列表"收成"一行小标签"。
+  // 武将名竖排(writing-mode:vertical-rl + text-orientation:upright,见CSS)。固定字号,
+  // 不是 fitFontSize 那套动态测量——武将名长度上限被 GENERALS 表本身锁定(已核实最长是
+  // "颜良文丑"4字),固定字号配合对这个具体worst case的真实测量验证即可。
+  const genNameVert = (g.started && gen) ? escapeHtml(gen.name) : '';
+  // 血量:纵向堆叠,每颗心一个独立的 div(不能用 repeat 拼一整串字符串,那样只是一行文字
+  // 里连续的字符、不会各自换行;必须逐个包成块级元素配合 flex-direction:column)。
+  // 大厅(未开局)不显示具体血条格数,避免"占位4格→开局3格"的误导跳变。
+  let heartsHtml;
+  if(g.started){
+    const filled = Math.max(0,p.hp), empty = Math.max(0,p.maxHp-p.hp);
+    heartsHtml = '<div class="seat-hp-col">'
+      + '❤'.repeat(filled).split('').map(c=>'<div>'+c+'</div>').join('')
+      + '♡'.repeat(empty).split('').map(c=>'<div class="empty">'+c+'</div>').join('')
+      + '</div>';
+  } else {
+    heartsHtml = '';
+  }
+  // 装备条(沉底):对手只显示已装备的槽位(没装备的行完全不渲染),自己显示全部4槽
+  // (没装备的显示"—")。每行"类别首字 + 花色点数 + 装备名",前缀取自 EQUIP_SLOT_ABBR
+  // (不能直接截 EQUIP_SLOT_LABEL 首字,"防具"/"防御马"会撞在同一个"防"字上)。
+  // 花色点数走 seatEquipFace(见文件上方):红花色着红、黑花色走正文白,两个色值都是按
+  // "深色渐变垫底"这个新背景实测选的,不是沿用 cardFace 那套给浅色底设计的配色。
   const eq = p.equips || emptyEquips();
   const equipSlotsToShow = isSelf ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
-  const equipList = g.started
-    ? '<div class="seat-equip">'+equipSlotsToShow.map(s=>{
-        const c = eq[s];
-        if(!c) return isSelf ? '<span class="erow empty-slot">—</span>' : '';
-        const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-        return '<span class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')">'+(cardFace(c)||'')+escapeHtml(c.name)+'</span>';
-      }).join('')+'</div>'
-    : '';
-  // 判定区(延时锦囊):紧凑 chip,颜色沿用既有紫色系(呼应手牌.card.trick的锦囊配色)。
+  const equipRows = g.started ? equipSlotsToShow.map(s=>{
+    const c = eq[s];
+    const prefix = EQUIP_SLOT_ABBR[s];
+    if(!c) return isSelf ? '<div class="erow empty-slot"><b>'+prefix+'</b> —</div>' : '';
+    const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
+    return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
+  }).join('') : '';
+  // 装备条整条只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块
+  // (虽然现在没有白底条了,但空的容器仍会让底部渐变多压一块立绘,没必要)。
+  const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
+  // 判定区(延时锦囊):紫色 chip,叠在装备条上方(仍在图片上层),同样自带半透明底衬。
   const delayRow = (g.started && (p.delays||[]).length>0)
     ? '<div class="seat-delays">'+p.delays.map(c=>{
         const dDesc = getCardDesc(c.name);
         return '<span class="dchip" title="'+escapeHtml(dDesc||'')+'" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">'+(cardFace(c)||'')+escapeHtml(c.name)+'</span>';
       }).join('')+'</div>'
     : '';
-  // 标题栏:武将名+血量数字,附加状态标签(回合中/连环/濒死——原来的"你"这个标签已经不需要,
-  // "我"的座位卡本身就用更大尺寸+金色边框视觉区分,不需要再额外文字提示)。"?"说明入口
-  // 只在已经选定武将时出现,点击查看完整技能说明(原来单独展示的"武将名·技能名"文字行
-  // 这次收进"?"的说明弹窗里,不再占标题栏的位置——这是紧凑卡片设计下的一处信息精简)。
+  // 标题栏(叠在顶部遮罩上):玩家名+血量数字+状态标签(回合中/连环/濒死)+"?"说明入口。
   const tags =
     (g.turn===seat&&g.started?'<span class="tag turn">回合</span>':'')+
     (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, seat))+'</span>':'')+
     (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'');
+  // 标题栏不再包含"?"说明入口(第4次微调把它挪到右上角、身份方块的正下方,见下面的
+  // infoBadge)。标题栏本身保留玩家名/状态标签/血量数字三样,布局不变。
   const titleRow =
     '<div class="seat-title">'+
       '<span class="seat-title-name" style="color:'+seatColor(seat)+'">'+escapeHtml(p.name)+'</span>'+
       tags+
       '<span class="seat-title-hp">'+(g.started?p.hp:'')+'</span>'+
-      (g.started&&gen?'<span class="info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+
     '</div>';
-  return titleRow
-    + '<div class="seat-avatar">'+avatarImg+avatarPlaceholder+'</div>'
-    + '<div class="seat-identity"></div>' // 身份/势力占位:数据模型里还没有这两个字段,先留空壳
-    + '<div class="seat-hp">'+hearts+'</div>'
-    + equipList
-    + delayRow;
+  // "?"说明入口:第4次微调从标题栏挪到右上角、身份占位方块的正下方(绝对定位,见CSS)。
+  // **它在新位置上落在顶部遮罩几乎完全透明的区域(实测该处 scrim alpha≈0,等于直接压在
+  // 裸立绘上)**,所以必须自带不透明底衬——通用 .info-badge 本身就带 background:#1a1410
+  // (不透明十六进制色,不是 rgba 半透明),这条正好满足本方案"每个可见元素都要有自己的
+  // 不透明底衬、不能只靠 text-shadow/半透明色块"的硬要求,挪位置时不能把它弄丢。
+  const infoBadge = (g.started&&gen)
+    ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
+    : '';
+  // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
+  // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备条)。
+  // 判定区和装备条一起包进 .seat-bottom(底部锚定的 flex column),这样判定区自然被
+  // 装备条顶到上方、不会被不透明白底压住,且不依赖任何"装备条大概多高"的魔数(装备条
+  // 行数是可变的:对手1~4行、"我"固定4行)——详见 index.html 里 .seat-bottom 的说明。
+  return '<div class="seat-art">'+avatarImg+avatarPlaceholder+'</div>'
+    + '<div class="seat-scrim-top"></div>'
+    + '<div class="seat-scrim-bottom"></div>'
+    + titleRow
+    // 左侧一列(从上往下):玩家名(在标题栏里,靠左)→ 势力/所属占位 → 武将名竖排 → 血量。
+    // **势力(魏/蜀/吴/群)这个字段游戏数据模型里还没有**(和身份局系统一样未实现,见
+    // CLAUDE.md),这里只留空壳占位、预留出位置,**不造假数据**——和 .seat-identity
+    // 一贯的处理原则一致。等以后真做了势力系统再回填内容。
+    //
+    // **这四样包成一个 .seat-left 竖直 flex 列,而不是各自写死绝对定位的 top 偏移量。**
+    // 原因是真实踩到的坑:武将名竖排的高度随字数变化(2字"马超"到4字"颜良文丑"差一倍),
+    // 而血量胶囊原本是"垂直居中"绝对定位——在矮的对手卡(SE 横屏下仅 128.66px 高)上,
+    // 3~4 字的武将名会直接和血量胶囊叠在一起(**这个重叠在上一轮 PR#20 里其实就已经存在,
+    // 只是当时的截图恰好都用了 2 字武将名而没暴露**)。用 flex 列让它们自然依次往下排,
+    // 字数怎么变都不会撞车,也不需要任何"武将名大概多高"的魔数——和 .seat-bottom
+    // (判定区+装备条)当初用同一套办法解决同一类问题。
+    + '<div class="seat-left">'
+      + '<div class="seat-faction"></div>'
+      + '<div class="seat-gen-name">'+genNameVert+'</div>'
+      + heartsHtml
+    + '</div>'
+    // 右上角:身份(主公/忠臣/反贼/内奸)占位方块 → 正下方是"?"说明入口。
+    // **身份字段同样还没有,只留正方形空壳占位,不造假数据。** 这里**复用现有的
+    // .seat-identity**(它本来就是"身份占位"这个概念,只是之前放在卡片中部右侧),
+    // 不新造第二个占位元素,避免同一个概念同时存在两个占位。
+    + '<div class="seat-identity"></div>'
+    + infoBadge
+    + '<div class="seat-bottom">'+delayRow+equipBar+'</div>';
 }
 
 
