@@ -423,6 +423,19 @@ function renderControls(g){
     renderPickGeneral(g, c);
     return;
   }
+  
+  // 马谡【散谣】UI
+  const sanyaoChooseHtml = renderSanyaoChooseTarget(g);
+  if(sanyaoChooseHtml) { c.innerHTML = sanyaoChooseHtml; return; }
+  const sanyaoHtml = renderSanyao(g);
+  if(sanyaoHtml) { c.innerHTML = sanyaoHtml; return; }
+  
+  // 马谡【制蛮】UI
+  const zhimengAskHtml = renderZhimengAsk(g);
+  if(zhimengAskHtml) { c.innerHTML = zhimengAskHtml; return; }
+  const zhimengPickHtml = renderZhimengPick(g);
+  if(zhimengPickHtml) { c.innerHTML = zhimengPickHtml; return; }
+  
   if(!g.started){
     const cnt=(g.players||[]).filter(Boolean).length;
     // 两种开局模式的按钮并列:随机武将(原有行为,直接分配)/三选一(进入 pickingGeneral
@@ -1809,4 +1822,101 @@ function renderControls(g){
     const b=document.createElement('button'); b.className='ghost';
     b.textContent='结束回合'; b.disabled=over>0 && !keji; b.onclick=endTurn; c.appendChild(b);
   }
+}
+
+// ========== 马谡【散谣】UI ==========
+
+function renderSanyaoChooseTarget(g) {
+  if(g.phase !== 'sanyaoChooseTarget' || !g.pending) return '';
+  const p = g.players[g.pending.from];
+  if(!p || p.seat !== mySeat) return '';
+  
+  let html = '<div class="sanyao-choose-target">';
+  html += '<p>' + escapeHtml(p.name) + ' 发动【散谣】，请选择体力值最大的目标：</p>';
+  
+  g.pending.candidates.forEach(seat => {
+    const target = g.players[seat];
+    if(target && target.alive) {
+      html += '<button onclick="respondSanyaoTarget(' + seat + ')">' + 
+        escapeHtml(target.name) + ' (体力:' + target.hp + ')</button>';
+    }
+  });
+  
+  html += '</div>';
+  return html;
+}
+
+function renderSanyao(g) {
+  if(g.phase !== 'sanyao' || !g.pending) return '';
+  const p = g.players[g.pending.from];
+  if(!p || p.seat !== mySeat) return '';
+  
+  const target = g.players[g.pending.target];
+  let html = '<div class="sanyao">';
+  html += '<p>' + escapeHtml(p.name) + ' 发动【散谣】，对 ' + escapeHtml(target.name) + ' 造成1点伤害：</p>';
+  html += '<p>请选择弃置一张牌：</p>';
+  
+  if((p.hand || []).length > 0) {
+    p.hand.forEach((card, idx) => {
+      if(card) {
+        html += '<button onclick="respondSanyao(\'hand\',' + idx + ')">手牌【' + escapeHtml(card.name) + '】</button>';
+      }
+    });
+  }
+  
+  EQUIP_SLOTS.forEach(slot => {
+    if(p.equips && p.equips[slot]) {
+      const equip = p.equips[slot];
+      const slotLabel = { weapon:'武器', armor:'防具', plus1:'+1马', minus1:'-1马' }[slot] || slot;
+      html += '<button onclick="respondSanyao(\'' + slot + '\')">' + slotLabel + '【' + escapeHtml(equip.name) + '】</button>';
+    }
+  });
+  
+  if((p.delays || []).length > 0) {
+    p.delays.forEach((card, idx) => {
+      if(card) {
+        html += '<button onclick="respondSanyao(\'delay\',' + idx + ')">判定区【' + escapeHtml(card.name) + '】</button>';
+      }
+    });
+  }
+  
+  html += '<button onclick="g.phase=\'play\'" class="ghost">取消</button>';
+  html += '</div>';
+  return html;
+}
+
+// ========== 马谡【制蛮】UI ==========
+
+function renderZhimengAsk(g) {
+  if(g.phase !== 'zhimengAsk' || !g.pending) return '';
+  const p = g.players[g.pending.from];
+  if(!p || p.seat !== mySeat) {
+    return '<div class="zhimeng-wait">等待 ' + escapeHtml(p.name) + ' 选择是否发动【制蛮】…</div>';
+  }
+  
+  const target = g.players[g.pending.to];
+  let html = '<div class="zhimeng-ask">';
+  html += '<p>' + escapeHtml(p.name) + ' 对 ' + escapeHtml(target.name) + ' 造成伤害，是否发动【制蛮】？</p>';
+  html += '<p>防止此伤害并获得其场上一张牌</p>';
+  html += '<button onclick="respondZhimeng(true)">发动</button>';
+  html += '<button onclick="respondZhimeng(false)" class="ghost">不发动</button>';
+  html += '</div>';
+  return html;
+}
+
+function renderZhimengPick(g) {
+  if(g.phase !== 'zhimengPick' || !g.pending) return '';
+  const p = g.players[g.pending.from];
+  if(!p || p.seat !== mySeat) return '';
+  
+  const target = g.players[g.pending.to];
+  let html = '<div class="zhimeng-pick">';
+  html += '<p>' + escapeHtml(p.name) + ' 发动【制蛮】，请选择获得 ' + escapeHtml(target.name) + ' 的哪一张牌：</p>';
+  
+  g.pending.options.forEach((opt, idx) => {
+    html += '<button onclick="respondZhimengPick(\'' + opt.type + '\',' + (opt.index !== undefined ? opt.index : '') + ')">' + escapeHtml(opt.label) + '</button>';
+  });
+  
+  html += '</div>';
+  return html;
 }
