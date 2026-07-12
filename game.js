@@ -376,6 +376,8 @@ function normalize(g){
   if(typeof g.liJianUsed!=='boolean') g.liJianUsed=false;
   // 周瑜【反间】:出牌阶段限一次
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
+  // 马谡【散谣】:出牌阶段限一次
+  if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 孔融【礼让】:每轮限一次 + 当前礼让对象/弃牌阶段记录
   if(!Number.isInteger(g.liRangRound)) g.liRangRound=0;
   if(!g.liRangRecord || typeof g.liRangRecord!=='object') g.liRangRecord=null;
@@ -2816,7 +2818,7 @@ function startTurn(g, seat){
     g.roundSeatsActed.push(seat);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌
   const p = g.players[seat];

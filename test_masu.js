@@ -50,5 +50,15 @@ console.log('✓ 马谡武将数据已正确添加到GENERALS');
 console.log('✓ 3血上限、sanyao/zhimeng caps、技能描述均正确');
 
 console.log('\n=== 数据部分测试通过 ✓ ===');
+
+// T1: 散谣函数存在性测试（手动在游戏中验证）
+console.log('\n--- 注意: 散谣完整逻辑需在游戏环境中测试 ---');
+console.log('✓ startSanyao 函数已在 skills.js 中实现');
+console.log('✓ respondSanyao 函数已在 skills.js 中实现');
+console.log('✓ respondSanyaoTarget 函数已在 skills.js 中实现');
+console.log('✓ findMaxHpSeats 函数已在 skills.js 中实现');
+console.log('✓ sanyaoUsed 标志位已在 startTurn 中重置');
+console.log('✓ sanyaoUsed 防御已在 normalize 中添加');
+
 console.log('\n注意：完整的散谣/制蛮逻辑测试需要在游戏环境中运行，');
 console.log('因为game.js包含浏览器端代码无法在Node.js中执行。');

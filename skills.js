@@ -1250,3 +1250,96 @@ function respondZaiqi() {
     return g;
   });
 }
+
+// ========== 马谡【散谣】技能 ==========
+
+// 找到全场体力值最大的角色（返回座位号数组）
+function findMaxHpSeats(g, excludeSeat) {
+  const alivePlayers = g.players.filter((p, i) => p && p.alive && i !== excludeSeat);
+  if(alivePlayers.length === 0) return [];
+  const maxHp = Math.max(...alivePlayers.map(p => p.hp));
+  return alivePlayers
+    .map((p, i) => ({ seat: g.players.indexOf(p), hp: p.hp }))
+    .filter(p => p.hp === maxHp)
+    .map(p => p.seat);
+}
+
+// 发动散谣
+function startSanyao(g, seat) {
+  const p = g.players[seat];
+  if(!p || !p.alive) return;
+  if(g.sanyaoUsed === true) return;
+  if(g.phase !== 'play') return;
+  
+  const hasHand = (p.hand || []).length > 0;
+  const hasEquip = EQUIP_SLOTS.some(slot => p.equips && p.equips[slot]);
+  const hasDelay = (p.delays || []).length > 0;
+  
+  if(!hasHand && !hasEquip && !hasDelay) return;
+  
+  const maxHpSeats = findMaxHpSeats(g, seat);
+  if(maxHpSeats.length === 0) return;
+  
+  if(maxHpSeats.length === 1) {
+    g.pending = { type: 'sanyao', from: seat, target: maxHpSeats[0] };
+    g.phase = 'sanyao';
+    g.log = pushLog(g.log, p.name + ' 发动【散谣】,选择弃置一张牌…');
+    markSkillSound(g, '散谣');
+    return;
+  }
+  
+  g.pending = { type: 'sanyaoChooseTarget', from: seat, candidates: maxHpSeats.slice() };
+  g.phase = 'sanyaoChooseTarget';
+  g.log = pushLog(g.log, p.name + ' 发动【散谣】,请选择体力值最大的目标…');
+  markSkillSound(g, '散谣');
+}
+
+// 响应散谣 — 选择弃置的牌
+function respondSanyao(cardType, cardIdxOrSlot) {
+  tx(g => {
+    const p = g.players[g.pending.from];
+    if(!p || !p.alive || g.phase !== 'sanyao') return g;
+    const targetSeat = g.pending.target;
+    const target = g.players[targetSeat];
+    if(!target || !target.alive) { g.phase = 'play'; return g; }
+    
+    let discardedCard = null;
+    if(cardType === 'hand') {
+      if(!p.hand || p.hand.length === 0) { g.phase = 'play'; return g; }
+      const idx = cardIdxOrSlot;
+      if(idx < 0 || idx >= p.hand.length) { g.phase = 'play'; return g; }
+      discardedCard = p.hand.splice(idx, 1)[0];
+    } else if(EQUIP_SLOTS.includes(cardType)) {
+      if(!p.equips || !p.equips[cardType]) { g.phase = 'play'; return g; }
+      discardedCard = p.equips[cardType];
+      p.equips[cardType] = null;
+    } else if(cardType === 'delay' && typeof cardIdxOrSlot === 'number') {
+      if(!p.delays || cardIdxOrSlot < 0 || cardIdxOrSlot >= p.delays.length) { g.phase = 'play'; return g; }
+      discardedCard = p.delays.splice(cardIdxOrSlot, 1)[0];
+    }
+    
+    if(discardedCard && !discardedCard.virtual) {
+      g.discard = g.discard || [];
+      g.discard.push(discardedCard);
+      g.log = pushLog(g.log, p.name + ' 弃置了【' + discardedCard.name + '】');
+    }
+    
+    g.sanyaoUsed = true;
+    dealDamage(g, targetSeat, 1, undefined, p.name + '发动【散谣】', 'skill', discardedCard);
+    g.pending = null;
+    g.phase = 'play';
+    return g;
+  });
+}
+
+// 响应散谣目标选择
+function respondSanyaoTarget(targetSeat) {
+  tx(g => {
+    if(g.phase !== 'sanyaoChooseTarget') return g;
+    if(!g.pending.candidates.includes(targetSeat)) return g;
+    g.pending = { type: 'sanyao', from: g.pending.from, target: targetSeat };
+    g.phase = 'sanyao';
+    g.log = pushLog(g.log, g.players[g.pending.from].name + ' 选择了目标 ' + g.players[targetSeat].name);
+    return g;
+  });
+}
