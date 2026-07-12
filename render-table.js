@@ -95,10 +95,11 @@ function renderTableCard(g){
         try{
           const fromRect = actorEl.getBoundingClientRect();
           const toRect = newestCardEl.getBoundingClientRect();
-          const seatsEl = document.getElementById('seats');
+          const seatsEl = document.getElementById('game');
           const containerRect = seatsEl.getBoundingClientRect();
-          // 坐标都换算成相对 #seats 容器的偏移,配合 #seats 的 position:relative 定位飞牌元素,
-          // 不用 fixed(fixed 相对视口,#seats 内部滚动/布局变化时容易和真实座位位置脱节)。
+          // 坐标都换算成相对 #game 容器的偏移(骨架级重建后坐标基准从旧版 #seats 改为
+          // #game,见 CLAUDE.md),配合 #game 的 position:relative 定位飞牌元素,
+          // 不用 fixed(fixed 相对视口,#game 内部滚动/布局变化时容易和真实座位位置脱节)。
           const fromX = fromRect.left - containerRect.left + fromRect.width/2;
           const fromY = fromRect.top - containerRect.top + fromRect.height/2;
           const toX = toRect.left - containerRect.left + toRect.width/2;
@@ -131,7 +132,7 @@ function renderTableCard(g){
     if(existingLines) existingLines.remove(); // 连续快速出牌:先清掉上一批还没淡出的连线
     if(Array.isArray(last.targets) && last.targets.length>0){
       const newestCardEl2 = el.lastElementChild;
-      const seatsEl2 = document.getElementById('seats');
+      const seatsEl2 = document.getElementById('game');
       if(newestCardEl2 && seatsEl2){
         try{
           const containerRect = seatsEl2.getBoundingClientRect();
