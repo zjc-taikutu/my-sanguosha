@@ -1766,6 +1766,17 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   if(!p) return false;
   if(!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   if(!skipTianxiang && maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
+  
+  // 马谡【制蛮】:在伤害结算前检测是否发动
+  const originalCtx = { amount, sourceSeat, reason, srcType, sourceCard };
+  if(typeof sourceSeat === 'number' && triggerZhimeng(g, sourceSeat, seat, originalCtx)) {
+    if(g.pending && g.pending.preventDamage && g.pending.zhimengResolved) {
+      g.pending = null;
+      g.phase = 'play';
+      return false;
+    }
+  }
+  
   p.hp = Math.max(0, p.hp - amount);
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });

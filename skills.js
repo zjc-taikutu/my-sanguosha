@@ -1343,3 +1343,235 @@ function respondSanyaoTarget(targetSeat) {
     return g;
   });
 }
+
+// ========== 马谡【制蛮】技能 ==========
+
+// 检查目标是否有牌可被获得
+function zhimengTargetHasCard(p) {
+  if(!p || !p.alive) return false;
+  if((p.hand || []).length > 0) return true;
+  if(EQUIP_SLOTS.some(slot => p.equips && p.equips[slot])) return true;
+  if((p.delays || []).length > 0) return true;
+  return false;
+}
+
+// 获取目标场上可获得的牌选项
+function getZhimengOptions(g, targetSeat) {
+  const target = g.players[targetSeat];
+  const options = [];
+  
+  if(!target || !target.alive) return options;
+  
+  if((target.hand || []).length > 0) {
+    options.push({ type: 'hand', label: '一张手牌' });
+  }
+  
+  EQUIP_SLOTS.forEach(slot => {
+    if(target.equips && target.equips[slot]) {
+      const equip = target.equips[slot];
+      options.push({ type: slot, label: '装备【' + equip.name + '】', card: equip });
+    }
+  });
+  
+  (target.delays || []).forEach((card, idx) => {
+    if(card) {
+      options.push({ type: 'delay', label: '判定区【' + card.name + '】', index: idx, card: card });
+    }
+  });
+  
+  return options;
+}
+
+// 触发制蛮询问
+function triggerZhimeng(g, from, to, ctx) {
+  if(from === to) return false;
+  
+  const attacker = g.players[from];
+  if(!attacker || !attacker.alive) return false;
+  
+  if(!hasCap(attacker, 'zhimeng')) return false;
+  
+  const target = g.players[to];
+  if(!target || !target.alive) return false;
+  
+  if(!zhimengTargetHasCard(target)) return false;
+  
+  const options = getZhimengOptions(g, to);
+  if(options.length === 0) return false;
+  
+  if(options.length === 1) {
+    zhimengAutoResolve(g, from, to, options[0]);
+    return true;
+  }
+  
+  g.pending = {
+    type: 'zhimengAsk',
+    from: from,
+    to: to,
+    options: options.map(o => ({ type: o.type, label: o.label, index: o.index })),
+    originalCtx: ctx
+  };
+  g.phase = 'zhimengAsk';
+  g.log = pushLog(g.log, attacker.name + ' 是否发动【制蛮】防止此伤害并获得目标一张牌…');
+  
+  return true;
+}
+
+// 自动结算制蛮（唯一选项时）
+function zhimengAutoResolve(g, from, to, option) {
+  const attacker = g.players[from];
+  const target = g.players[to];
+  
+  let gainedCard = null;
+  
+  if(option.type === 'hand') {
+    const hand = target.hand || [];
+    if(hand.length > 0) {
+      const idx = Math.floor(Math.random() * hand.length);
+      gainedCard = hand.splice(idx, 1)[0];
+    }
+  } else if(EQUIP_SLOTS.includes(option.type)) {
+    if(target.equips && target.equips[option.type]) {
+      gainedCard = target.equips[option.type];
+      target.equips[option.type] = null;
+    }
+  } else if(option.type === 'delay') {
+    if(target.delays && target.delays[option.index]) {
+      gainedCard = target.delays.splice(option.index, 1)[0];
+    }
+  }
+  
+  if(gainedCard) {
+    attacker.hand = attacker.hand || [];
+    attacker.hand.push(gainedCard);
+    g.log = pushLog(g.log, attacker.name + ' 获得了' + (gainedCard.virtual ? '' : '【' + gainedCard.name + '】'));
+  }
+  
+  g.pending = g.pending || {};
+  g.pending.preventDamage = true;
+  g.pending.zhimengResolved = true;
+  
+  markSkillSound(g, '制蛮');
+}
+
+// 响应制蛮选择
+function respondZhimeng(activate) {
+  tx(g => {
+    if(g.phase !== 'zhimengAsk') return g;
+    
+    const pending = g.pending;
+    if(!pending) {
+      g.phase = 'play';
+      return g;
+    }
+    
+    if(!activate) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    const from = pending.from;
+    const to = pending.to;
+    const attacker = g.players[from];
+    const target = g.players[to];
+    
+    if(!attacker || !attacker.alive || !target || !target.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    if(pending.options.length === 1) {
+      zhimengAutoResolve(g, from, to, pending.options[0]);
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    g.pending = {
+      type: 'zhimengPick',
+      from: from,
+      to: to,
+      options: pending.options.slice(),
+      originalCtx: pending.originalCtx
+    };
+    g.phase = 'zhimengPick';
+    g.log = pushLog(g.log, attacker.name + ' 选择获得哪一张牌…');
+    
+    return g;
+  });
+}
+
+// 响应制蛮牌选择
+function respondZhimengPick(optionType, optionIndex) {
+  tx(g => {
+    if(g.phase !== 'zhimengPick') return g;
+    
+    const pending = g.pending;
+    if(!pending) {
+      g.phase = 'play';
+      return g;
+    }
+    
+    const from = pending.from;
+    const to = pending.to;
+    const attacker = g.players[from];
+    const target = g.players[to];
+    
+    if(!attacker || !attacker.alive || !target || !target.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    let selectedOption = null;
+    for(let i = 0; i < pending.options.length; i++) {
+      const opt = pending.options[i];
+      if(opt.type === optionType && (optionIndex === undefined || opt.index === optionIndex)) {
+        selectedOption = opt;
+        break;
+      }
+    }
+    
+    if(!selectedOption) {
+      g.phase = 'play';
+      return g;
+    }
+    
+    let gainedCard = null;
+    
+    if(selectedOption.type === 'hand') {
+      const hand = target.hand || [];
+      if(hand.length > 0) {
+        const idx = Math.floor(Math.random() * hand.length);
+        gainedCard = hand.splice(idx, 1)[0];
+      }
+    } else if(EQUIP_SLOTS.includes(selectedOption.type)) {
+      if(target.equips && target.equips[selectedOption.type]) {
+        gainedCard = target.equips[selectedOption.type];
+        target.equips[selectedOption.type] = null;
+      }
+    } else if(selectedOption.type === 'delay') {
+      if(target.delays && target.delays[selectedOption.index]) {
+        gainedCard = target.delays.splice(selectedOption.index, 1)[0];
+      }
+    }
+    
+    if(gainedCard) {
+      attacker.hand = attacker.hand || [];
+      attacker.hand.push(gainedCard);
+      g.log = pushLog(g.log, attacker.name + ' 获得了【' + gainedCard.name + '】');
+    }
+    
+    g.pending = {
+      preventDamage: true,
+      zhimengResolved: true
+    };
+    
+    g.phase = 'play';
+    markSkillSound(g, '制蛮');
+    
+    return g;
+  });
+}
