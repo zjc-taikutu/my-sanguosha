@@ -164,7 +164,7 @@ function respondQinglong(activate, cardIdx){
     g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
     markCardSound(g, '杀', mySeat, card, targetSeat);
     g.pending=null;
-    resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card);
+    resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, undefined);
     return g;
   });
 }

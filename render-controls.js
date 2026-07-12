@@ -447,6 +447,20 @@ function renderControls(g){
   setBanner(''); // 唯一重置点:每次重渲染先清空,下面每个分支各写各的一句
   const me=g.players[mySeat];
   const myTurn = g.turn===mySeat;
+  
+  // 蔡文姬【悲歌】UI
+  const beigeHtml = renderBeigeChoose(g) || renderBeigeDiscard(g) || renderBeigeJudge(g);
+  if(beigeHtml) {
+    c.innerHTML = beigeHtml;
+    return;
+  }
+  
+  // 翻面状态提示
+  const faceupHtml = renderFaceupStatus(g);
+  if(faceupHtml) {
+    c.innerHTML = faceupHtml;
+    return;
+  }
 
   // pickingGeneral 阶段发生在 g.started 真正置 true(finishGeneralAssign)之前,必须在
   // "!g.started" 这个判断之前先检查,否则会被下面那个分支提前拦截、永远进不到这里。
@@ -539,6 +553,95 @@ function renderControls(g){
     const source = g.players[g.pending.sourceSeat];
     const target = g.players[g.pending.targetSeat];
     setBanner(escapeHtml(source?source.name:'?')+' 正在选择 '+escapeHtml(target?target.name:'?')+' 的装备牌…');
+    return;
+  }
+  
+  // 祝融【烈刃】:伤害结算后的触发选择
+  if(g.phase==='lieRenChoose' && g.pending && g.pending.type==='lieRenChoose' && g.pending.sourceSeat===mySeat){
+    const target = g.players[g.pending.targetSeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【烈刃】发动';
+    div.appendChild(h4);
+    const p1=document.createElement('p'); p1.textContent='你使用【杀】对 '+escapeHtml(target?target.name:'目标')+' 造成了伤害';
+    div.appendChild(p1);
+    const p2=document.createElement('p'); p2.textContent='可以与其拼点，若你赢，你获得其一张牌';
+    div.appendChild(p2);
+    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#e74c3c';
+    b1.textContent='发动烈刃';
+    b1.onclick=()=>triggerLieRen();
+    div.appendChild(b1);
+    const b2=document.createElement('button'); b2.className='cancel-btn';
+    b2.textContent='不发动';
+    b2.onclick=()=>cancelLieRen();
+    div.appendChild(b2);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='lieRenChoose' && g.pending && g.pending.type==='lieRenChoose'){
+    const source = g.players[g.pending.sourceSeat];
+    const target = g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(source?source.name:'?')+' 可以发动【烈刃】,与 '+escapeHtml(target?target.name:'?')+' 拼点…');
+    return;
+  }
+  
+  // 祝融【烈刃】:选择拼点牌
+  if(g.phase==='lieRenPickCard' && g.pending && g.pending.type==='lieRenPickCard' && g.pending.sourceSeat===mySeat){
+    const target = g.players[g.pending.targetSeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【烈刃】选择拼点牌';
+    div.appendChild(h4);
+    const p1=document.createElement('p'); p1.textContent='请选择一张手牌用于拼点';
+    div.appendChild(p1);
+    const handDiv=document.createElement('div'); handDiv.className='hand-options';
+    
+    const hand = me.hand || [];
+    hand.forEach((card, idx)=>{
+      const b=document.createElement('button');
+      b.className='card-btn';
+      b.textContent='【'+escapeHtml(card.name)+'】'+card.suit+rankText(card.rank);
+      b.onclick=()=>pickLieRenCard(idx);
+      handDiv.appendChild(b);
+    });
+    div.appendChild(handDiv);
+    const cb=document.createElement('button'); cb.className='cancel-btn';
+    cb.textContent='取消'; cb.onclick=()=>cancelLieRen();
+    div.appendChild(cb);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='lieRenPickCard' && g.pending && g.pending.type==='lieRenPickCard'){
+    const source = g.players[g.pending.sourceSeat];
+    const target = g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(source?source.name:'?')+' 发动【烈刃】,等待 '+escapeHtml(target?target.name:'?')+' 选择拼点牌…');
+    return;
+  }
+  
+  // 祝融【烈刃】:目标响应拼点
+  if(g.phase==='lieRenRespond' && g.pending && g.pending.type==='lieRenRespond' && g.pending.targetSeat===mySeat){
+    const source = g.players[g.pending.sourceSeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【烈刃】拼点响应';
+    div.appendChild(h4);
+    const p1=document.createElement('p'); p1.textContent=escapeHtml(source?source.name:'祝融')+' 对你发动【烈刃】,请选择一张手牌拼点';
+    div.appendChild(p1);
+    const handDiv=document.createElement('div'); handDiv.className='hand-options';
+    
+    const hand = me.hand || [];
+    hand.forEach((card, idx)=>{
+      const b=document.createElement('button');
+      b.className='card-btn';
+      b.textContent='【'+escapeHtml(card.name)+'】'+card.suit+rankText(card.rank);
+      b.onclick=()=>respondLieRen(idx);
+      handDiv.appendChild(b);
+    });
+    div.appendChild(handDiv);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='lieRenRespond' && g.pending && g.pending.type==='lieRenRespond'){
+    const source = g.players[g.pending.sourceSeat];
+    const target = g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(source?source.name:'?')+' 对 '+escapeHtml(target?target.name:'?')+' 发动【烈刃】,等待 '+escapeHtml(target?target.name:'?')+' 选择拼点牌…');
     return;
   }
 
@@ -2634,4 +2737,91 @@ function renderZhimengPick(g) {
   
   html += '</div>';
   return html;
+}
+
+// ===================== 蔡文姬技能UI =====================
+
+// 悲歌：选择是否发动UI
+function renderBeigeChoose(g) {
+  if(g.phase !== 'beigeChoose' || !g.pending || g.pending.type !== 'beigeChoose' || g.pending.sourceSeat !== mySeat) return '';
+  
+  const source = g.players[mySeat];
+  if(!source || !source.alive) return '';
+  
+  const damaged = g.players[g.pending.damagedSeat];
+  const sourcePlayer = g.players[g.pending.damageSource];
+  
+  let html = '<div class="beige-choose">';
+  html += '<h4>【悲歌】发动</h4>';
+  html += '<p>' + escapeHtml(damaged.name) + ' 受到【杀】伤害后,你可以弃置一张牌令其进行判定</p>';
+  html += '<p>判定结果：红桃回复1体力；方块摸2牌；梅花伤害来源弃2牌；黑桃伤害来源翻面</p>';
+  html += '<button onclick="triggerBeige(true)" class="skill-btn" style="background: #e74c3c;">发动</button>';
+  html += '<button onclick="triggerBeige(false)" class="cancel-btn">不发动</button>';
+  html += '</div>';
+  return html;
+}
+
+// 悲歌：选择弃置的牌UI
+function renderBeigeDiscard(g) {
+  if(g.phase !== 'beigeDiscard' || !g.pending || g.pending.type !== 'beigeDiscard' || g.pending.sourceSeat !== mySeat) return '';
+  
+  const source = g.players[mySeat];
+  if(!source || !source.alive) return '';
+  
+  const damaged = g.players[g.pending.damagedSeat];
+  
+  let html = '<div class="beige-discard">';
+  html += '<h4>【悲歌】弃置牌</h4>';
+  html += '<p>为 ' + escapeHtml(damaged.name) + ' 发动【悲歌】,请选择一张牌弃置</p>';
+  
+  // 可弃置的手牌
+  html += '<div class="card-options"><h5>手牌：</h5>';
+  const hand = source.hand || [];
+  for (let i = 0; i < hand.length; i++) {
+    const card = hand[i];
+    html += '<button onclick="beigeDiscard(' + i + ', false, \'\')" class="card-btn">弃置【' + escapeHtml(card.name) + '】(' + card.suit + rankText(card.rank) + ')</button>';
+  }
+  
+  // 可弃置的装备
+  html += '<h5>装备：</h5>';
+  const equipTypes = ['weapon', 'armor', 'plus1', 'minus1'];
+  const equipNames = ['武器', '防具', '+1马', '-1马'];
+  
+  for (let i = 0; i < equipTypes.length; i++) {
+    const eqType = equipTypes[i];
+    const eqName = equipNames[i];
+    if (source.equips && source.equips[eqType] !== null) {
+      const eqCard = source.equips[eqType];
+      html += '<button onclick="beigeDiscard(0, true, \'' + eqType + '\')" class="card-btn">弃置' + eqName + '【' + escapeHtml(eqCard.name) + '】</button>';
+    }
+  }
+  
+  html += '</div>';
+  html += '<button onclick="cancelBeige()" class="cancel-btn">取消</button>';
+  html += '</div>';
+  return html;
+}
+
+// 悲歌：判定阶段UI
+function renderBeigeJudge(g) {
+  if(g.phase !== 'beigeJudge' || !g.pending || g.pending.type !== 'beigeJudge' || g.pending.sourceSeat !== mySeat) return '';
+  
+  const damaged = g.players[g.pending.damagedSeat];
+  if(!damaged) return '';
+  
+  let html = '<div class="beige-judge">';
+  html += '<h4>【悲歌】判定</h4>';
+  html += '<p>等待 ' + escapeHtml(damaged.name) + ' 的判定结果...</p>';
+  html += '<button onclick="doBeigeJudge()" class="skill-btn" style="background: #f39c12;">进行判定</button>';
+  html += '<button onclick="cancelBeige()" class="cancel-btn">取消</button>';
+  html += '</div>';
+  return html;
+}
+
+// 翻面状态提示UI
+function renderFaceupStatus(g) {
+  const p = g.players[mySeat];
+  if(!p || p.faceup !== false) return '';
+  
+  return '<div class="status-notice"><p>你处于翻面状态，本回合将被跳过并自动翻回正面</p></div>';
 }

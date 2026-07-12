@@ -357,6 +357,12 @@ const GENERALS = {
   zhangjiao:     { id:'zhangjiao',     name:'张角',   gender:'male', maxHp:3, skill:'雷击/鬼道',
     desc:'雷击:当你使用或打出【闪】时,你可以令一名角色进行一次判定,若结果为♠,你对其造成2点雷电伤害。鬼道:当一名角色的判定牌生效前,你可以打出一张黑色牌替换之。',
     caps:{ leiji:true, guidu:true } },
+  caiwenji:      { id:'caiwenji',      name:'蔡文姬', gender:'female', maxHp:3, skill:'悲歌/断肠',
+    desc:'悲歌:当一名角色受到【杀】造成的伤害后,你可以弃置一张牌,令其判定,若结果为:红桃,其回复1点体力;方块,其摸两张牌;梅花,伤害来源弃置两张牌;黑桃,伤害来源翻面。断肠:锁定技,当你死亡时,杀死你的角色失去所有武将技能。',
+    caps:{ beige:true, duanchang:true } },
+  zhurong:       { id:'zhurong',       name:'祝融',   gender:'female', maxHp:4, skill:'巨象/烈刃',
+    desc:'巨象:锁定技,①【南蛮入侵】对你无效;②当其他角色使用的【南蛮入侵】结算结束后置入弃牌堆时,你获得之。烈刃:当你使用【杀】对目标角色造成伤害后,你可以与其拼点,若你赢,你获得该角色的一张牌。',
+    caps:{ juxiang:true, lieRen:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

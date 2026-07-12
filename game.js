@@ -679,6 +679,79 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 蔡文姬【悲歌】:伤害后选择是否发动
+  if(g.pending && g.pending.type==='beigeChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
+       d.sourceSeat !== mySeat ||
+       (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
+      g.pending = null;
+      g.phase = g.phase === 'beigeChoose' ? 'play' : g.phase;
+    }
+  }
+  // 蔡文姬【悲歌】:弃牌选择阶段
+  if(g.pending && g.pending.type==='beigeDiscard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
+       d.sourceSeat !== mySeat ||
+       (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  // 蔡文姬【悲歌】:判定阶段
+  if(g.pending && g.pending.type==='beigeJudge'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
+       d.sourceSeat !== mySeat ||
+       !d.resume || typeof d.resume.kind!=='string'){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  // 蔡文姬【断肠】:死亡结算标记
+  if(typeof g.dyingSource !== 'number' && g.dyingSource !== null) g.dyingSource = null;
+  
+  // 祝融【烈刃】:拼点选择阶段
+  if(g.pending && g.pending.type==='lieRenChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  
+  // 祝融【烈刃】:选择拼点牌阶段
+  if(g.pending && g.pending.type==='lieRenPickCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  
+  // 祝融【烈刃】:拼点响应阶段
+  if(g.pending && g.pending.type==='lieRenRespond'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !d.sourceCard || typeof d.sourceCard.rank!=='number'){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  
+  // 翻面状态：确保所有角色都有 faceup 属性
+  for (let i = 0; i < g.players.length; i++) {
+    if (g.players[i] && typeof g.players[i].faceup !== 'boolean') {
+      g.players[i].faceup = true; // 默认正面朝上
+    }
+  }
   return g;
 }
 // logEvent: 追加一条结构化日志事件。ev = {text, kind?, actor?, targets?}:
@@ -2392,6 +2465,20 @@ function maybeStartQiaomeng(g, from, to, shaColor) {
   markSkillSound(g, 'qiaomeng');
   return true;
 }
+
+// maybeStartLieRen: 祝融【烈刃】—— 使用【杀】对目标角色造成伤害后触发
+function maybeStartLieRen(g, from, to) {
+  const source = g.players[from];
+  const target = g.players[to];
+  // 检查条件:攻击者是祝融,有烈刃技能,目标存活
+  if(!source || !source.alive || !target || !target.alive || from === to || !hasCap(source,'lieRen')) return false;
+  
+  // 进入烈刃选择阶段
+  g.pending={type:'lieRenChoose', sourceSeat:from, targetSeat:to};
+  g.phase='lieRenChoose';
+  g.log=pushLog(g.log, source.name + ' 可以发动【烈刃】,与 ' + target.name + ' 拼点');
+  return true;
+}
 function respondLiuli(choice, newTargetSeat){
   tx(g=>{
     if(g.phase!=='liuli'||!g.pending||g.pending.type!=='liuli'||g.pending.to!==mySeat) return g;
@@ -2541,6 +2628,28 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(sourceCard!==undefined) ctx.sourceCard=sourceCard;
     triggerHook(g, seat, 'onDamaged', ctx);
     if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
+    
+    // 蔡文姬【悲歌】:检查是否可以触发悲歌（仅对【杀】伤害生效）
+    if (amount > 0 && reason && reason.includes('【杀】') && g.players[seat] && g.players[seat].alive) {
+      // 寻找所有有【悲歌】技能的蔡文姬
+      for (let i = 0; i < g.players.length; i++) {
+        const p = g.players[i];
+        if (p && p.alive && generalHasCap(p, 'beige') && i !== seat) {
+          // 进入悲歌选择阶段
+          g.pending = {
+            type: 'beigeChoose',
+            sourceSeat: i,
+            damagedSeat: seat,
+            damageSource: sourceSeat,
+            reason: reason
+          };
+          g.phase = 'beigeChoose';
+          g.log = pushLog(g.log, p.name + ' 可以发动【悲歌】,是否弃置一张牌令 ' + g.players[seat].name + ' 进行判定?');
+          markSkillSound(g, '悲歌');
+          return true; // 挂起，等待玩家选择
+        }
+      }
+    }
     
     // 魏延【狂骨】:触发回复体力效果(每点伤害回复1点,不超过上限)
     if(kuangguDist !== null && kuangguDist <= 1) {
@@ -2812,6 +2921,24 @@ function finishDying(g, actuallyDied){
     g.log=pushLog(g.log, p.name+' 无人使用【桃】救援,阵亡！'+(parts.length?'（'+parts.join('，')+'）':''));
     // 阵亡弃装备刻意【不】触发 onLoseEquip 失去装备钩子(如枭姬):人已死,死亡结算不再发动常规技能。
     // ⚠️ 日后新增「主动卸载装备」入口时,记得在那里接入 triggerHook(g, seat, 'onLoseEquip', {count}),别漏了枭姬。
+    
+    // 蔡文姬【断肠】：处理断肠效果（锁定技，当蔡文姬死亡时，杀死她的角色失去所有武将技能）
+    const killerSeat = resume.sourceSeat || null;
+    if (generalHasCap(p, 'duanchang') && typeof killerSeat === 'number' && g.players[killerSeat]) {
+      const killer = g.players[killerSeat];
+      if (killer && killer.alive) {
+        // 杀死蔡文姬的角色失去所有武将技能
+        killer.caps = {};
+        // 清空skills数组（如果存在）
+        if (killer.skills) killer.skills = [];
+        // 更新武将表中的技能描述
+        if (g.players[killerSeat].skill) {
+          g.players[killerSeat].skill = '（已失去所有技能）';
+        }
+        g.log = pushLog(g.log, killer.name + ' 失去了所有武将技能（【断肠】效果）');
+        markSkillSound(g, '断肠');
+      }
+    }
     
     // 李典【忘隙】致死造成侧：若 sourceSeat 是李典且 amount>0，在死亡结算后挂起 wangxiAsk
     if(typeof resume.sourceSeat==='number' && typeof resume.amount==='number' && resume.amount>0){
@@ -3455,7 +3582,49 @@ function aoeAdvance(g, prevSeat){
     }
   }
   
+  // 巨象：南蛮入侵对祝融无效
+  if(next!==null && g.aoe.trick==='南蛮入侵'){
+    const nextPlayer=g.players[next];
+    if(nextPlayer && nextPlayer.alive && generalHasCap(nextPlayer,'juxiang')){
+      g.log=pushLog(g.log, nextPlayer.name+'【巨象】发动，南蛮入侵对其无效');
+      return aoeAdvance(g, next);
+    }
+  }
+  
   if(next===null){
+    // 巨象效果②：其他角色使用南蛮入侵结算结束后，所有祝融获得该锦囊牌
+    if(g.aoe.trick==='南蛮入侵' && g.aoe.from !== null && g.players[g.aoe.from]){
+      const isFromZhurong = generalHasCap(g.players[g.aoe.from], 'juxiang');
+      if(!isFromZhurong){ // 只有其他角色使用的南蛮入侵才会触发
+        // 寻找场上所有祝融
+        const zhurongSeats = [];
+        for(let i=0; i<g.players.length; i++){
+          if(g.players[i] && g.players[i].alive && generalHasCap(g.players[i], 'juxiang')){
+            zhurongSeats.push(i);
+          }
+        }
+        
+        if(zhurongSeats.length > 0){ // 场上有祝融
+          // 为每个祝融都获得一张南蛮入侵牌
+          for(const seat of zhurongSeats){
+            const zhurong = g.players[seat];
+            if(zhurong && zhurong.alive){
+              // 寻找弃牌堆中的南蛮入侵牌
+              const nanmanIdx = g.discard.findIndex(card => card && card.name === '南蛮入侵');
+              if(nanmanIdx !== -1){ // 找到南蛮入侵牌
+                const nanmanCard = g.discard[nanmanIdx];
+                if(!zhurong.hand) zhurong.hand = [];
+                zhurong.hand.push(nanmanCard);
+                g.log = pushLog(g.log, zhurong.name + '【巨象】发动,获得了【南蛮入侵】');
+                // 从弃牌堆中移除该南蛮入侵牌
+                g.discard.splice(nanmanIdx, 1);
+              }
+            }
+          }
+        }
+      }
+    }
+    
     g.aoe=null; g.pending=null; g.phase='play';
     // 这里不需要再手动清空 g.exchangeCards:pending/aoe 已经在上一行同时清空,这个分支到此
     // 为止不会再有后续代码在同一个 tx 里重新给 pending 赋值——pruneExchangeCards(见其定义
@@ -3582,6 +3751,8 @@ function respondShan(useShan){
       if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
       // 公孙瓒【趫猛】:使用黑色【杀】造成伤害后,可以选择目标装备区的一张牌
       if(maybeStartQiaomeng(g, g.pending.from, mySeat, shaColor)) return g;
+      // 祝融【烈刃】:使用【杀】造成伤害后,可以与目标拼点
+      if(maybeStartLieRen(g, g.pending.from, mySeat)) return g;
     }
     g.pending=null;
     finishSingleShaTarget(g); // 单个目标响应完毕:方天画戟排队中还有下一个则继续,否则回到出牌阶段
@@ -3690,6 +3861,14 @@ function startTurn(g, seat){
     g.roundSeatsActed=[seat];
   } else {
     g.roundSeatsActed.push(seat);
+  }
+  // 翻面状态检查：如果处于翻面状态（背面朝上），则跳过回合
+  const p = g.players[seat];
+  if(p && p.alive && p.faceup === false) {
+    p.faceup = true; // 翻回正面
+    g.log=pushLog(g.log, p.name + ' 处于翻面状态，跳过回合并翻回正面');
+    // 跳过回合，直接进入下一角色
+    return endTurn(g);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
   g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false;
@@ -4045,9 +4224,241 @@ function isBlackTactics(card) {
   const tacticsCards = [
     '过河拆桥', '顺手牵羊', '无中生有', '决斗', '借刀杀人',
     '无懈可击', '五谷丰登', '桃园结义', '南蛮入侵', '万箭齐发',
-    '调虎离山', '理确κου', '兵粮寸断', '乐不思蜀', '火攻'
+    '调虎离山', '理确kou', '兵粮寸断', '乐不思蜀', '火攻'
   ];
   const isTactics = tacticsCards.includes(card.name);
   return isBlack && isTactics;
+}
+
+// ===================== 蔡文姬技能实现 =====================
+
+// 悲歌选择是否发动
+function triggerBeige(doTrigger) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'beigeChoose' || pending.sourceSeat !== mySeat) return g;
+    
+    if (!doTrigger) {
+      // 不发动
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【悲歌】');
+      return g;
+    }
+    
+    const source = g.players[mySeat];
+    const damagedSeat = pending.damagedSeat;
+    const damageSource = pending.damageSource;
+    
+    if (!source || !source.alive || !g.players[damagedSeat] || !g.players[damagedSeat].alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 检查是否有牌可以弃置（手牌或装备）
+    const canDiscard = (source.hand && source.hand.length > 0) || 
+                      (source.equips && Object.values(source.equips).some(eq => eq && eq !== null));
+    
+    if (!canDiscard) {
+      g.log = pushLog(g.log, source.name + ' 没有牌可以弃置,无法发动【悲歌】');
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 进入弃牌选择阶段
+    g.pending = {
+      type: 'beigeDiscard',
+      sourceSeat: mySeat,
+      damagedSeat: damagedSeat,
+      damageSource: damageSource,
+      reason: pending.reason
+    };
+    g.phase = 'beigeDiscard';
+    g.log = pushLog(g.log, source.name + ' 发动【悲歌】,请选择一张牌弃置');
+    
+    return g;
+  });
+}
+
+// 悲歌选择弃置的牌
+function beigeDiscard(cardIndex, isEquip, equipType) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'beigeDiscard' || pending.sourceSeat !== mySeat) return g;
+    
+    const source = g.players[mySeat];
+    const damagedSeat = pending.damagedSeat;
+    const damageSource = pending.damageSource;
+    
+    if (!source || !source.alive || !g.players[damagedSeat] || !g.players[damagedSeat].alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    let discardedCard = null;
+    
+    if (isEquip && equipType) {
+      // 弃置装备
+      if (source.equips && source.equips[equipType] !== null) {
+        discardedCard = source.equips[equipType];
+        source.equips[equipType] = null;
+      }
+    } else {
+      // 弃置手牌
+      if (source.hand && source.hand.length > cardIndex) {
+        discardedCard = source.hand[cardIndex];
+        source.hand.splice(cardIndex, 1);
+      }
+    }
+    
+    if (!discardedCard) {
+      g.log = pushLog(g.log, source.name + ' 弃牌失败');
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 弃置牌到弃牌堆
+    g.discard.push(discardedCard);
+    g.log = pushLog(g.log, source.name + ' 弃置了【' + discardedCard.name + '】');
+    
+    // 进入判定阶段
+    g.pending = {
+      type: 'beigeJudge',
+      sourceSeat: mySeat,
+      damagedSeat: damagedSeat,
+      damageSource: damageSource,
+      resume: { kind: 'beigeJudge', sourceSeat: mySeat, damagedSeat: damagedSeat, damageSource: damageSource }
+    };
+    g.phase = 'beigeJudge';
+    g.log = pushLog(g.log, g.players[damagedSeat].name + ' 进行判定…');
+    
+    return g;
+  });
+}
+
+// 悲歌判定处理
+function doBeigeJudge() {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'beigeJudge' || pending.sourceSeat !== mySeat) return g;
+    
+    const { sourceSeat, damagedSeat, damageSource, resume } = pending;
+    const source = g.players[sourceSeat];
+    const damaged = g.players[damagedSeat];
+    
+    if (!source || !source.alive || !damaged || !damaged.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 进行判定
+    const judgeCard = judge(g);
+    if(!judgeCard) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    g.log = pushLog(g.log, damaged.name + ' 判定为' + judgeCard.suit + rankText(judgeCard.rank));
+    
+    // 检查是否有改判技能需要处理
+    // 先保存判定结果，等待可能的改判
+    if(maybeGuicai(g, damagedSeat, judgeCard, resume) === 'pending') {
+      return g; // 等待改判处理
+    }
+    
+    // 处理判定结果
+    return processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSource);
+  });
+}
+
+// 处理悲歌判定结果
+function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSource) {
+  tx(g => {
+    const damaged = g.players[damagedSeat];
+    
+    if (!damaged || !damaged.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 根据花色执行不同效果
+    switch(judgeCard.suit) {
+      case '♥': // 红桃 - 受伤角色回复1点体力
+        heal(g, damagedSeat, 1, sourceSeat, '悲歌');
+        g.log = pushLog(g.log, damaged.name + ' 回复1点体力');
+        break;
+        
+      case '♦': // 方块 - 受伤角色摸两张牌
+        drawN(g, damagedSeat, 2);
+        g.log = pushLog(g.log, damaged.name + ' 摸两张牌');
+        break;
+        
+      case '♣': // 梅花 - 伤害来源弃置两张牌
+        if (damageSource !== null && typeof damageSource === 'number' && g.players[damageSource] && g.players[damageSource].alive) {
+          const sourcePlayer = g.players[damageSource];
+          const cardsToDiscard = [];
+          
+          // 先弃置手牌
+          if (sourcePlayer.hand && sourcePlayer.hand.length > 0) {
+            const discardCount = Math.min(2, sourcePlayer.hand.length);
+            for (let i = 0; i < discardCount; i++) {
+              cardsToDiscard.push(sourcePlayer.hand.shift());
+            }
+          }
+          
+          // 如果手牌不足2张，继续弃置装备
+          if (cardsToDiscard.length < 2 && sourcePlayer.equips) {
+            const equipSlots = ['weapon', 'armor', 'plus1', 'minus1'];
+            for (const eqType of equipSlots) {
+              if (cardsToDiscard.length >= 2) break;
+              if (sourcePlayer.equips[eqType] !== null) {
+                cardsToDiscard.push(sourcePlayer.equips[eqType]);
+                sourcePlayer.equips[eqType] = null;
+              }
+            }
+          }
+          
+          g.discard.push(...cardsToDiscard);
+          g.log = pushLog(g.log, sourcePlayer.name + ' 弃置了' + cardsToDiscard.length + '张牌');
+        }
+        break;
+        
+      case '♠': // 黑桃 - 伤害来源翻面
+        if (damageSource !== null && typeof damageSource === 'number' && g.players[damageSource] && g.players[damageSource].alive) {
+          const sourcePlayer = g.players[damageSource];
+          sourcePlayer.faceup = !sourcePlayer.faceup;
+          g.log = pushLog(g.log, sourcePlayer.name + ' 翻面');
+        }
+        break;
+    }
+    
+    // 清理状态
+    g.pending = null;
+    g.phase = 'play';
+    
+    return g;
+  });
+}
+
+// 取消悲歌
+function cancelBeige() {
+  tx(g => {
+    if (g.pending && (g.pending.type === 'beigeChoose' || 
+                      g.pending.type === 'beigeDiscard' || 
+                      g.pending.type === 'beigeJudge') &&
+        g.pending.sourceSeat === mySeat) {
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【悲歌】');
+    }
+    return g;
+  });
 }
 

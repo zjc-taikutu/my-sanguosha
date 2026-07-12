@@ -64,7 +64,9 @@ const SKILL_PINYIN = {
   '雷击':'leiji', '鬼道':'guidu',
   '乱击':'luanji',
   '同疾':'tongji',
-  '妄尊':'wangzun'
+  '妄尊':'wangzun',
+  '悲歌':'beige', '断肠':'duanchang',
+  '巨象':'juxiang', '烈刃':'lieRen'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
@@ -396,7 +398,7 @@ function render(g){
     if(!p) return;
     const d=document.createElement('div');
     const slot = (mySeat===null) ? 'top' : seatSlot(seatN, mySeat, i);
-    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+' slot-'+slot;
+    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+' slot-'+slot+(p.faceup===false?' flipped':'');
     d.dataset.seat = i; // 供中央出牌区(renderTableCard)按座位号选中,高亮出牌方/目标座位用
     const gen=getGeneral(p.general); // 可能为 null(大厅/旧数据)
     // 大厅(未开局)武将未定,不显示具体血条格数,避免"占位4格→开局3格"的误导跳变
