@@ -244,37 +244,63 @@
   .seat-art .avatar-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;padding:4px;font-size:10px;color:var(--paper-dim);background:#241f1b;}
   /* 顶部/底部渐变遮罩:纯装饰层,不拦截点击(pointer-events:none,否则会挡住底下
-     .seat 的目标选择点击和装备/判定区 chip 的 onclick)。 */
+     .seat 的目标选择点击和装备/判定区 chip 的 onclick)。
+     **第7次微调:本想把顶部/底部渐变都改成半透明,底部做到了(见下面 .seat-scrim-bottom
+     的说明),顶部这里实测发现基本没有下调空间——已如实报告给用户,这里先按原值(第3次
+     布局定的 .80/.45/0)维持不变,不是自己偷偷决定的。**
+     实测过程:标题栏文字(.seat-title,含玩家名)在最亮立绘(马超,对手卡200px/11px字号,
+     即 WCAG AA 校验一直用的那个最坏样本)上的对比度,随第一个渐变阶段(0%处的α值,
+     决定标题栏这个贴在顶部的元素能拿到多少不透明度)几乎线性下降:α=.80(原值)时
+     4.62~4.66,α=.79时已经卡在4.50这个边界值(浮点误差下判定失败),α=.78时4.43,
+     α=.65(最初尝试的起点)时更只有2.1~2.7——**这条余量几乎是零,不是"风险",是已经
+     实测证明的硬约束**:标题栏紧贴在渐变最顶端(y=0),该处不透明度约等于渐变第一个
+     阶段的α值本身,不存在"往后面的阶段调整、前面留白处不受影响"这种绕开办法。
+     这和底部渐变的情况不同——装备文字/手牌图标数字位置更靠下、渐变本身覆盖范围更大
+     (60%卡高 vs 这里的34%),有更多空间可以调整。 */
   .seat-scrim-top{position:absolute;top:0;left:0;right:0;height:34%;pointer-events:none;
     background:linear-gradient(180deg, rgba(0,0,0,.80) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%);}
-  /* **底部渐变(第6次微调:装备条改成"撑满"这整块60%区域后,渐变的α分布必须整体重算)。**
-     第5次微调时装备条只占这个区域的底部43.7%,渐变可以在62%处就开始往上淡出(反正没有
-     文字落在那里)。**这次装备条的4行内容本身就设计成接近填满整个60%区域**(见下面
-     .seat-equip-bar 的 cqw 换算注释),意味着最上面那一行(第4行)会落在离渐变顶部很近的
-     位置——如果继续沿用旧的"62%后开始变淡、80%只剩.45"这组数字,第4行会直接落进
-     半透明到全透明的区域,对比度必然崩掉,不是"不增反降"的假设性风险,是必然发生。
-     **重新设计的原则**:强透明度(.85+)必须覆盖到接近整个区域的顶部,只在最后一小段
-     (≈88%→100%)才真正开始淡出,给装备条的顶部内容留出安全余量,同时保留一点淡出让
-     立绘到遮罩的过渡不至于是一条生硬的硬边。**这组数字同样是靠实测钉死的,不是拍脑袋**——
-     见 verify_seatcard_equipscrim.js 第6次微调的重新实测记录:4行文字逐行对比度全部
-     ≥4.5(WCAG AA),桌面/SE两档均覆盖。 */
+  /* **底部渐变(第7次微调:从第5/6次微调确立的"近乎不透明"改成半透明,主动例外)。**
+     第5/6次微调的立论是"底衬必须不透明,不能依赖背后立绘明暗"——这条规则本身没有错,
+     被两次真实的可读性失败(头像铺满整卡/头像居左固定大块)反复验证过。**这次是用户
+     在完全知情这条规则和其历史教训的前提下,明确要求"阴影要透出立绘"**——这是一次
+     主动的、知情的例外,不是像前两次那样不知情地踩坑,所以没有违背这条规则的精神
+     (规则的精神是"不要在不知情的情况下假设半透明能顶住",而不是"永远不能用半透明")。
+     **半透明意味着对比度会重新依赖背后立绘的明暗**,所以这次同样必须逐行实测(桌面+
+     SE两档、含全场最亮的大乔),如果测不到 WCAG AA 的 4.5,不能自己悄悄调深凑合,
+     要停下来问用户——这次的实测数据见 CLAUDE.md 第7次微调条目。
+     装备栏这次不再"撑满"(第6次微调那种目标已经被这次的改动取代,4行装备缩回到
+     和其它文字协调的小字号),所以渐变覆盖高度不需要再迁就"最上面一行贴着渐变顶部"
+     这个几何约束,可以用更简单直白的分布。 */
   .seat-scrim-bottom{position:absolute;bottom:0;left:0;right:0;height:60%;pointer-events:none;
     background:linear-gradient(0deg,
-      rgba(0,0,0,.95) 0%,
-      rgba(0,0,0,.92) 55%,
-      rgba(0,0,0,.85) 80%,
-      rgba(0,0,0,.55) 92%,
+      rgba(0,0,0,.55) 0%,
+      rgba(0,0,0,.50) 40%,
+      rgba(0,0,0,.42) 65%,
+      rgba(0,0,0,.20) 85%,
       rgba(0,0,0,0) 100%);}
-  /* 标题栏:叠在顶部遮罩上(不再自带背景色,对比度由遮罩保证)。 */
+  /* 标题栏:叠在顶部遮罩上(不再自带背景色,对比度由遮罩保证)。
+     **第7次微调:①删掉标题栏右侧的数字血量(.seat-title-hp)**——血量已经在左侧
+     .seat-hp-col 的竖排心形图标里完整显示,标题栏再放一遍数字是冗余信息,删掉不影响
+     任何功能,纯粹的信息去重。**②玩家名从靠左改成居中**:标题栏删掉血量数字之后,
+     `justify-content:space-between` 不再有意义(右侧没有东西可以"对齐到两端"了),
+     改成 `justify-content:center` 让名字真正居中;回合/连环/濒死这几个状态标签
+     (tags)不参与这次居中——它们只在特定状态下才出现,如果和名字挤在同一个居中
+     flex流里,标签的出现/消失会导致名字左右晃动(不是真正的居中,而是"扣掉标签宽度
+     后居中"),所以改成绝对定位钉在标题栏右侧(见下面 .seat-title-tags),不占据
+     居中布局的flex空间,名字才能稳定居中、不受标签有无影响。 */
   .seat-title{
     position:absolute;top:0;left:0;right:0;
     color:var(--paper);font-weight:700;
-    padding:3px 5px;display:flex;align-items:center;justify-content:space-between;
-    gap:4px;white-space:nowrap;overflow:hidden;font-size:11px;
+    padding:3px 5px;display:flex;align-items:center;justify-content:center;
+    white-space:nowrap;overflow:hidden;font-size:11px;
     text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 2px rgba(0,0,0,.8);
   }
-  .seat-title-name{overflow:hidden;text-overflow:ellipsis;}
-  .seat-title-hp{color:var(--cinnabar-bright);flex:none;}
+  .seat-title-name{overflow:hidden;text-overflow:ellipsis;text-align:center;}
+  /* 状态标签(回合中/连环/濒死):绝对定位钉在标题栏右侧,不参与上面的居中flex布局
+     (理由见 .seat-title 的说明)。标题栏本身已经是 position:absolute 的定位上下文,
+     子元素可以直接相对它定位。 */
+  .seat-title-tags{position:absolute;top:50%;right:5px;transform:translateY(-50%);
+    display:flex;gap:3px;}
   /* ===== 左侧一列(第4次微调):玩家名(在标题栏里,靠左) → 势力/所属占位 → 武将名竖排 → 血量 =====
      **这四样(除玩家名在标题栏外)包成一个竖直 flex 列,不再各自写死绝对定位的 top 偏移量。**
      这是真实踩到的坑逼出来的:武将名竖排的高度随字数变化(2字"马超" vs 4字"颜良文丑"差一倍),
@@ -361,29 +387,53 @@
     z-index:2;
   }
   /* 装备条(第5次微调:去掉不透明白底,改成白色文字直接叠在立绘下半部;
-     **第6次微调:4行从"紧挤在底部一小条"放大到"撑满 .seat-scrim-bottom 覆盖的整个60%
-     阴影区"**)。
-     **对比度仍然由 .seat-scrim-bottom 那层深色渐变垫底保证**——这次渐变的α分布已经
-     跟着重算过(见其注释),两处是同一个改动的两半,不能只改一边。
-     **为什么用 cqw(容器查询宽度单位)而不是 px/媒体断点**:卡片宽度主要由对手人数决定,
-     不是由视口宽度决定(2人局1对手220-260px vs 7人局6对手仅96.5px,这个差距在同一个
-     视口宽度下就能发生)——用 cqw(1cqw = .seat 自身宽度的1%,由 .seat 已声明的
-     container-type:inline-size 提供)能让字号/行距/间隙/内边距连续地跟着"这张卡片
-     自己有多宽"缩放,不需要为每个断点分别手调一次数字,也天然不需要再给 .seat.me
-     单独写一份放大版覆盖(旧版 font-size:10px 那条覆盖已删除——"我"的卡本来就比对手宽,
-     同一条 cqw 规则在更宽的容器下自然算出更大的字号)。
-     **几何换算(目标:4行内容加上间隙/内边距,总高度落在阴影区60%范围内、且给顶部留出
-     安全余量,不能顶格到100%——顶格会让最上面一行文字压在渐变即将淡出的边缘,对比度
-     不可控)**:.seat{aspect-ratio:3/4} 锁定卡高=卡宽×4/3,阴影区高度=60%×4/3卡宽=
-     80cqw。这次取总内容高度目标≈68.8cqw(约占阴影区86%,留14%安全边距):
-     字号12.5cqw×行高1.2=每行15cqw,4行合计60cqw;间隙1.6cqw×3处=4.8cqw;
-     上下内边距各2cqw合计4cqw;总计68.8cqw。
-     **实测数据见 verify_seatcard_equipscrim.js 第6次微调记录**:桌面/SE两档、马超/大乔/
-     司马懿三张对照立绘,4行逐行对比度全部≥4.5(WCAG AA)。 */
+     第6次微调:4行放大到"撑满"阴影区;
+     **第7次微调:撑满这个目标本身被取消——字号缩回到和标题栏/武将名/血量协调的比例,
+     行距收紧,不再追求"填满阴影区60%"这个目标**(那是第6次微调的目标,这次主动放弃)。
+     **同时把"手牌数量图标"塞进装备条区域最左侧,装备文字整体挪到图标右侧、同一横向
+     区域内(不是叠在图标上方)**——新增 .seat-equip-row 作为水平flex容器,左边放
+     .seat-hand-icon(固定尺寸的图标,不随行数变化),右边放 .seat-equip-bar(仍然是
+     4行纵向堆叠的文字列),两者左右并排、垂直居中对齐。
+     **字号继续用 cqw 但套 clamp() 夹住上下限**,不是像第6次微调那样让它随卡片宽度
+     无限放大——纯 cqw 在"我"的宽卡片(220~260px)上会算出明显大于标题栏(11px)的
+     字号,反而不"协调";用 clamp(7px, 6.5cqw, 10px) 夹住:最小卡片(SE 7人局对手,
+     96.5px)算出约6.3px会被夹到7px下限,最大卡片("我")算出约14~17px会被夹到10px
+     上限,中等宽度的卡片按6.5cqw连续插值——小卡不至于挤成一团难以辨认,大卡也不会
+     喧宾夺主盖过标题栏。
+     **对比度仍然由 .seat-scrim-bottom 保证,但这次那层渐变改成了半透明(见其注释和
+     CLAUDE.md 第7次微调条目的实测数据)**——这是这次改动里风险最高的一环,字号变小
+     叠加背景变透明,两个因素都会削弱对比度,所以实测格外重要。 */
+  .seat-equip-row{display:flex;align-items:center;gap:4px;padding:0 3px 3px;}
+  /* 手牌数量图标:两张交叉叠放的浅色卡牌轮廓(一张左倾一张右倾)+ 黑色描边白字的数字,
+     叠在两张卡牌交叉的中间位置。**数字用 text-shadow 描边,不是圆圈/方框底色**——
+     这是用户明确要求的视觉效果(和 .corner 角标"纯文字+描边"是同一手法,黑色描边在
+     任意背景明暗下都能提供足够对比度,不需要额外的底色块)。
+     尺寸同样用 clamp() 夹住随卡片宽度的缩放范围,和装备文字的字号缩放同一个道理。 */
+  .seat-hand-icon{
+    position:relative;flex:none;
+    width:clamp(16px,11cqw,22px);height:clamp(20px,14cqw,27px);
+  }
+  .seat-hand-icon .hi-card{
+    position:absolute;width:60%;height:78%;
+    background:var(--paper);border:1px solid rgba(0,0,0,.4);border-radius:2px;
+    box-shadow:0 1px 2px rgba(0,0,0,.5);
+  }
+  /* 两张卡片**不能共用同一个中心点**——第一版让 a/b 两个矩形位置完全重合、只靠旋转
+     角度相反区分,实测(getBoundingClientRect)两者的包围盒是完全相同的数值,截图上看
+     就是糊成一个圆角方块,完全看不出"两张交叉的卡牌"这个设计意图。改成左右各自偏移
+     一点再反向旋转,两张矩形中心点不同、只有中间一部分重叠,才能真正显出交叉的牌型。 */
+  .seat-hand-icon .hi-card.a{left:2%;top:16%;transform:rotate(-18deg);}
+  .seat-hand-icon .hi-card.b{left:38%;top:16%;transform:rotate(18deg);}
+  .seat-hand-icon .hi-count{
+    position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;
+    color:#fff;font-weight:800;font-size:clamp(9px,7.5cqw,13px);
+    text-shadow:-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000,
+      0 0 2px #000, 0 0 2px #000;
+  }
   .seat-equip-bar{
-    background:none;color:var(--paper);
-    display:flex;flex-direction:column;gap:1.6cqw;
-    padding:2cqw 3cqw;font-size:12.5cqw;line-height:1.2;
+    background:none;color:var(--paper);flex:1 1 auto;min-width:0;
+    display:flex;flex-direction:column;gap:1px;
+    font-size:clamp(7px,6.5cqw,10px);line-height:1.15;
     text-shadow:0 1px 2px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.85);
   }
   .seat-equip-bar .erow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -985,16 +1035,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=126"></script>
-<script src="data.js?v=126"></script>
-<script src="room-lifecycle.js?v=126"></script>
-<script src="game.js?v=126"></script>
-<script src="weapons.js?v=126"></script>
-<script src="skills.js?v=126"></script>
-<script src="render.js?v=126"></script>
-<script src="render-table.js?v=126"></script>
-<script src="render-hand.js?v=126"></script>
-<script src="render-controls.js?v=126"></script>
-<script src="render-log.js?v=126"></script>
+<script src="config.js?v=127"></script>
+<script src="data.js?v=127"></script>
+<script src="room-lifecycle.js?v=127"></script>
+<script src="game.js?v=127"></script>
+<script src="weapons.js?v=127"></script>
+<script src="skills.js?v=127"></script>
+<script src="render.js?v=127"></script>
+<script src="render-table.js?v=127"></script>
+<script src="render-hand.js?v=127"></script>
+<script src="render-controls.js?v=127"></script>
+<script src="render-log.js?v=127"></script>
 </body>
 </html>
