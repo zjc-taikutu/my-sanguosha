@@ -247,25 +247,23 @@
      .seat 的目标选择点击和装备/判定区 chip 的 onclick)。 */
   .seat-scrim-top{position:absolute;top:0;left:0;right:0;height:34%;pointer-events:none;
     background:linear-gradient(180deg, rgba(0,0,0,.80) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%);}
-  /* **底部渐变(第5次微调后,这层的职责变了:从"过渡装饰"变成"白色装备文字的对比度保证")。**
-     原来装备条是不透明白底,这层渐变只是让立绘到白条的过渡不生硬(.62 → 透明就够了);
-     现在白底没了、装备文字直接叠在立绘上,**这层渐变是唯一保证白字在任意立绘上都看得清的
-     东西**,强度必须按最坏组合(最亮立绘 + 4行装备 + 最小卡片)反推,而不是"看着差不多"。
-     几何(**以下是实测值,不是估算——一开始按估算写的"4行装备约占卡底37%"是错的**):
-     4行装备在最坏情况下,条顶实际到达卡片底部往上 **43.7%** 的位置(SE 横屏对手卡
-     96.5×128.66 实测)。渐变覆盖卡高 60%,α 从底部的 .94 逐段递减,到 62%(≈卡高37%)仍有
-     .82,再往上进入 .82→.45 的过渡带——也就是说**最上面那一行(第4行)实际落在渐变的过渡带
-     里,不在最强区**。但实测该行对比度在最亮立绘上仍有 7.11(桌面)/ 11.5+(SE),远高于 AA 的
-     4.5,**所以刻意不再把渐变加深去"罩住"它**:那样只会把立绘下半部压得更黑、损害观感,
-     而可读性本来就已经达标——**不为了满足一个自己拍的几何指标去牺牲画面**。
-     **真正的硬指标是"实测对比度",不是"条顶落在第几个百分比"**;要改这层渐变,重新跑
-     verify_seatcard_equipscrim.js 的对比度实测即可,别照着这里的百分比数字反推。 */
+  /* **底部渐变(第6次微调:装备条改成"撑满"这整块60%区域后,渐变的α分布必须整体重算)。**
+     第5次微调时装备条只占这个区域的底部43.7%,渐变可以在62%处就开始往上淡出(反正没有
+     文字落在那里)。**这次装备条的4行内容本身就设计成接近填满整个60%区域**(见下面
+     .seat-equip-bar 的 cqw 换算注释),意味着最上面那一行(第4行)会落在离渐变顶部很近的
+     位置——如果继续沿用旧的"62%后开始变淡、80%只剩.45"这组数字,第4行会直接落进
+     半透明到全透明的区域,对比度必然崩掉,不是"不增反降"的假设性风险,是必然发生。
+     **重新设计的原则**:强透明度(.85+)必须覆盖到接近整个区域的顶部,只在最后一小段
+     (≈88%→100%)才真正开始淡出,给装备条的顶部内容留出安全余量,同时保留一点淡出让
+     立绘到遮罩的过渡不至于是一条生硬的硬边。**这组数字同样是靠实测钉死的,不是拍脑袋**——
+     见 verify_seatcard_equipscrim.js 第6次微调的重新实测记录:4行文字逐行对比度全部
+     ≥4.5(WCAG AA),桌面/SE两档均覆盖。 */
   .seat-scrim-bottom{position:absolute;bottom:0;left:0;right:0;height:60%;pointer-events:none;
     background:linear-gradient(0deg,
-      rgba(0,0,0,.94) 0%,
-      rgba(0,0,0,.90) 35%,
-      rgba(0,0,0,.82) 62%,
-      rgba(0,0,0,.45) 80%,
+      rgba(0,0,0,.95) 0%,
+      rgba(0,0,0,.92) 55%,
+      rgba(0,0,0,.85) 80%,
+      rgba(0,0,0,.55) 92%,
       rgba(0,0,0,0) 100%);}
   /* 标题栏:叠在顶部遮罩上(不再自带背景色,对比度由遮罩保证)。 */
   .seat-title{
@@ -362,21 +360,36 @@
     width:14px;height:14px;font-size:9px;
     z-index:2;
   }
-  /* 装备条(第5次微调:**去掉不透明白底,改成白色文字直接叠在立绘下半部**)。
-     **对比度不再由自己的背景保证,而是由 .seat-scrim-bottom 那层深色渐变垫底保证**——
-     所以那层渐变的强度/覆盖高度是硬性依赖,改动它之前必须重新跑对比度实测(见其注释)。
-     额外叠一层 text-shadow 只是补强,**不是主要手段**(单靠描边顶不住中间调立绘,这是
-     本项目已经用数据证明过两次的结论)。 */
+  /* 装备条(第5次微调:去掉不透明白底,改成白色文字直接叠在立绘下半部;
+     **第6次微调:4行从"紧挤在底部一小条"放大到"撑满 .seat-scrim-bottom 覆盖的整个60%
+     阴影区"**)。
+     **对比度仍然由 .seat-scrim-bottom 那层深色渐变垫底保证**——这次渐变的α分布已经
+     跟着重算过(见其注释),两处是同一个改动的两半,不能只改一边。
+     **为什么用 cqw(容器查询宽度单位)而不是 px/媒体断点**:卡片宽度主要由对手人数决定,
+     不是由视口宽度决定(2人局1对手220-260px vs 7人局6对手仅96.5px,这个差距在同一个
+     视口宽度下就能发生)——用 cqw(1cqw = .seat 自身宽度的1%,由 .seat 已声明的
+     container-type:inline-size 提供)能让字号/行距/间隙/内边距连续地跟着"这张卡片
+     自己有多宽"缩放,不需要为每个断点分别手调一次数字,也天然不需要再给 .seat.me
+     单独写一份放大版覆盖(旧版 font-size:10px 那条覆盖已删除——"我"的卡本来就比对手宽,
+     同一条 cqw 规则在更宽的容器下自然算出更大的字号)。
+     **几何换算(目标:4行内容加上间隙/内边距,总高度落在阴影区60%范围内、且给顶部留出
+     安全余量,不能顶格到100%——顶格会让最上面一行文字压在渐变即将淡出的边缘,对比度
+     不可控)**:.seat{aspect-ratio:3/4} 锁定卡高=卡宽×4/3,阴影区高度=60%×4/3卡宽=
+     80cqw。这次取总内容高度目标≈68.8cqw(约占阴影区86%,留14%安全边距):
+     字号12.5cqw×行高1.2=每行15cqw,4行合计60cqw;间隙1.6cqw×3处=4.8cqw;
+     上下内边距各2cqw合计4cqw;总计68.8cqw。
+     **实测数据见 verify_seatcard_equipscrim.js 第6次微调记录**:桌面/SE两档、马超/大乔/
+     司马懿三张对照立绘,4行逐行对比度全部≥4.5(WCAG AA)。 */
   .seat-equip-bar{
     background:none;color:var(--paper);
-    display:flex;flex-direction:column;gap:1px;
-    padding:2px 3px 3px;font-size:8px;line-height:1.35;
+    display:flex;flex-direction:column;gap:1.6cqw;
+    padding:2cqw 3cqw;font-size:12.5cqw;line-height:1.2;
     text-shadow:0 1px 2px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.85);
   }
   .seat-equip-bar .erow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     color:var(--paper);}
-  .seat-equip-bar .erow b{color:var(--gold);font-weight:700;margin-right:1px;} /* 类别首字:金色,和装备名区分 */
-  .seat-equip-bar .erow .efd{margin-right:2px;} /* 花色点数:颜色由 render.js 的 seatEquipFace 按红/黑分别给 */
+  .seat-equip-bar .erow b{color:var(--gold);font-weight:700;margin-right:.15em;} /* 类别首字:金色,和装备名区分;margin用em随字号缩放 */
+  .seat-equip-bar .erow .efd{margin-right:.2em;} /* 花色点数:颜色由 render.js 的 seatEquipFace 按红/黑分别给 */
   .seat-equip-bar .erow.filled{cursor:pointer;}
   .seat-equip-bar .erow.empty-slot{color:var(--paper-dim);opacity:.75;} /* 空槽:淡化,但仍在深色渐变上,依然清晰 */
   /* 卡片底部区(判定区 + 装备条):**整块从底部往上堆叠的 flex column**。
@@ -415,7 +428,10 @@
   .seat.me .seat-identity{top:28px;right:6px;width:22px;height:22px;}
   .seat.me .seat-info-badge{top:54px;right:6px;width:18px;height:18px;font-size:11px;}
   .seat.me .seat-hp-col{font-size:14px;padding:4px 3px;} /* left 已由 .seat-left 统一管,这里只调尺寸 */
-  .seat.me .seat-equip-bar{font-size:10px;padding:3px 5px;line-height:1.4;}
+  /* (第6次微调:原来这里有一条 .seat.me .seat-equip-bar{font-size:10px;...} 的固定像素覆盖,
+     已删除——装备条改用 cqw 之后,"我"的卡片本来就比对手宽,同一条基础规则在更宽的容器下
+     自然算出更大的字号,不需要再为"我"单独写一份放大版,那样反而会在两条规则之间制造
+     "谁该覆盖谁"的隐患。) */
   .seat.me .seat-delays .dchip{font-size:10px;padding:1px 5px;}
   .seat .tag{font-size:9px;letter-spacing:.08em;background:rgba(51,43,36,.85);color:var(--paper);
     border-radius:4px;padding:0 4px;text-shadow:none;}
@@ -762,7 +778,11 @@
     .seat-identity{top:17px;width:13px;height:13px;}
     .seat .seat-info-badge{top:33px;width:12px;height:12px;font-size:8px;}
     .seat-hp-col{font-size:10px;}
-    .seat-equip-bar{font-size:7px;padding:2px;}
+    /* (第6次微调:原来这里有一条 .seat-equip-bar{font-size:7px;padding:2px} 的固定像素覆盖,
+       已删除——这是视口宽度断点,和卡片自身宽度(由对手人数决定)不是一回事,continuing to
+       override 会在≤640px的视口上把 cqw 算出来的字号强行按回7px,悄悄废掉这次放大的效果
+       (CLAUDE.md 里已经记过好几次这类"断点覆盖了不该覆盖的规则"的坑,这是同一类问题,
+       这次改CSS前就先排查掉了,不是留到出bug才发现)。) */
   }
   @media (max-width:480px){
     .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
@@ -780,7 +800,7 @@
     .seat-identity{top:15px;width:12px;height:12px;}
     .seat .seat-info-badge{top:29px;width:11px;height:11px;font-size:7px;}
     .seat-hp-col{font-size:9px;}
-    .seat-equip-bar{font-size:7px;}
+    /* (第6次微调:同上一个断点,原有的 .seat-equip-bar{font-size:7px} 固定像素覆盖已删除。) */
   }
 
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
@@ -965,16 +985,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=125"></script>
-<script src="data.js?v=125"></script>
-<script src="room-lifecycle.js?v=125"></script>
-<script src="game.js?v=125"></script>
-<script src="weapons.js?v=125"></script>
-<script src="skills.js?v=125"></script>
-<script src="render.js?v=125"></script>
-<script src="render-table.js?v=125"></script>
-<script src="render-hand.js?v=125"></script>
-<script src="render-controls.js?v=125"></script>
-<script src="render-log.js?v=125"></script>
+<script src="config.js?v=126"></script>
+<script src="data.js?v=126"></script>
+<script src="room-lifecycle.js?v=126"></script>
+<script src="game.js?v=126"></script>
+<script src="weapons.js?v=126"></script>
+<script src="skills.js?v=126"></script>
+<script src="render.js?v=126"></script>
+<script src="render-table.js?v=126"></script>
+<script src="render-hand.js?v=126"></script>
+<script src="render-controls.js?v=126"></script>
+<script src="render-log.js?v=126"></script>
 </body>
 </html>
