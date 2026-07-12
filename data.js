@@ -323,6 +323,16 @@ const GENERALS = {
     desc:'挑衅:出牌阶段限一次,你可指定一名其他角色,令其选择一项:1.对你使用一张杀;2.令你弃置其一张牌。志继:觉醒技,准备阶段,若你没有手牌,你减1点体力上限,回复1点体力或摸两张牌,然后获得技能观星。',
     caps:{ tiaoxin:true, zhiji:true },
     hooks:{ } },
+  zhoutai:        { id:'zhoutai',        name:'周泰',   gender:'male', maxHp:4, skill:'不屈',
+    desc:'当你的体力降到0或以下时,可以选择放置一张不屈牌。所有回复体力的场景都会触发移除一张不屈牌,最后一张被移除时恢复1点体力。',
+    caps:{ buqu:true },
+    hooks:{ } },
+  weiyan:        { id:'weiyan',        name:'魏延',   gender:'male', maxHp:4, skill:'狂骨',
+    desc:'锁定技，当你对一名角色造成伤害后，若其扣减体力前你计算与其的距离不大于1，你回复等同于伤害点数的体力。',
+    caps:{ kuanggu:true } },
+  lusu:          { id:'lusu',          name:'鲁肃',   gender:'male', maxHp:3, skill:'好施/缔盟',
+    desc:'好施:摸牌阶段,你可以多摸两张牌,然后若你的手牌数大于5,你将一半的手牌(向下取整)交给除你以外全场手牌数最少的一名其他角色。缔盟:出牌阶段限一次,你可以选择两名其他角色并弃置X张牌(X为这两名角色的手牌数之差),令他们交换手牌。',
+    caps:{ haoshi:true, extraDrawPhase:2, dimeng:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

@@ -875,6 +875,15 @@ function renDe(cardIdx, targetSeat){
       if(me.hp<me.maxHp) me.hp = Math.min(me.maxHp, me.hp+1);
       g.log=pushLog(g.log, me.name+' 【仁德】发动,回复1点体力');
       markSkillSound(g, '仁德');
+      // 周泰【不屈】:回复体力时移除一张不屈牌
+      if (me.general === 'zhoutai' && me.buquCards && me.buquCards.length > 0) {
+        const removedCard = me.buquCards.pop();
+        g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
+        if(me.buquCards.length === 0) {
+          me.hp = Math.min(me.maxHp, me.hp + 1);
+          g.log = pushLog(g.log, me.name+' 移除最后一张不屈牌,恢复1点体力（体力'+me.hp+'）');
+        }
+      }
     }
     g.phase='play';
     return g;
@@ -897,6 +906,16 @@ function qingNang(cardIdx, targetSeat){
     g.discard.push(card);
     tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【青囊】,令 '+tgt.name+' 回复1点体力');
+    // 周泰【不屈】:回复体力时移除一张不屈牌
+    const targetSeat = g.players.findIndex(p => p === tgt);
+    if (targetSeat !== -1 && tgt.general === 'zhoutai' && tgt.buquCards && tgt.buquCards.length > 0) {
+      const removedCard = tgt.buquCards.pop();
+      g.log = pushLog(g.log, tgt.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
+      if(tgt.buquCards.length === 0) {
+        tgt.hp = Math.min(tgt.maxHp, tgt.hp + 1);
+        g.log = pushLog(g.log, tgt.name+' 移除最后一张不屈牌,恢复1点体力（体力'+tgt.hp+'）');
+      }
+    }
     markSkillSound(g, '青囊');
     g.phase='play';
     return g;
@@ -1057,6 +1076,15 @@ function respondZhijiChoice(healOrDraw){
       // 选择回复1点体力
       p.hp = Math.min(p.hp + 1, p.maxHp);
       g.log = pushLog(g.log, p.name + ' 选择回复1点体力');
+      // 周泰【不屈】:回复体力时移除一张不屈牌
+      if (p.general === 'zhoutai' && p.buquCards && p.buquCards.length > 0) {
+        const removedCard = p.buquCards.pop();
+        g.log = pushLog(g.log, p.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
+        if(p.buquCards.length === 0) {
+          p.hp = Math.min(p.maxHp, p.hp + 1);
+          g.log = pushLog(g.log, p.name+' 移除最后一张不屈牌,恢复1点体力（体力'+p.hp+'）');
+        }
+      }
     } else {
       // 选择摸两张牌
       drawN(g, seat, 2);
@@ -1234,6 +1262,15 @@ function respondZaiqi() {
     const recoverAmount = Math.min(lostHp, heartCount);
     if (recoverAmount > 0) {
       me.hp = Math.min(me.maxHp, me.hp + recoverAmount);
+      // 周泰【不屈】:回复体力时移除一张不屈牌
+      if (me.general === 'zhoutai' && me.buquCards && me.buquCards.length > 0) {
+        const removedCard = me.buquCards.pop();
+        g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
+        if(me.buquCards.length === 0) {
+          me.hp = Math.min(me.maxHp, me.hp + 1);
+          g.log = pushLog(g.log, me.name+' 移除最后一张不屈牌,恢复1点体力（体力'+me.hp+'）');
+        }
+      }
     }
     
     // 记录日志
@@ -1571,6 +1608,70 @@ function respondZhimengPick(optionType, optionIndex) {
     
     g.phase = 'play';
     markSkillSound(g, '制蛮');
+    
+    return g;
+  });
+}
+
+// respondHaoshi: 鲁肃【好施】——选择目标角色
+function respondHaoshi(targetSeat){
+  tx(g=>{
+    if(g.phase!=='haoshiPick'||!g.pending||g.pending.type!=='haoshiPick'||g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!hasCap(me,'haoshi')) return g;
+    if(typeof targetSeat!=='number') return g;
+    if(!g.pending.candidates || !g.pending.candidates.includes(targetSeat)) return g;
+    if(!g.players[targetSeat] || !g.players[targetSeat].alive) return g;
+    
+    const half = g.pending.half;
+    const cardsToGive = me.hand.splice(0, half);
+    g.players[targetSeat].hand.push(...cardsToGive);
+    g.log = pushLog(g.log, me.name+' 发动【好施】,将'+half+'张手牌交给 '+g.players[targetSeat].name);
+    markSkillSound(g, '好施');
+    
+    // 清理pending状态，继续游戏
+    g.pending = null;
+    g.phase = 'play';
+    
+    return g;
+  });
+}
+
+// respondDimeng: 鲁肃【缔盟】——选择两名其他角色并弃置X张牌,令他们交换手牌
+function respondDimeng(seatA, seatB){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!hasCap(me,'dimeng')) return g;
+    if(typeof seatA!=='number' || typeof seatB!=='number') return g;
+    if(seatA===seatB || seatA===mySeat || seatB===mySeat) return g;
+    if(!g.players[seatA] || !g.players[seatA].alive || !g.players[seatB] || !g.players[seatB].alive) return g;
+    if(g.dimengUsed) return g;
+    
+    // 计算X = 手牌数之差
+    const handA = (g.players[seatA].hand || []).length;
+    const handB = (g.players[seatB].hand || []).length;
+    const X = Math.abs(handA - handB);
+    
+    // 检查是否能弃置X张牌
+    if((me.hand || []).length < X) {
+      g.log = pushLog(g.log, me.name+' 手牌不足'+X+'张,无法发动【缔盟】');
+      return g;
+    }
+    
+    // 弃置X张牌
+    const cardsToDiscard = me.hand.splice(0, X);
+    g.discard.push(...cardsToDiscard);
+    
+    // 交换两名角色的手牌
+    const tempA = g.players[seatA].hand || [];
+    const tempB = g.players[seatB].hand || [];
+    g.players[seatA].hand = tempB;
+    g.players[seatB].hand = tempA;
+    
+    g.dimengUsed = true;
+    g.log = pushLog(g.log, me.name+' 发动【缔盟】,弃置'+X+'张牌,令 '+g.players[seatA].name+' 与 '+g.players[seatB].name+' 交换手牌');
+    markSkillSound(g, '缔盟');
     
     return g;
   });

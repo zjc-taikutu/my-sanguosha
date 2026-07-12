@@ -57,6 +57,11 @@ function resetDuanliang(){ duanliangMode=false; duanliangCardIdx=null; }
 let qixiMode = false;
 let qixiCardIdx = null;
 function resetQixi(){ qixiMode=false; qixiCardIdx=null; }
+// 鲁肃【缔盟】:出牌阶段限一次,选择两名其他角色并弃置X张牌,令他们交换手牌。
+let dimengMode = false;
+let dimengSeatA = null;
+let dimengSeatB = null;
+function resetDimeng(){ dimengMode=false; dimengSeatA=null; dimengSeatB=null; }
 let guoseMode = false;
 let guoseCardIdx = null;
 function resetGuose(){ guoseMode=false; guoseCardIdx=null; }
@@ -423,6 +428,27 @@ function renderControls(g){
     renderPickGeneral(g, c);
     return;
   }
+  // 鲁肃【好施】:选择目标
+  if(g.phase==='haoshiPick' && g.pending && g.pending.type==='haoshiPick' && g.pending.seat===mySeat){
+    const half = g.pending.half;
+    const candidates = g.pending.candidates || [];
+    setBanner('【好施】选择一个角色,将'+half+'张手牌交给他。');
+    candidates.forEach(seat=>{
+      const p = g.players[seat];
+      if(p && p.alive){
+        const b=document.createElement('button'); b.className='primary';
+        b.textContent='交给 '+p.name;
+        b.onclick=()=>respondHaoshi(seat);
+        c.appendChild(b);
+      }
+    });
+    return;
+  }
+  if(g.phase==='haoshiPick' && g.pending && g.pending.type==='haoshiPick'){
+    const p = g.players[g.pending.seat];
+    waitAskBanner(p ? p.name : '鲁肃', '好施');
+    return;
+  }
   
   // 马谡【散谣】UI
   const sanyaoChooseHtml = renderSanyaoChooseTarget(g);
@@ -435,6 +461,27 @@ function renderControls(g){
   if(zhimengAskHtml) { c.innerHTML = zhimengAskHtml; return; }
   const zhimengPickHtml = renderZhimengPick(g);
   if(zhimengPickHtml) { c.innerHTML = zhimengPickHtml; return; }
+  
+  // 周泰【不屈】UI:体力降到0时是否放置不屈牌
+  if(g.phase==='buquAsk' && g.pending && g.pending.type==='buquAsk' && g.pending.seat===mySeat){
+    const div=document.createElement('div'); div.className='centered';
+    const p=document.createElement('p'); p.textContent='是否发动【不屈】,放置一张不屈牌？';
+    div.appendChild(p);
+    
+    const btnUse=document.createElement('button');
+    btnUse.textContent='放置不屈牌';
+    btnUse.onclick=()=>respondBuqu(true);
+    div.appendChild(btnUse);
+    
+    const btnSkip=document.createElement('button');
+    btnSkip.textContent='不发动';
+    btnSkip.onclick=()=>respondBuqu(false);
+    div.appendChild(btnSkip);
+    
+    c.appendChild(div);
+    setBanner('请选择是否发动【不屈】');
+    return;
+  }
   
   if(!g.started){
     const cnt=(g.players||[]).filter(Boolean).length;
@@ -1558,7 +1605,43 @@ function renderControls(g){
     if(duanliangMode && g.duanliangUsed) resetDuanliang(); // 选牌途中变得不可用(理论上不会,双重保险)
     // 方天画戟触发条件(手牌恰好剩1张+能当杀+还能出杀)在选目标途中变得不满足 → 安全退出,不卡在选牌模式
     if(fangtianMode && (!canSha || me.hand.length!==1 || !hasCap(me,'fangtian') || !canUseAs(me,(me.hand||[])[0],'杀'))) resetFangtian();
-    if(quhuMode){
+    // 鲁肃【缔盟】:选择两名其他角色
+    if(dimengMode && g.dimengUsed) resetDimeng();
+    if(dimengMode){
+      const availableTargets = g.players.filter((p,i)=>p && p.alive && i!==mySeat);
+      if(dimengSeatA === null){
+        setBanner('【缔盟】选择第一名角色(已选 0/2)。');
+      } else if(dimengSeatB === null){
+        setBanner('【缔盟】选择第二名角色(已选 1/2)。');
+      }
+      // 渲染可选角色按钮
+      g.players.forEach((p,i)=>{ 
+        if(!p || !p.alive || i===mySeat) return;
+        if(dimengSeatA === null || (dimengSeatB === null && i !== dimengSeatA)){
+          const b=document.createElement('button');
+          b.textContent='选择 '+p.name;
+          b.onclick=()=>{ 
+            if(dimengSeatA === null) dimengSeatA = i; 
+            else if(dimengSeatB === null && i !== dimengSeatA) dimengSeatB = i;
+            render(g); 
+          };
+          c.appendChild(b);
+        }
+      });
+      // 确认按钮(选满2人后才能确认)
+      if(dimengSeatA !== null && dimengSeatB !== null){
+        const ok=document.createElement('button'); ok.className='primary';
+        ok.textContent='确认发动'; 
+        ok.onclick=()=>{ 
+          const a = dimengSeatA, b = dimengSeatB;
+          resetDimeng(); 
+          respondDimeng(a, b); 
+        };
+        c.appendChild(ok);
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetDimeng(); render(g); }; c.appendChild(cb);
+    } else if(quhuMode){
       setBanner(quhuCardIdx===null
         ? '【驱虎】选择一张手牌用于拼点。'
         : '已选中拼点牌,选择一名当前体力值大于你的角色拼点。');
@@ -1727,7 +1810,7 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode;
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
@@ -1791,13 +1874,19 @@ function renderControls(g){
       const qb=document.createElement('button'); qb.className='ghost';
       qb.textContent='发动【驱虎】'; qb.onclick=()=>{ selectedCardIdx=null; quhuMode=true; quhuCardIdx=null; render(g); }; c.appendChild(qb);
     }
+    // 鲁肃【缔盟】:出牌阶段限一次,选择两名其他角色
+    const hasDimengTarget = g.players.filter((p,i)=>p && p.alive && i!==mySeat).length >= 2;
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'dimeng') && !g.dimengUsed && hasDimengTarget){
+      const db=document.createElement('button'); db.className='ghost';
+      db.textContent='发动【缔盟】'; db.onclick=()=>{ selectedCardIdx=null; dimengMode=true; dimengSeatA=null; dimengSeatB=null; render(g); }; c.appendChild(db);
+    }
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'fangtian') && canSha
        && (me.hand||[]).length===1 && canUseAs(me,(me.hand||[])[0],'杀')){
       const fb=document.createElement('button'); fb.className='ghost';
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌

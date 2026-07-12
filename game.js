@@ -59,6 +59,8 @@ function normalize(g){
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   // 许褚【裸衣】:本回合伤害加成标记。回合开始重置,旧存档缺失回退 false。
   if(typeof g.luoyiActive!=='boolean') g.luoyiActive=false;
+  // 鲁肃【缔盟】:回合内使用标记
+  if(typeof g.dimengUsed!=='boolean') g.dimengUsed=false;
   // 开局选将模式:'random'/'pick',开局前是 null,旧存档缺失同样回退 null
   if(g.generalMode===undefined) g.generalMode=null;
   g.players.forEach(p=>{ if(p){ p.hand = p.hand || []; if(typeof p.alive!=='boolean') p.alive=true;
@@ -77,6 +79,8 @@ function normalize(g){
     if(!Number.isInteger(p.zhengyiTurn)) p.zhengyiTurn=-1;
     // 姜维【志继】觉醒标记
     if(typeof p.zhijiAwakened!=='boolean') p.zhijiAwakened=false;
+    // 周泰【不屈】牌堆:不屈牌数组,每张牌是一个对象{id,name,suit,rank}
+    p.buquCards = p.buquCards || [];
     // 玩家动态获得的能力(如志继觉醒后获得观星)
     if(typeof p.caps!=='object'||p.caps===null) p.caps={};
     // 判定区(延时锦囊):和 p.hand 同款防御,Firebase 吞空数组
@@ -494,6 +498,15 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 鲁肃【好施】选择目标阶段:seat 应是数字且存活, candidates 应是非空数组
+  if(g.pending && g.pending.type==='haoshiPick'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       !Number.isInteger(d.half) || d.half<=0){
+      g.pending=null; g.phase='play';
+    }
+  }
   return g;
 }
 // logEvent: 追加一条结构化日志事件。ev = {text, kind?, actor?, targets?}:
@@ -601,6 +614,41 @@ function eligibleLiRangSeat(g, targetSeat){
 function finishDrawPhase(g, seat, n){
   drawN(g, seat, n);
   g.log=pushLog(g.log, g.players[seat].name+' 摸了'+n+'张牌');
+  
+  // 鲁肃【好施】:摸牌后若手牌数>5,需将一半手牌交给手牌最少的其他角色
+  const p = g.players[seat];
+  if(p && p.alive && generalHasCap(p, 'haoshi') && (p.hand || []).length > 5){
+    const half = Math.floor(p.hand.length / 2);
+    if(half > 0){
+      // 找手牌最少的其他存活角色
+      let targetSeats = [];
+      let minHand = Infinity;
+      for(let i = 0; i < g.players.length; i++){
+        if(i === seat || !g.players[i] || !g.players[i].alive) continue;
+        const handCount = (g.players[i].hand || []).length;
+        if(handCount < minHand){
+          minHand = handCount;
+          targetSeats = [i];
+        } else if(handCount === minHand){
+          targetSeats.push(i);
+        }
+      }
+      // 若只有一个目标，直接分配
+      if(targetSeats.length === 1){
+        const targetSeat = targetSeats[0];
+        const cardsToGive = p.hand.splice(0, half);
+        g.players[targetSeat].hand.push(...cardsToGive);
+        g.log=pushLog(g.log, p.name+' 发动【好施】,将'+half+'张手牌交给 '+g.players[targetSeat].name);
+        markSkillSound(g, '好施');
+      } else if(targetSeats.length > 1){
+        // 多个最少手牌的角色，需要玩家选择
+        g.pending = { type: 'haoshiPick', seat, half, candidates: targetSeats };
+        g.phase = 'haoshiPick';
+        g.log = pushLog(g.log, p.name+' 发动【好施】,请选择要交给的角色…');
+      }
+    }
+  }
+  
   // 乐不思蜀/张郃【巧变】:摸牌阶段照常摸牌,只是不给出牌(或弃牌)机会——advancePastPlay
   // 统一判断出牌/弃牌阶段是否被跳过,不在这里各自重复逻辑。
   advancePastPlay(g);
@@ -1177,7 +1225,12 @@ const CARD_PLAYS = {
   '桃': {
     target:false,
     canPlay:(g,me,card)=> card.name==='桃' && me.hp<me.maxHp,
-    effect:(g,me,card)=>{ me.hp++; g.log=pushLog(g.log, me.name+' 使用【桃】回复1点体力'); }
+    effect:(g,me,card)=>{ 
+      me.hp++; 
+      g.log=pushLog(g.log, me.name+' 使用【桃】回复1点体力'); 
+      const seat = g.players.findIndex(p => p === me);
+      if(seat !== -1) removeBuquCard(g, seat);
+    }
   },
   '决斗': {
     target:true,
@@ -1815,6 +1868,16 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
   }
   
+  // 魏延【狂骨】:在扣减体力前计算距离(锁定技,造成伤害后若距离≤1则回复等同于伤害点数的体力)
+  let kuangguDist = null;
+  if(amount > 0 && typeof sourceSeat === 'number' && sourceSeat !== seat 
+     && sourceSeat >= 0 && sourceSeat < g.players.length) {
+    const attacker = g.players[sourceSeat];
+    if(attacker && attacker.alive && generalHasCap(attacker, 'kuanggu')){
+      kuangguDist = distance(g, sourceSeat, seat);
+    }
+  }
+
   p.hp = Math.max(0, p.hp - amount);
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
@@ -1839,6 +1902,13 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   }
 
   if(p.hp<=0){
+    // 周泰【不屈】:体力降到0或以下时,可以选择放置一张不屈牌
+    if(p.general === 'zhoutai' && (g.deck || []).length > 0) {
+      g.pending = { type:'buquAsk', seat, resume:{type:srcType, sourceSeat, amount} };
+      g.phase = 'buquAsk';
+      g.log = pushLog(g.log, p.name+' 体力降到0,是否发动【不屈】,放置一张不屈牌…');
+      return true; // 挂起,等待选择
+    }
     startDying(g, seat, srcType, sourceSeat, amount);
     return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解算时统一处理)
   }
@@ -1859,6 +1929,19 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(sourceCard!==undefined) ctx.sourceCard=sourceCard;
     triggerHook(g, seat, 'onDamaged', ctx);
     if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
+    
+    // 魏延【狂骨】:触发回复体力效果(每点伤害回复1点,不超过上限)
+    if(kuangguDist !== null && kuangguDist <= 1) {
+      const attacker = g.players[sourceSeat];
+      if(attacker && attacker.alive) {
+        const healAmount = Math.min(amount, attacker.maxHp - attacker.hp);
+        if(healAmount > 0) {
+          attacker.hp += healAmount;
+          g.log = pushLog(g.log, attacker.name + ' 发动【狂骨】,回复'+healAmount+'点体力（体力'+attacker.hp+'）');
+          markSkillSound(g, '狂骨');
+        }
+      }
+    }
     
     // 李典【忘隙】造成侧：sourceSeat 是李典且 seat != sourceSeat 且非致命时挂起
     if(typeof sourceSeat==='number' && sourceSeat !== seat && sourceSeat < g.players.length){
@@ -1941,6 +2024,8 @@ function respondDying(useTao, jijiuChoice){
       dyingP.hp++;
       const asTao = jijiuChoice ? '当【桃】' : '';
       g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' 打出【'+card.name+'】'+asTao+',回复1点体力（体力'+dyingP.hp+'）');
+      // 周泰【不屈】:回复体力时移除一张不屈牌
+      removeBuquCard(g, g.pending.seat);
       if(jijiuChoice) markSkillSound(g, '急救');
       markCardSound(g, '桃', mySeat, card, g.pending.seat);
       if(dyingP.hp>0){ finishDying(g, false); }
@@ -1970,7 +2055,17 @@ function useNiepan(){
     me.chained=false;
     me.turnedOver=false;
     me.nirvanaUsed=true;
+    const hpBefore = me.hp;
     me.hp=Math.min(me.maxHp, 3);
+    // 周泰【不屈】:回复体力时移除一张不屈牌
+    if (me.general === 'zhoutai' && me.buquCards && me.buquCards.length > 0 && me.hp > hpBefore) {
+      const removedCard = me.buquCards.pop();
+      g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
+      if(me.buquCards.length === 0) {
+        me.hp = Math.min(me.maxHp, me.hp + 1);
+        g.log = pushLog(g.log, me.name+' 移除最后一张不屈牌,恢复1点体力（体力'+me.hp+'）');
+      }
+    }
     drawN(g, mySeat, 3);
     g.log=pushLog(g.log, me.name+' 发动限定技【涅槃】,弃置所有牌,复原武将牌,摸3张牌并回复至'+me.hp+'点体力');
     markSkillSound(g, '涅槃');
@@ -1978,6 +2073,75 @@ function useNiepan(){
     return g;
   });
 }
+// respondBuqu: 周泰【不屈】选择响应。选择放置或不放置不屈牌。
+function respondBuqu(useBuqu){
+  tx(g=>{
+    if(g.phase!=='buquAsk'||!g.pending||g.pending.type!=='buquAsk') return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || g.pending.seat!==mySeat) return g;
+    
+    const p = g.players[g.pending.seat];
+    if(!p || !p.alive || p.general !== 'zhoutai') return g;
+    
+    if(useBuqu && (g.deck || []).length > 0) {
+      // 从牌堆顶放置一张不屈牌
+      const card = g.deck.pop();
+      p.buquCards.push(card);
+      g.log = pushLog(g.log, p.name+' 发动【不屈】,放置了一张不屈牌（'+card.name+' '+card.suit+card.rank+'）');
+      markSkillSound(g, '不屈');
+      
+      // 检查防死条件:所有不屈牌点数都唯一
+      const allUnique = checkBuquUnique(p);
+      if(allUnique) {
+        // 防止死亡：体力设置为0
+        p.hp = 0;
+        g.log = pushLog(g.log, p.name+' 所有不屈牌点数唯一,防止死亡（体力设为0）');
+        // 清理pending并恢复流程
+        g.pending = null;
+        g.phase = 'play';
+        return g;
+      }
+      // 如果放置了不屈牌但防死条件不满足，继续进入濒死流程
+      g.log = pushLog(g.log, p.name+' 发动【不屈】但防死条件不满足,继续濒死流程');
+    } else {
+      g.log = pushLog(g.log, p.name+' 选择不发动【不屈】');
+    }
+    
+    // 如果没有防死,继续调用startDying
+    const resume = g.pending.resume;
+    startDying(g, g.pending.seat, resume.type, resume.sourceSeat, resume.amount);
+    g.pending = null;
+    return g;
+  });
+}
+
+// checkBuquUnique: 检查周泰的不屈牌是否所有点数都唯一
+function checkBuquUnique(player) {
+  const ranks = (player.buquCards || []).map(card => card.rank);
+  const uniqueRanks = [...new Set(ranks)];
+  return ranks.length === uniqueRanks.length && ranks.length > 0;
+}
+
+// removeBuquCard: 处理回复体力时移除一张不屈牌的逻辑
+// 返回true表示移除了不屈牌且恢复了1点体力（最后一张被移除时）
+function removeBuquCard(g, seat) {
+  const p = g.players[seat];
+  if(!p || p.general !== 'zhoutai' || !p.buquCards || p.buquCards.length === 0) return false;
+  
+  // 移除最后一张不屈牌（从数组末尾移除）
+  const removedCard = p.buquCards.pop();
+  g.log = pushLog(g.log, p.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
+  
+  // 如果不屈牌数组为空（即刚刚移除的是最后一张），则恢复1点体力
+  if(p.buquCards.length === 0) {
+    p.hp = Math.min(p.maxHp, p.hp + 1);
+    g.log = pushLog(g.log, p.name+' 移除最后一张不屈牌,恢复1点体力（体力'+p.hp+'）');
+    return true;
+  }
+  
+  return false;
+}
+
 // finishDying: 濒死解决(获救或真死)。真死时把原 dealDamage 里的"阵亡弃牌"逻辑搬到这里执行;
 // 随后按 pending.resume.type 接回原来被 dealDamage 打断的那条流程的尾巴
 // (respondShan/duelResponse/aoeRespond 各自原有的 checkWin+阶段推进逻辑,原样不变、只是延后到此刻执行)。
@@ -2247,6 +2411,8 @@ function respondYaowu(choice) {
       // 回复1点体力
       chooser.hp = Math.min(chooser.maxHp, chooser.hp + 1);
       g.log = pushLog(g.log, chooser.name + ' 发动【耀武】，选择回复1点体力（体力' + chooser.hp + '）');
+      // 周泰【不屈】:回复体力时移除一张不屈牌
+      removeBuquCard(g, chooserSeat);
       markSkillSound(g, '耀武');
     } else if (choice === 'draw') {
       // 摸一张牌
@@ -2441,6 +2607,13 @@ function resolveTrick(g, info){
   if(info.trick==='桃园结义'){
     // 对所有存活角色生效(含使用者自己);已满血的人跳过,不溢出、不报错。
     g.players.forEach(p=>{ if(p && p.alive && p.hp<p.maxHp) p.hp++; });
+    // 为每个存活且实际回复体力的玩家移除不屈牌
+    // 只需要为周泰自己处理，因为只有周泰有不屈牌
+    g.players.forEach((p, seat) => {
+      if(p && p.alive && p.general === 'zhoutai' && p.buquCards && p.buquCards.length > 0 && p.hp > 0) {
+        removeBuquCard(g, seat);
+      }
+    });
     g.pending=null; g.phase='play';
     g.log=pushLog(g.log, g.players[info.from].name+' 【桃园结义】生效,所有存活角色回复1点体力');
     return;
@@ -2867,7 +3040,7 @@ function startTurn(g, seat){
     g.roundSeatsActed.push(seat);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌
   const p = g.players[seat];
