@@ -192,60 +192,135 @@
     70%{opacity:.85;}
     100%{opacity:0;}
   }
-  /* ===== 座位卡片:标题栏+头像+身份占位+血量+装备,纵向堆叠(骨架级重建阶段1)=====
-     取代上一版"头像居左+信息居右"结构——参考图要求的是紧凑横排同屏展示,这套结构
-     天然更窄、更适合小卡片。.avatar-box(选将阶段候选卡片仍在用,见下方.general-pick-card
-     的说明)刻意不复用于这里,新起 .seat-avatar 这个类名——两者的尺寸约束方向相反
-     (选将卡片的头像是"侧边固定宽度+信息在旁边",这里是"占满卡片整个宽度+信息在下方"),
-     硬要共用同一个类名会互相冲突,分开定义更安全,互不牵连。 */
+  /* ===== 座位卡片(第3次布局):武将立绘铺满整卡 + 文字叠加在图片上层 =====
+     **这是本项目第三次采用"文字叠在武将立绘上"的设计。前两次(头像铺满整卡 / 头像居左
+     固定大块)都因为"文字盖在可变内容图片上导致可读性差"而主动放弃(见CLAUDE.md两轮
+     记录),上一版(头像缩小成角落小图、文字全部挪到图片框外)正是为了从根上避开这个
+     问题。这次是在完全知情的前提下有意识地做回来,不是不知情地重踩旧坑。**
+
+     **这次能成立的关键,是换了一套前两次没用对的手法:保证对比度的是"文字和图片之间的
+     那一层"(backing layer),不是文字本身的描边。** 前两次都试图靠"半透明小色块 + 文字
+     描边"硬顶,这在深色立绘上勉强能看、在中间调/浅色立绘上必然失效(描边和半透明底都
+     依赖背后的明暗,背后一变就失效)。这次每个文字元素都有自己的底衬层,其中**装备条是
+     完全不透明的白底**——不透明意味着"背后是什么立绘"对它的对比度毫无影响,这是唯一
+     能保证"在任意立绘上都看得清"的手法,也正是前两次缺的那一环。
+
+     逐元素的可读性方案(每一项都必须有 backing layer,不能只靠 text-shadow):
+       标题栏  -> .seat-scrim-top 顶部深色渐变遮罩打底 + text-shadow
+       武将名  -> 落在顶部遮罩的深色区内 + text-shadow
+       血量    -> 位置在卡片中部,顶部/底部遮罩都够不到,所以它自带半透明深色胶囊底衬
+       装备条  -> **完全不透明的白底**(--seat-equip-bg) + 深色文字,沉底
+       判定区  -> 自带半透明深色底衬(同血量思路)
+     另有 .seat-scrim-bottom 底部渐变,作用**不是**给装备条打底(它自己不透明、不需要),
+     而是让"立绘 → 白色装备条"的过渡在浅色立绘上不至于是一道生硬的白边。
+
+     卡片宽高比锁 3:4 跟随立绘素材(素材实测:40张里24张是3:4、16张是2:3,3:4是多数派;
+     2:3的那16张会被 object-fit:cover 从底部裁掉约11%高度——底部本来就会被不透明装备条
+     盖住,实际损失很小,且 object-position:center top 保证头部完整不被裁)。 */
+  :root{
+    --seat-equip-bg:#f2efe6;   /* 装备条不透明白底——这次方案的核心,对比度不依赖背后立绘 */
+    --seat-equip-fg:#2a2019;   /* 装备条深色文字 */
+  }
   .seat{
     background:#1d1916;border:1px solid var(--line);
     border-radius:10px;position:relative;overflow:hidden;
-    display:flex;flex-direction:column;
+    aspect-ratio:3/4;          /* 卡片形状跟随立绘素材比例(见上方说明) */
     flex:1 1 0;min-width:90px;max-width:200px; /* 对手行弹性收缩,见 .opp-row 的可读性下限说明 */
   }
-  .seat.active{border-color:var(--jade);box-shadow:0 0 0 2px var(--jade) inset;} /* 当前行动者:绿色高亮,对应参考图 */
+  .seat.active{border-color:var(--jade);box-shadow:0 0 0 2px var(--jade) inset;} /* 当前行动者:绿色高亮 */
   .seat.dead{opacity:.45;filter:grayscale(.6);}
   /* 出牌方/目标座位的短暂高亮(中央出牌区同一节奏淡出),这两条沿用不变,不受这次
      卡片结构改动影响——outline 是独立的盒模型外层视觉层,和 border/box-shadow 不冲突。 */
   .seat.table-actor{outline:2px solid var(--cinnabar-bright);outline-offset:2px;transition:outline-color .3s;}
   .seat.table-target{outline:2px solid var(--gold);outline-offset:2px;transition:outline-color .3s;}
-  /* 标题栏:深色底,"武将名 血量数字"同一行,"?"说明入口靠右——对应参考图顶部深色条。 */
+  /* 立绘:铺满整卡作为视觉主体。object-position:center top 保证头部永远完整保留
+     (裁切只发生在底部,而底部本来就被装备条盖住)。 */
+  .seat-art{position:absolute;inset:0;overflow:hidden;background:#15120f;}
+  .seat-art .avatar{width:100%;height:100%;object-fit:cover;object-position:center top;display:block;}
+  .seat-art .avatar-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:4px;font-size:10px;color:var(--paper-dim);background:#241f1b;}
+  /* 顶部/底部渐变遮罩:纯装饰层,不拦截点击(pointer-events:none,否则会挡住底下
+     .seat 的目标选择点击和装备/判定区 chip 的 onclick)。 */
+  .seat-scrim-top{position:absolute;top:0;left:0;right:0;height:34%;pointer-events:none;
+    background:linear-gradient(180deg, rgba(0,0,0,.80) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%);}
+  .seat-scrim-bottom{position:absolute;bottom:0;left:0;right:0;height:38%;pointer-events:none;
+    background:linear-gradient(0deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,0) 100%);}
+  /* 标题栏:叠在顶部遮罩上(不再自带背景色,对比度由遮罩保证)。 */
   .seat-title{
-    background:rgba(0,0,0,.35);color:var(--paper);font-weight:700;
+    position:absolute;top:0;left:0;right:0;
+    color:var(--paper);font-weight:700;
     padding:3px 5px;display:flex;align-items:center;justify-content:space-between;
-    gap:4px;white-space:nowrap;overflow:hidden;font-size:11px;flex:none;
+    gap:4px;white-space:nowrap;overflow:hidden;font-size:11px;
+    text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 2px rgba(0,0,0,.8);
   }
   .seat-title-name{overflow:hidden;text-overflow:ellipsis;}
   .seat-title-hp{color:var(--cinnabar-bright);flex:none;}
-  /* 头像:宽高比精确锁死等于素材 3:4,占满卡片宽度,object-fit:cover 零裁切——沿用
-     "头像居左+信息居右"版本已经验证过的这条约束,只是容器形状从"固定像素宽高"改成
-     "宽度100%、高度按aspect-ratio跟随",比例本身完全不变。 */
-  .seat-avatar{width:100%;aspect-ratio:3/4;position:relative;overflow:hidden;background:#15120f;flex:none;}
-  .seat-avatar .avatar{width:100%;height:100%;object-fit:cover;display:block;}
-  .seat-avatar .avatar-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-    text-align:center;padding:4px;font-size:10px;color:var(--paper-dim);background:#241f1b;}
-  /* 身份/势力占位行:这两个字段这次游戏数据模型里都还没有(身份局/势力系统按CLAUDE.md
-     记录还没做),这里只画一个空壳占位,不造假数据——等真正的系统做出来再回填内容。 */
-  .seat-identity{font-size:9px;text-align:center;color:var(--paper-dim);padding:1px 0;min-height:11px;flex:none;}
-  /* 血量:红心图标逐个显示,和原来的 .hp 是同一概念,现在独立成单独一行(不和姓名挤同一行)。 */
-  .seat-hp{font-size:11px;text-align:center;color:var(--cinnabar-bright);letter-spacing:1px;padding:1px 0;flex:none;}
-  .seat-hp .empty{color:#4a3f37;}
-  /* 装备:紧凑图标/缩写标签横排一行,数量少则这行天然更短、没有装备则整行空着不留占位文字
-     (对应参考图"数量少的卡片这行是空的"这条描述)。沿用既有的erow/filled/empty-slot类名
-     前缀方便识别历史,但视觉上从"逐行列表"收成"一行小标签"。 */
-  .seat-equip{display:flex;flex-wrap:wrap;gap:2px;padding:2px 4px 4px;font-size:8px;color:var(--paper-dim);flex:none;}
-  .seat-equip .erow{background:rgba(176,141,79,.12);border:1px solid rgba(176,141,79,.4);
-    border-radius:4px;padding:0 3px;color:var(--gold);white-space:nowrap;}
-  /* 判定区(延时锦囊):紧凑卡片里同样收成小chip贴在装备行下方,颜色沿用既有的紫色系
-     (呼应手牌.card.trick的锦囊配色),和装备的金色系区分开。 */
-  .seat-delays{display:flex;flex-wrap:wrap;gap:2px;padding:0 4px 3px;flex:none;}
+  /* 武将名竖排:writing-mode:vertical-rl 让字符纵向堆叠,text-orientation:upright
+     保证汉字保持正常朝向(不随竖排旋转90度)。位置在标题栏之下、贴左边,落在顶部遮罩
+     的深色区内。固定字号(非动态测量)——武将名长度上限被 GENERALS 表锁定(实测最长
+     "颜良文丑"4字)。 */
+  .seat-gen-name{
+    position:absolute;top:20px;left:4px;
+    writing-mode:vertical-rl;text-orientation:upright;
+    font-size:11px;font-weight:700;color:var(--paper);letter-spacing:1px;
+    text-shadow:0 1px 3px rgba(0,0,0,.95), 0 0 2px rgba(0,0,0,.8);
+  }
+  /* 血量:纵向堆叠,贴左侧中部。**这是唯一一个顶部/底部遮罩都够不到的文字元素**,所以
+     它必须自带底衬。
+     **底衬用近乎不透明的深色(.88),不是半透明——这是实测逼出来的修正,不是保守选择。**
+     第一版这里用的是 rgba(0,0,0,.42) 半透明,程序化测出来:在最亮的两张立绘上对比度只有
+     3.87(马超)和 2.30(大乔),**双双低于 WCAG AA 的 4.5**,在暗立绘上却有 4.60 —— 也就是
+     说它的可读性直接取决于背后立绘的明暗。**这恰恰就是前两次"文字叠图片"失败的那个根因,
+     被我自己在这一个元素上重新引入了一遍**(整套方案的立论就是"底衬必须不透明、对比度
+     不能依赖背后的图",装备条做到了,血量这里却退回了半透明)。改成 .88 之后不透明度足够高,
+     对比度基本不再随立绘变化。这条记录留在这里,是因为它精确说明了"为什么这次的方案必须
+     坚持不透明底衬"——一旦某个元素破例用半透明,那个元素就会重蹈覆辙。 */
+  .seat-hp-col{
+    position:absolute;left:4px;top:50%;transform:translateY(-40%);
+    display:flex;flex-direction:column;align-items:center;gap:0;
+    font-size:11px;line-height:1.15;color:#ff6a4d;
+    background:rgba(18,12,8,.88);border-radius:999px;padding:3px 3px;
+    text-shadow:0 1px 2px rgba(0,0,0,.9);
+  }
+  .seat-hp-col .empty{color:#7d6a5c;}
+  /* 身份/势力占位:数据模型里还没有这两个字段(身份局/势力系统未实现),空壳占位,不造假
+     数据。绝对定位放在右侧中部,不占文档流(整卡现在是绝对定位层叠结构)。 */
+  .seat-identity{position:absolute;right:4px;top:50%;transform:translateY(-50%);
+    font-size:9px;text-align:center;color:var(--paper);min-height:11px;
+    text-shadow:0 1px 3px rgba(0,0,0,.95);}
+  /* 装备条:**沉底 + 完全不透明白底 + 深色文字**——这次方案的核心。不透明底衬意味着
+     对比度和背后的立绘完全无关,不管立绘是深是浅、是花是素,装备文字都一定看得清。
+     这是前两次"文字叠图片"失败时缺的那一环(那两次用的是半透明色块,依赖背后明暗)。
+     整条只在真的有装备行时才渲染(见 render.js),对手没装备时不留空白条压住立绘。 */
+  .seat-equip-bar{
+    background:var(--seat-equip-bg);color:var(--seat-equip-fg);
+    display:flex;flex-direction:column;gap:1px;
+    padding:2px 3px;font-size:8px;line-height:1.35;
+    border-top:1px solid rgba(0,0,0,.18);
+  }
+  .seat-equip-bar .erow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    color:var(--seat-equip-fg);}
+  .seat-equip-bar .erow b{color:#8a6a2f;font-weight:700;margin-right:1px;} /* 类别首字:金褐色,和装备名区分 */
+  .seat-equip-bar .erow.filled{cursor:pointer;}
+  .seat-equip-bar .erow.empty-slot{color:#9a9086;} /* 空槽:灰化,仍在白底上,依然清晰 */
+  /* 卡片底部区(判定区 + 装备条):**整块从底部往上堆叠的 flex column**。
+     判定区必须显示在装备条"上方"(不能被不透明白底压住看不见),而装备条的高度取决于
+     行数(对手1~4行不等、"我"固定4行)——如果给判定区写一个绝对定位的 bottom 偏移量,
+     就得凭空猜一个"装备条大概多高"的魔数,行数一变就错位。这里改用"底部锚定的 flex
+     column"把两者装在同一个容器里:装备条在下、判定区在上,判定区自然被装备条顶上去,
+     不需要任何魔数、也不需要 :has() 或 JS 参与,行数怎么变都不会错位。 */
+  .seat-bottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;}
+  /* 判定区(延时锦囊):叠在图片上层,自带半透明深色底衬(同血量思路,不能只靠描边)。
+     紫色系呼应手牌 .card.trick 的锦囊配色,和装备的白底金字区分开。 */
+  .seat-delays{display:flex;flex-wrap:wrap;gap:2px;justify-content:flex-end;
+    padding:0 3px 2px;}
   .seat-delays .dchip{font-size:8px;padding:0 3px;border:1px solid #7a5fa0;border-radius:4px;
-    color:#c3aee0;background:rgba(122,95,160,.12);white-space:nowrap;}
-  /* "?"说明入口:标题栏右侧的小圆点,复用既有 info-badge 视觉概念但尺寸更小,贴合紧凑标题栏。 */
+    color:#e2d6f5;background:rgba(40,25,60,.75);white-space:nowrap;
+    text-shadow:0 1px 2px rgba(0,0,0,.9);}
+  /* "?"说明入口:标题栏右侧的小圆点。 */
   .seat-title .info-badge{width:14px;height:14px;font-size:9px;flex:none;}
-  /* "我"的座位卡:更大、金色高亮(区别于普通对手卡片),对应参考图左下角描述——布局结构
-     完全一致(标题栏+头像+身份占位+血量+装备),只是尺寸和边框颜色不同。 */
+  /* "我"的座位卡:更大、朱红高亮(区别于普通对手卡片)——布局结构完全一致(立绘铺满+
+     文字叠加),只是尺寸和边框颜色不同。装备条显示全部4槽(含空槽),所以比对手的更高。 */
   .seat.me{
     border-color:var(--cinnabar);box-shadow:0 0 0 2px var(--cinnabar) inset;
     /* 220px 明确大于对手卡片的 max-width:200px 上限——之前用180px时,如果只有1个对手,
@@ -256,16 +331,18 @@
   }
   .seat.me .seat-title{font-size:13px;padding:5px 8px;}
   .seat.me .seat-title .info-badge{width:18px;height:18px;font-size:11px;}
+  .seat.me .seat-gen-name{font-size:13px;top:26px;left:6px;}
   .seat.me .seat-identity{font-size:11px;}
-  .seat.me .seat-hp{font-size:14px;}
-  .seat.me .seat-equip{font-size:10px;padding:3px 6px 6px;}
+  .seat.me .seat-hp-col{font-size:14px;left:6px;padding:4px 3px;}
+  .seat.me .seat-equip-bar{font-size:10px;padding:3px 5px;line-height:1.4;}
   .seat.me .seat-delays .dchip{font-size:10px;padding:1px 5px;}
-  .seat .tag{font-size:9px;letter-spacing:.08em;background:#332b24;color:var(--paper-dim);
-    border-radius:4px;padding:0 4px;}
+  .seat .tag{font-size:9px;letter-spacing:.08em;background:rgba(51,43,36,.85);color:var(--paper);
+    border-radius:4px;padding:0 4px;text-shadow:none;}
   .seat .tag.turn{background:var(--gold);color:#1a1410;}
   /* 三选一选将阶段:候选卡片纵向堆叠,继续用 .avatar-box/.avatar/.avatar-placeholder
-     这套独立于座位卡片的头像展示(侧边固定宽度+信息在旁边),和上面 .seat-avatar
-     (占满宽度+信息在下方)刻意不共用,两者尺寸约束方向相反,合并会互相冲突。 */
+     这套独立于座位卡片的头像展示(侧边固定宽度+信息在旁边),和上面 .seat-art
+     (铺满整卡+文字叠加)刻意不共用——选将卡片不需要文字叠图片那一整套遮罩/底衬,
+     合并只会把两边都搞复杂,分开定义更安全。 */
   .avatar-box{position:relative;flex:none;width:90px;height:120px;overflow:hidden;
     border-radius:8px;background:#15120f;}
   .avatar-box .avatar{width:100%;height:100%;object-fit:cover;display:block;}
@@ -543,12 +620,12 @@
     .my-turn-banner{font-size:1.3rem;padding:16px 26px;}
   }
 
-  /* ===== 窄宽度断点(骨架级重建后,座位卡本身靠 flex:1 1 0 + aspect-ratio 天然响应式,
-     不需要再按断点分别写死头像/卡片尺寸——.seat-avatar{width:100%;aspect-ratio:3/4}
-     本来就跟随卡片实际渲染宽度等比缩放。这两个断点这次只保留仍然有效的部分:手牌卡面/
-     中央出牌区字号/日志toast——旧版按 .opp1/.opp2/.avatar-box 写死尺寸的规则已随
-     新布局整体移除。这次改动面向横屏为主,这两个断点更多是"万一在很窄的窗口下查看"的
-     兜底,不是主要设计目标(横屏下常见宽度远宽于640/480这两个值,见CLAUDE.md的Q1表格)。 ===== */
+  /* ===== 窄宽度断点(座位卡宽度靠 flex:1 1 0 天然响应式、高度靠 aspect-ratio:3/4 自动
+     跟随宽度,都不需要按断点写死;但卡片内部叠加的文字元素是固定字号,不会跟着卡片缩放,
+     所以这两个断点要把它们逐档收紧,否则窄屏下文字会相对卡片显得过大、把立绘盖住太多)。
+     这次改动面向横屏为主,这两个断点更多是"万一在很窄的窗口下查看"的兜底,不是主要设计
+     目标(横屏下常见宽度远宽于640/480这两个值,iPhone SE横屏667px这个已验证过的最紧张
+     场景本身就在这两个断点范围之外)。 ===== */
   @media (max-width:640px){
     /* 手牌:桌面 64x92 在窄屏上占太多行;缩小卡面本身,flex-wrap(已有,见 .hand)继续兜底
        "无论多少张手牌都不会横向溢出/需要横向滚动"这条硬指标——缩小是为了减少换行数量,
@@ -563,6 +640,11 @@
     .table-card-who{font-size:11px;}
     .table-card-name{font-size:17px;}
     .table-card-face{font-size:14px;}
+    .seat-title{font-size:10px;padding:2px 4px;}
+    .seat-title .info-badge{width:12px;height:12px;font-size:8px;}
+    .seat-gen-name{font-size:10px;top:18px;}
+    .seat-hp-col{font-size:10px;}
+    .seat-equip-bar{font-size:7px;padding:2px;}
   }
   @media (max-width:480px){
     .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
@@ -573,6 +655,10 @@
     .table-card-who{font-size:10px;}
     .table-card-name{font-size:14px;}
     .table-card-face{font-size:12px;}
+    .seat-title{font-size:9px;}
+    .seat-gen-name{font-size:9px;top:16px;}
+    .seat-hp-col{font-size:9px;}
+    .seat-equip-bar{font-size:7px;}
   }
 
   .err{color:var(--cinnabar-bright);font-size:13px;margin-top:8px;}
@@ -757,16 +843,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=121"></script>
-<script src="data.js?v=121"></script>
-<script src="room-lifecycle.js?v=121"></script>
-<script src="game.js?v=121"></script>
-<script src="weapons.js?v=121"></script>
-<script src="skills.js?v=121"></script>
-<script src="render.js?v=121"></script>
-<script src="render-table.js?v=121"></script>
-<script src="render-hand.js?v=121"></script>
-<script src="render-controls.js?v=121"></script>
-<script src="render-log.js?v=121"></script>
+<script src="config.js?v=123"></script>
+<script src="data.js?v=123"></script>
+<script src="room-lifecycle.js?v=123"></script>
+<script src="game.js?v=123"></script>
+<script src="weapons.js?v=123"></script>
+<script src="skills.js?v=123"></script>
+<script src="render.js?v=123"></script>
+<script src="render-table.js?v=123"></script>
+<script src="render-hand.js?v=123"></script>
+<script src="render-controls.js?v=123"></script>
+<script src="render-log.js?v=123"></script>
 </body>
 </html>
