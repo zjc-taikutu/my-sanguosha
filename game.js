@@ -166,6 +166,44 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 马谡【散谣】选择目标阶段:from 应是数字且存活, candidates 应是非空数组
+  if(g.pending && g.pending.type==='sanyaoChooseTarget'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       !d.candidates.every(s => Number.isInteger(s) && g.players[s] && g.players[s].alive)){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 马谡【散谣】弃牌阶段:from/target 应是数字且存活
+  if(g.pending && g.pending.type==='sanyao'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.target!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.target] || !g.players[d.target].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 马谡【制蛮】询问阶段:from/to 应是数字且存活, options 应是非空数组
+  if(g.pending && g.pending.type==='zhimengAsk'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.options) || d.options.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 马谡【制蛮】选择牌阶段:from/to 应是数字且存活, options 应是非空数组
+  if(g.pending && g.pending.type==='zhimengPick'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.options) || d.options.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 方天画戟排队(g.fangtianQueue):非活跃时应为 null(和 g.pending/g.aoe 同款标量哨兵)。
   // 活跃时 from/idx 应是数字、targets 应是非空数组——任一不对就整体判无效清空,防止卡死。
   if(g.fangtianQueue===undefined) g.fangtianQueue=null;

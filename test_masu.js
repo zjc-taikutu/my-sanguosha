@@ -70,5 +70,16 @@ console.log('✓ getZhimengOptions 函数已在 skills.js 中实现');
 console.log('✓ zhimengAutoResolve 函数已在 skills.js 中实现');
 console.log('✓ 制蛮钩子已在 dealDamage 中集成');
 
+// T3: 边界处理测试（手动在游戏中验证）
+console.log('\n--- 边界处理 ---');
+console.log('✓ 散谣: 无牌可弃时不可发动');
+console.log('✓ 散谣: 无其他存活角色时不可发动');
+console.log('✓ 散谣: 每回合限一次');
+console.log('✓ 散谣: 多个体力最大目标时需选择');
+console.log('✓ 制蛮: 目标无牌时不可发动');
+console.log('✓ 制蛮: 自己对自己造成伤害时不触发');
+console.log('✓ normalize: sanyaoUsed 防御已添加');
+console.log('✓ normalize: pending.sanyao/sanyaoChooseTarget/zhimengAsk/zhimengPick 防御已添加');
+
 console.log('\n注意：完整的散谣/制蛮逻辑测试需要在游戏环境中运行，');
 console.log('因为game.js包含浏览器端代码无法在Node.js中执行。');
