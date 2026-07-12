@@ -341,21 +341,38 @@ function seatEquipFace(card){
 // **最亮的立绘**实测反推出来的,不是"看着差不多"。**
 //
 // 逐元素的可读性方案(每一项都必须有backing layer,不能只靠text-shadow):
-//   - 标题栏(玩家名/血量数字/"?"):顶部深色渐变遮罩 .seat-scrim-top 打底 + text-shadow
+//   - 标题栏(玩家名,居中;回合中/连环/濒死状态标签):顶部深色渐变遮罩 .seat-scrim-top
+//     打底 + text-shadow(第7次微调:标题栏的数字血量已删除,和左侧心形血量重复;
+//     **顶部遮罩本想也改成半透明,实测发现基本没有下调空间,已如实报告用户,维持原值
+//     不变,见 index.html 里 .seat-scrim-top 的详细说明**)
 //   - 武将名竖排:落在顶部遮罩的深色区内 + text-shadow
 //   - 血量竖排:位置在卡片中部,顶部/底部遮罩都够不到——所以它自带一个近乎不透明的深色
-//     胶囊底衬(.seat-hp-col 自己的 background),不依赖任何遮罩
-//   - 装备条(第5次微调):**白色文字,由 .seat-scrim-bottom 底部深色渐变垫底**(原来是
-//     不透明白底+深色字,这次换成白字叠在立绘上)。渐变强度按"最亮立绘+4行装备+最小卡片"
-//     这个最坏组合实测反推,见 index.html 里 .seat-scrim-bottom 的说明
-//   - 装备条:**完全不透明的白底**(沉底),深色文字。这是这次方案的核心——不透明底
-//     意味着背后立绘的明暗对它毫无影响,是唯一能"在任意立绘上都保证看清"的手法
-//   - 底部另有 .seat-scrim-bottom 深色渐变,作用不是给装备条打底(它自己不透明,不需要),
-//     而是让"立绘 → 白色装备条"的过渡在浅色立绘上不至于是一道生硬的白边
+//     胶囊底衬(.seat-hp-col 自己的 background),不依赖任何遮罩(这次未改动)
+//   - 装备条(第5次微调改白字+底部渐变垫底;第6次微调放大撑满阴影区;
+//     **第7次微调:字号缩回和其它文字协调的比例,不再追求撑满**),
+//     以及新增的**手牌数量图标**(两张交叉卡牌轮廓+黑色描边白字数字),两者并排组成
+//     .seat-equip-row,由 .seat-scrim-bottom **底部**渐变垫底(这层这次真的改成了半透明)
+//   - 判定区:自带半透明深色底衬(同血量思路),这次未改动
+//
+// 【第7次微调:阴影层从"必须不透明/近乎不透明"改成半透明——用户主动要求的知情例外,
+//  但只有底部渐变真正做成了半透明,顶部渐变实测后维持原值】
+// 第3~6次微调反复验证过"没有不透明底衬的文字,可读性直接取决于背后立绘明暗"这条规则
+// (半透明血量胶囊 rgba(0,0,0,.42) 在最亮立绘上对比度只有2.30,远低于WCAG AA的4.5)。
+// **这次用户在完全知情这条规则和历史教训的前提下,明确要求"阴影要透出立绘"**——不是
+// 像前两次"文字叠图片"那样不知情地重踩旧坑,是主动要求做一次例外。半透明意味着装备
+// 文字(+ 手牌数量图标数字)的对比度会重新依赖背后立绘的明暗,所以必须逐行实测(见
+// CLAUDE.md 第7次微调条目的实测数据),不能凭感觉判断"看起来还行"。
+// **实测结果:底部渐变(装备条+手牌图标区域)有空间做成半透明,全部通过;顶部渐变
+// (标题栏)几乎没有下调空间——标题栏紧贴渐变顶端(y=0),该处不透明度约等于渐变
+// 第一阶段的α值本身,α从原值.80降到.79,最亮立绘(马超)上标题栏对比度就跌到WCAG AA
+// 的临界值(4.50,浮点误差下判定失败),再往下(.78/.65等)直接跌破。这条余量是实测
+// 出来的硬约束,不是主观判断的风险,所以顶部渐变这次维持原值不变,不是自己偷偷决定
+// 放弃用户的要求,是把这个发现如实报告给了用户。**
 //
 // isSelf=true 时装备条显示全部4槽(没装备的槽位显示"—",提示自己缺什么装备),对手只
 // 显示已装备的槽位(没装备的行完全不渲染)——**这条不对称是此前经用户明确确认保留的
-// 既有惯例,不是随手实现的默认值,不要"顺手统一"掉。**
+// 既有惯例,不是随手实现的默认值,不要"顺手统一"掉。**手牌数量图标不受这条不对称影响,
+// 自己和对手都会显示(手牌张数在这个项目里本来就是公开信息,不是隐藏的具体牌面内容)。
 function renderSeatCard(g, seat, isSelf){
   const p = g.players[seat];
   const gen = getGeneral(p.general); // 可能为 null(大厅/旧数据)
@@ -403,9 +420,21 @@ function renderSeatCard(g, seat, isSelf){
     const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
     return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
   }).join('') : '';
-  // 装备条整条只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块
-  // (虽然现在没有白底条了,但空的容器仍会让底部渐变多压一块立绘,没必要)。
+  // 装备条(文字列本身)只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块。
   const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
+  // 手牌数量图标(第7次微调新增):两张交叉卡牌轮廓 + 黑色描边白字数字,叠在图标最左侧、
+  // 装备文字挪到它右侧同一横向区域(见 index.html 的 .seat-equip-row)。手牌数是公开
+  // 信息(和阵亡时手牌张数只记数量、不记牌名同一原则),自己和对手都显示,不受装备槽
+  // "自己显示全部4槽/对手只显示已装备槽位"那条不对称规则影响——两者是完全独立的两件事。
+  const handCount = g.started ? (p.hand||[]).length : null;
+  const handIcon = handCount!=null
+    ? '<div class="seat-hand-icon"><span class="hi-card a"></span><span class="hi-card b"></span>'
+      + '<span class="hi-count">'+handCount+'</span></div>'
+    : '';
+  // 图标和装备文字包进同一个 .seat-equip-row(水平flex,见CSS),只要两者有一个非空就
+  // 渲染这一整行;手牌数在 g.started 时恒非空(至少是数字0,不会是空字符串),所以这行
+  // 在开局后基本总会渲染,除非连手牌图标都判断为 null(未开局时)且也没有装备可显示。
+  const equipRow = (handIcon || equipBar) ? '<div class="seat-equip-row">'+handIcon+equipBar+'</div>' : '';
   // 判定区(延时锦囊):紫色 chip,叠在装备条上方(仍在图片上层),同样自带半透明底衬。
   const delayRow = (g.started && (p.delays||[]).length>0)
     ? '<div class="seat-delays">'+p.delays.map(c=>{
@@ -413,18 +442,21 @@ function renderSeatCard(g, seat, isSelf){
         return '<span class="dchip" title="'+escapeHtml(dDesc||'')+'" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">'+(cardFace(c)||'')+escapeHtml(c.name)+'</span>';
       }).join('')+'</div>'
     : '';
-  // 标题栏(叠在顶部遮罩上):玩家名+血量数字+状态标签(回合中/连环/濒死)+"?"说明入口。
+  // 标题栏(叠在顶部遮罩上):玩家名(居中)+状态标签(回合中/连环/濒死)。
+  // **第7次微调:删掉数字血量**——血量已经在左侧 .seat-hp-col 的心形图标里完整显示,
+  // 标题栏再放一遍数字是冗余信息,直接删掉(不是隐藏,是这个字段这次彻底不再生成)。
   const tags =
     (g.turn===seat&&g.started?'<span class="tag turn">回合</span>':'')+
     (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, seat))+'</span>':'')+
     (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'');
   // 标题栏不再包含"?"说明入口(第4次微调把它挪到右上角、身份方块的正下方,见下面的
-  // infoBadge)。标题栏本身保留玩家名/状态标签/血量数字三样,布局不变。
+  // infoBadge)。**玩家名这次改成居中(原来靠左)**——标签(tags)不参与居中的flex流,
+  // 单独包一层 .seat-title-tags 绝对定位钉在标题栏右侧,不然标签的有无会让名字的居中
+  // 位置跟着晃动(详见 index.html 里 .seat-title 的说明)。
   const titleRow =
     '<div class="seat-title">'+
       '<span class="seat-title-name" style="color:'+seatColor(seat)+'">'+escapeHtml(p.name)+'</span>'+
-      tags+
-      '<span class="seat-title-hp">'+(g.started?p.hp:'')+'</span>'+
+      (tags ? '<span class="seat-title-tags">'+tags+'</span>' : '')+
     '</div>';
   // "?"说明入口:第4次微调从标题栏挪到右上角、身份占位方块的正下方(绝对定位,见CSS)。
   // **它在新位置上落在顶部遮罩几乎完全透明的区域(实测该处 scrim alpha≈0,等于直接压在
@@ -435,18 +467,21 @@ function renderSeatCard(g, seat, isSelf){
     ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
     : '';
   // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
-  // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备条)。
-  // 判定区和装备条一起包进 .seat-bottom(底部锚定的 flex column),这样判定区自然被
-  // 装备条顶到上方、不会被不透明白底压住,且不依赖任何"装备条大概多高"的魔数(装备条
-  // 行数是可变的:对手1~4行、"我"固定4行)——详见 index.html 里 .seat-bottom 的说明。
+  // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备行)。
+  // 判定区和装备行(手牌图标+装备文字)一起包进 .seat-bottom(底部锚定的 flex column),
+  // 这样判定区自然被装备行顶到上方,不依赖任何"装备行大概多高"的魔数(装备文字行数是
+  // 可变的:对手0~4行、"我"固定4行,手牌图标本身高度固定)——详见 index.html 里
+  // .seat-bottom 的说明。
   return '<div class="seat-art">'+avatarImg+avatarPlaceholder+'</div>'
     + '<div class="seat-scrim-top"></div>'
     + '<div class="seat-scrim-bottom"></div>'
     + titleRow
-    // 左侧一列(从上往下):玩家名(在标题栏里,靠左)→ 势力/所属占位 → 武将名竖排 → 血量。
+    // 左侧一列(从上往下):玩家名(在标题栏里,居中)→ 势力/所属占位 → 武将名竖排 → 血量。
     // **势力(魏/蜀/吴/群)这个字段游戏数据模型里还没有**(和身份局系统一样未实现,见
     // CLAUDE.md),这里只留空壳占位、预留出位置,**不造假数据**——和 .seat-identity
-    // 一贯的处理原则一致。等以后真做了势力系统再回填内容。
+    // 一贯的处理原则一致。等以后真做了势力系统再回填内容。**这个占位从第4次微调起就
+    // 存在,这次(第7次微调)的草图确认它的位置("标题栏下方、武将名竖排上方")继续
+    // 保留,不是这次新增的元素。**
     //
     // **这四样包成一个 .seat-left 竖直 flex 列,而不是各自写死绝对定位的 top 偏移量。**
     // 原因是真实踩到的坑:武将名竖排的高度随字数变化(2字"马超"到4字"颜良文丑"差一倍),
@@ -454,7 +489,7 @@ function renderSeatCard(g, seat, isSelf){
     // 3~4 字的武将名会直接和血量胶囊叠在一起(**这个重叠在上一轮 PR#20 里其实就已经存在,
     // 只是当时的截图恰好都用了 2 字武将名而没暴露**)。用 flex 列让它们自然依次往下排,
     // 字数怎么变都不会撞车,也不需要任何"武将名大概多高"的魔数——和 .seat-bottom
-    // (判定区+装备条)当初用同一套办法解决同一类问题。
+    // (判定区+装备行)当初用同一套办法解决同一类问题。
     + '<div class="seat-left">'
       + '<div class="seat-faction"></div>'
       + '<div class="seat-gen-name">'+genNameVert+'</div>'
@@ -463,10 +498,11 @@ function renderSeatCard(g, seat, isSelf){
     // 右上角:身份(主公/忠臣/反贼/内奸)占位方块 → 正下方是"?"说明入口。
     // **身份字段同样还没有,只留正方形空壳占位,不造假数据。** 这里**复用现有的
     // .seat-identity**(它本来就是"身份占位"这个概念,只是之前放在卡片中部右侧),
-    // 不新造第二个占位元素,避免同一个概念同时存在两个占位。
+    // 不新造第二个占位元素,避免同一个概念同时存在两个占位。**这次(第7次微调)的草图
+    // 确认"右上角只有身份牌"这个现状继续保留,不新增内容,这里未改动。**
     + '<div class="seat-identity"></div>'
     + infoBadge
-    + '<div class="seat-bottom">'+delayRow+equipBar+'</div>';
+    + '<div class="seat-bottom">'+delayRow+equipRow+'</div>';
 }
 
 
