@@ -304,24 +304,35 @@ function setBanner(html, style){
   document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
 }
 
-// ===== renderSeatCard: 座位卡片的视觉结构(骨架级重建 landscape-ui 第1阶段) =====
+// 座位卡装备行的单字缩写——刻意和 render-controls.js 的 EQUIP_SLOT_LABEL(完整词:
+// 武器/防具/防御马/进攻马,用于顺手牵羊/过河拆桥选牌列表等场景)分开维护,不能简单取
+// EQUIP_SLOT_LABEL 的首字——"防具"和"防御马"都以"防"开头,直接截取会让两个槽位的
+// 缩写撞在一起,4个字符必须两两不同。
+const EQUIP_SLOT_ABBR = { weapon:'武', armor:'防', plus1:'御', minus1:'攻' };
+// ===== renderSeatCard: 座位卡片的视觉结构(骨架级重建 landscape-ui 第1阶段,
+// 座位卡内部布局第2次调整) =====
 // 从原来 render() 内联的匿名代码块提炼成具名函数——这次是整段视觉结构的重写,不是纯粹
 // 的"剪切搬移零行为变化"式重构,提炼成本本来就为零(反正每一行都要重新验证),没有理由
 // 还留成一段匿名回调,详见CLAUDE.md这次改动记录。只负责"这张卡片长什么样",不管点击/
 // 目标选择这类交互逻辑(那批~15种技能各自的客户端选牌状态机变量仍留在 render() 里,
 // 和这次视觉结构无关,原则上和 render-hand.js 拆分时的取舍一致)。
 // isSelf=true 时是"我"的座位卡(更大、金色高亮,由 CSS 的 .seat.me 处理,这里只需要
-// 决定要不要显示完整4槽装备——对手卡片只显示已装备的槽位,自己的卡片显示全部4槽含空槽,
-// 沿用装备区一贯的既有原则)。
+// 决定要不要显示完整4槽装备——**这条不对称是经用户明确确认保留的既有惯例,不是这次
+// 顺手决定的默认值**:对手卡片只显示已装备的槽位(没装备的行完全不渲染),自己的卡片
+// 显示全部4槽(没装备的槽位显示"—",提示自己缺什么装备)——两者不统一,这是有意保留)。
 // 身份/势力这两格这次游戏数据模型里都还没有(身份局/势力系统未实现,见CLAUDE.md),
 // 这里只画一个空壳 <div class="seat-identity"></div> 占位,不造假数据。
+//
+// 【第2次内部布局调整,取代原来"标题栏+头像铺满+身份占位+血量横排+装备横排一行"结构】
+// 头像从"占满卡片宽度的3:4大图"缩小成"角落小图"——**这是吸取本项目自己走过的教训后
+// 刻意做出的选择,不是巧合**:更早的"头像铺满整卡"方案和随后的"头像居左固定小块"方案
+// 都曾经因为"文字盖在图片上可读性差"这个同一类问题被放弃(见CLAUDE.md两轮历史记录),
+// 这次缩小成小图、彻底不在头像上叠加任何文字,从源头避开这整类问题,不是重新踩同一个坑。
+// 新结构:标题栏(不变)→ 顶部行(左:武将名竖排 / 右:头像小图)→ 身份占位(不变,位置
+// 顺延到顶部行之后)→ 中部行(左:血量纵向堆叠 / 右:装备逐行列表)→ 判定区(不变)。
 function renderSeatCard(g, seat, isSelf){
   const p = g.players[seat];
   const gen = getGeneral(p.general); // 可能为 null(大厅/旧数据)
-  // 大厅(未开局)武将未定,不显示具体血条格数,避免"占位4格→开局3格"的误导跳变
-  const hearts = g.started
-    ? ('❤'.repeat(Math.max(0,p.hp)) + '<span class="empty">'+'♡'.repeat(Math.max(0,p.maxHp-p.hp))+'</span>')
-    : '<span class="empty">—</span>';
   // 未正式开局时(g.started仍为false,含三选一选将阶段pickingGeneral):不能显示具体武将
   // 名字——gen 在这个玩家选完之后就已经非空了(respondPickGeneral 立即赋值,不等其他人
   // 选完),所以不能直接判断"gen是否非空"决定显示什么,要按"选没选"这个状态本身区分文案,
@@ -335,18 +346,51 @@ function renderSeatCard(g, seat, isSelf){
     ? '<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
     : '';
   const avatarPlaceholder = '<div class="avatar-placeholder"'+(avatarReady?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
-  // 装备:紧凑图标/缩写标签一行,对手只显示已装备的槽位、自己显示全部4槽(含空槽占位),
-  // 沿用既有原则,只是视觉上从"逐行列表"收成"一行小标签"。
+  // 武将名竖排文字:writing-mode:vertical-rl 让字符纵向排列,text-orientation:upright
+  // 保证汉字保持正常朝向(不随竖排旋转90度)。字号是固定值(见CSS,按断点分档),不是
+  // fitFontSize那套按内容动态测量字号的机制——武将名的长度上限被GENERALS表本身锁定
+  // (已核实最长是"颜良文丑"4字,不是随手估的),固定字号配合真实测量验证足够,不需要
+  // 引入手牌标题栏那套面向"不可预测长度"的动态测量机制。
+  const genNameVert = (g.started && gen) ? escapeHtml(gen.name) : '';
+  // 顶部行:左武将名竖排,右头像小图
+  const topRow =
+    '<div class="seat-top-row">'+
+      '<div class="seat-gen-name">'+genNameVert+'</div>'+
+      '<div class="seat-avatar-mini">'+avatarImg+avatarPlaceholder+'</div>'+
+    '</div>';
+  // 血量:纵向堆叠——每颗心一个独立的 div(不能再用 repeat 拼一整串字符串,那样只是
+  // 一行文字里连续的字符,不会各自换行;必须逐个包成块级元素,配合 flex-direction:column
+  // 才能真正纵向堆叠)。大厅(未开局)武将未定,不显示具体血条格数,避免"占位4格→开局
+  // 3格"的误导跳变。
+  let heartsHtml;
+  if(g.started){
+    const filled = Math.max(0,p.hp), empty = Math.max(0,p.maxHp-p.hp);
+    heartsHtml = '<div class="seat-hp-col">'
+      + '❤'.repeat(filled).split('').map(c=>'<div>'+c+'</div>').join('')
+      + '♡'.repeat(empty).split('').map(c=>'<div class="empty">'+c+'</div>').join('')
+      + '</div>';
+  } else {
+    heartsHtml = '<div class="seat-hp-col"><div class="empty">—</div></div>';
+  }
+  // 装备:对手只显示已装备的槽位(没装备的行完全不渲染),自己显示全部4槽(没装备的槽位
+  // 显示"—")——这条不对称是经用户明确确认保留的既有惯例,见函数顶部注释。每行格式是
+  // "类别首字+完整装备名",如"武 大宛"/"防 八卦阵"/"攻 赤兔"/"御 的卢"。
+  // **不能直接取 EQUIP_SLOT_LABEL[s].charAt(0)**——那是"武器/防具/防御马/进攻马"这4个
+  // 完整词的首字,防具"防具"和防御马"防御马"两个词都以"防"开头,直接取首字会让armor和
+  // plus1两个不同槽位显示成同一个前缀字"防",视觉上无法区分(这是实现时被回归测试真实
+  // 抓出来的bug,不是理论假设)。改用专门维护的单字缩写表,4个字符两两不同。
   const eq = p.equips || emptyEquips();
   const equipSlotsToShow = isSelf ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
-  const equipList = g.started
-    ? '<div class="seat-equip">'+equipSlotsToShow.map(s=>{
+  const equipCol = g.started
+    ? '<div class="seat-equip-col">'+equipSlotsToShow.map(s=>{
         const c = eq[s];
-        if(!c) return isSelf ? '<span class="erow empty-slot">—</span>' : '';
+        const prefix = EQUIP_SLOT_ABBR[s];
+        if(!c) return isSelf ? '<div class="erow empty-slot">'+prefix+' —</div>' : '';
         const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-        return '<span class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')">'+(cardFace(c)||'')+escapeHtml(c.name)+'</span>';
+        return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')">'+prefix+' '+escapeHtml(c.name)+'</div>';
       }).join('')+'</div>'
-    : '';
+    : '<div class="seat-equip-col"></div>';
+  const midRow = '<div class="seat-mid-row">'+heartsHtml+equipCol+'</div>';
   // 判定区(延时锦囊):紧凑 chip,颜色沿用既有紫色系(呼应手牌.card.trick的锦囊配色)。
   const delayRow = (g.started && (p.delays||[]).length>0)
     ? '<div class="seat-delays">'+p.delays.map(c=>{
@@ -354,10 +398,8 @@ function renderSeatCard(g, seat, isSelf){
         return '<span class="dchip" title="'+escapeHtml(dDesc||'')+'" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">'+(cardFace(c)||'')+escapeHtml(c.name)+'</span>';
       }).join('')+'</div>'
     : '';
-  // 标题栏:武将名+血量数字,附加状态标签(回合中/连环/濒死——原来的"你"这个标签已经不需要,
-  // "我"的座位卡本身就用更大尺寸+金色边框视觉区分,不需要再额外文字提示)。"?"说明入口
-  // 只在已经选定武将时出现,点击查看完整技能说明(原来单独展示的"武将名·技能名"文字行
-  // 这次收进"?"的说明弹窗里,不再占标题栏的位置——这是紧凑卡片设计下的一处信息精简)。
+  // 标题栏(不变):玩家名+血量数字,附加状态标签(回合中/连环/濒死)。"?"说明入口点击
+  // 查看完整技能说明。
   const tags =
     (g.turn===seat&&g.started?'<span class="tag turn">回合</span>':'')+
     (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, seat))+'</span>':'')+
@@ -370,10 +412,9 @@ function renderSeatCard(g, seat, isSelf){
       (g.started&&gen?'<span class="info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>':'')+
     '</div>';
   return titleRow
-    + '<div class="seat-avatar">'+avatarImg+avatarPlaceholder+'</div>'
+    + topRow
     + '<div class="seat-identity"></div>' // 身份/势力占位:数据模型里还没有这两个字段,先留空壳
-    + '<div class="seat-hp">'+hearts+'</div>'
-    + equipList
+    + midRow
     + delayRow;
 }
 
