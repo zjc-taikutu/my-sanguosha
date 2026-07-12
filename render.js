@@ -310,6 +310,23 @@ function setBanner(html, style){
 // 缩写撞在一起,4个字符必须两两不同。
 const EQUIP_SLOT_ABBR = { weapon:'武', armor:'防', plus1:'御', minus1:'攻' };
 
+// 座位卡装备行的花色+点数。**不能直接用 data.js 的 cardFace(card)**——它把颜色写死成
+// inline style(红 #b33 / 黑 #3a2f28),那套配色是给**浅色背景**设计的(当初装备条是不透明
+// 白底)。第5次微调把白底条换成"白字+深色渐变垫底"之后,背景变成近黑,实测这两个颜色在
+// 近黑底上的对比度只有 3.16 和 1.40,双双远低于 WCAG AA 的 4.5(黑色花色几乎完全看不见);
+// 而 inline style 优先级最高,也没法用 CSS 类覆盖掉。
+// 所以这里按 render-log.js 里 SUIT_COLOR 的**同一个思路**(红桃/方块着红、其余走正文色)
+// 重新取色,只是换成适配深色底的两个值,**不新造花色映射表**:
+//   - 红色花色 -> #ff6a4d(和本文件 .seat-hp-col 血量红心用的是同一个色值,深色底上的
+//     红色在这个项目里就用这一个,不再各处自己挑;实测近黑底上对比度 6.44)
+//   - 黑色花色 -> var(--paper)(正文白,实测 14.04)
+// 复用 data.js 已有的 isRed(card) 和 rankText(rank),不重复实现"哪些花色算红"这件事。
+function seatEquipFace(card){
+  if(!card || !card.suit) return '';
+  const color = isRed(card) ? '#ff6a4d' : 'var(--paper)';
+  return '<span class="efd" style="color:'+color+'">'+card.suit+rankText(card.rank)+'</span>';
+}
+
 // ===== renderSeatCard: 座位卡片的视觉结构 =====
 // 只负责"这张卡片长什么样",不管点击/目标选择这类交互逻辑(那批~15种技能各自的客户端
 // 选牌状态机变量仍留在 render() 里,和这次视觉结构无关)。
@@ -318,16 +335,19 @@ const EQUIP_SLOT_ABBR = { weapon:'武', armor:'防', plus1:'御', minus1:'攻' }
 // **这是本项目第三次采用"文字叠在武将立绘上"的设计,前两次(头像铺满整卡 / 头像居左
 // 固定大块)都因为"文字盖在可变内容图片上导致可读性差"而主动放弃,详见CLAUDE.md。
 // 这次是在完全知情的前提下有意识地做回来,不是不知情地重踩旧坑——能成立的关键在于
-// 换了一套前两次没用对的手法解决可读性:**保证对比度的是"文字和图片之间的那一层",
-// 不是文字本身的描边**。前两次都试图靠半透明小色块+文字描边硬顶,在中间调的立绘上
-// 必然失效;这次每个文字元素都有自己的底衬层,其中装备条是完全不透明的白底
-// (--seat-equip-bg),对比度和背后是什么立绘完全无关,不可能失效。**
+// 换了一套前两次没用对的手法解决可读性:**保证对比度的是"文字和图片之间的那一层"
+// (backing layer),不是文字本身的描边**。前两次都试图靠半透明小色块+文字描边硬顶,
+// 在中间调/浅色的立绘上必然失效;这次每个文字元素都有自己的底衬层,且底衬的强度是按
+// **最亮的立绘**实测反推出来的,不是"看着差不多"。**
 //
 // 逐元素的可读性方案(每一项都必须有backing layer,不能只靠text-shadow):
 //   - 标题栏(玩家名/血量数字/"?"):顶部深色渐变遮罩 .seat-scrim-top 打底 + text-shadow
 //   - 武将名竖排:落在顶部遮罩的深色区内 + text-shadow
-//   - 血量竖排:位置在卡片中部,顶部/底部遮罩都够不到——所以它自带一个半透明深色
+//   - 血量竖排:位置在卡片中部,顶部/底部遮罩都够不到——所以它自带一个近乎不透明的深色
 //     胶囊底衬(.seat-hp-col 自己的 background),不依赖任何遮罩
+//   - 装备条(第5次微调):**白色文字,由 .seat-scrim-bottom 底部深色渐变垫底**(原来是
+//     不透明白底+深色字,这次换成白字叠在立绘上)。渐变强度按"最亮立绘+4行装备+最小卡片"
+//     这个最坏组合实测反推,见 index.html 里 .seat-scrim-bottom 的说明
 //   - 装备条:**完全不透明的白底**(沉底),深色文字。这是这次方案的核心——不透明底
 //     意味着背后立绘的明暗对它毫无影响,是唯一能"在任意立绘上都保证看清"的手法
 //   - 底部另有 .seat-scrim-bottom 深色渐变,作用不是给装备条打底(它自己不透明,不需要),
@@ -369,9 +389,11 @@ function renderSeatCard(g, seat, isSelf){
   } else {
     heartsHtml = '';
   }
-  // 装备条(沉底,不透明白底):对手只显示已装备的槽位(没装备的行完全不渲染),自己显示
-  // 全部4槽(没装备的显示"—")。每行"类别首字+完整装备名",前缀取自 EQUIP_SLOT_ABBR
+  // 装备条(沉底):对手只显示已装备的槽位(没装备的行完全不渲染),自己显示全部4槽
+  // (没装备的显示"—")。每行"类别首字 + 花色点数 + 装备名",前缀取自 EQUIP_SLOT_ABBR
   // (不能直接截 EQUIP_SLOT_LABEL 首字,"防具"/"防御马"会撞在同一个"防"字上)。
+  // 花色点数走 seatEquipFace(见文件上方):红花色着红、黑花色走正文白,两个色值都是按
+  // "深色渐变垫底"这个新背景实测选的,不是沿用 cardFace 那套给浅色底设计的配色。
   const eq = p.equips || emptyEquips();
   const equipSlotsToShow = isSelf ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
   const equipRows = g.started ? equipSlotsToShow.map(s=>{
@@ -379,10 +401,10 @@ function renderSeatCard(g, seat, isSelf){
     const prefix = EQUIP_SLOT_ABBR[s];
     if(!c) return isSelf ? '<div class="erow empty-slot"><b>'+prefix+'</b> —</div>' : '';
     const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-    return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+escapeHtml(c.name)+'</div>';
+    return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
   }).join('') : '';
-  // 装备条整条只在真的有内容时才渲染——对手一件装备都没有时,不留一条空白的白底横条
-  // 压在立绘上(那会白白遮住立绘且不传达任何信息)。
+  // 装备条整条只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块
+  // (虽然现在没有白底条了,但空的容器仍会让底部渐变多压一块立绘,没必要)。
   const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
   // 判定区(延时锦囊):紫色 chip,叠在装备条上方(仍在图片上层),同样自带半透明底衬。
   const delayRow = (g.started && (p.delays||[]).length>0)

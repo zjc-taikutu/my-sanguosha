@@ -208,19 +208,22 @@
      逐元素的可读性方案(每一项都必须有 backing layer,不能只靠 text-shadow):
        标题栏  -> .seat-scrim-top 顶部深色渐变遮罩打底 + text-shadow
        武将名  -> 落在顶部遮罩的深色区内 + text-shadow
-       血量    -> 位置在卡片中部,顶部/底部遮罩都够不到,所以它自带半透明深色胶囊底衬
-       装备条  -> **完全不透明的白底**(--seat-equip-bg) + 深色文字,沉底
+       血量    -> 位置在卡片中部,顶部/底部遮罩都够不到,所以它自带近乎不透明的深色胶囊底衬
+       装备条  -> **白色文字 + .seat-scrim-bottom 底部深色渐变垫底**(第5次微调:原来是
+                  不透明白底条,现在改成白字直接叠在立绘下半部,由这层渐变承担对比度保证)
        判定区  -> 自带半透明深色底衬(同血量思路)
-     另有 .seat-scrim-bottom 底部渐变,作用**不是**给装备条打底(它自己不透明、不需要),
-     而是让"立绘 → 白色装备条"的过渡在浅色立绘上不至于是一道生硬的白边。
+
+     **第5次微调把装备条从"不透明白底+深色字"换成"白字+底部深色渐变垫底"。这一步是有
+     风险的——原来的白底是"完全不透明",对比度和背后立绘数学上无关(实测最亮/最暗立绘
+     10.58 vs 10.58,差值 0.00);换成渐变之后,渐变是半透明的,理论上对比度会重新依赖
+     背后立绘的明暗,正是本项目前两次栽跟头的那个模式。所以这层渐变的强度不是拍脑袋定的,
+     是按"最亮的立绘 + 最多的装备行数(4行) + 最小的卡片"这个最坏组合反推、并程序化实测
+     出来的**(实测数据见 CLAUDE.md 本次条目)。**要点:渐变必须在整个装备文字区域内都
+     足够暗,不能只压住最下面一两行、让第3~4行跑到渐变已经变淡的亮区去。**
 
      卡片宽高比锁 3:4 跟随立绘素材(素材实测:40张里24张是3:4、16张是2:3,3:4是多数派;
-     2:3的那16张会被 object-fit:cover 从底部裁掉约11%高度——底部本来就会被不透明装备条
-     盖住,实际损失很小,且 object-position:center top 保证头部完整不被裁)。 */
-  :root{
-    --seat-equip-bg:#f2efe6;   /* 装备条不透明白底——这次方案的核心,对比度不依赖背后立绘 */
-    --seat-equip-fg:#2a2019;   /* 装备条深色文字 */
-  }
+     2:3的那16张会被 object-fit:cover 从底部裁掉约11%高度——底部本来就落在装备文字区
+     的深色渐变里,实际损失很小,且 object-position:center top 保证头部完整不被裁)。 */
   .seat{
     background:#1d1916;border:1px solid var(--line);
     border-radius:10px;position:relative;overflow:hidden;
@@ -244,8 +247,26 @@
      .seat 的目标选择点击和装备/判定区 chip 的 onclick)。 */
   .seat-scrim-top{position:absolute;top:0;left:0;right:0;height:34%;pointer-events:none;
     background:linear-gradient(180deg, rgba(0,0,0,.80) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%);}
-  .seat-scrim-bottom{position:absolute;bottom:0;left:0;right:0;height:38%;pointer-events:none;
-    background:linear-gradient(0deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,0) 100%);}
+  /* **底部渐变(第5次微调后,这层的职责变了:从"过渡装饰"变成"白色装备文字的对比度保证")。**
+     原来装备条是不透明白底,这层渐变只是让立绘到白条的过渡不生硬(.62 → 透明就够了);
+     现在白底没了、装备文字直接叠在立绘上,**这层渐变是唯一保证白字在任意立绘上都看得清的
+     东西**,强度必须按最坏组合(最亮立绘 + 4行装备 + 最小卡片)反推,而不是"看着差不多"。
+     几何(**以下是实测值,不是估算——一开始按估算写的"4行装备约占卡底37%"是错的**):
+     4行装备在最坏情况下,条顶实际到达卡片底部往上 **43.7%** 的位置(SE 横屏对手卡
+     96.5×128.66 实测)。渐变覆盖卡高 60%,α 从底部的 .94 逐段递减,到 62%(≈卡高37%)仍有
+     .82,再往上进入 .82→.45 的过渡带——也就是说**最上面那一行(第4行)实际落在渐变的过渡带
+     里,不在最强区**。但实测该行对比度在最亮立绘上仍有 7.11(桌面)/ 11.5+(SE),远高于 AA 的
+     4.5,**所以刻意不再把渐变加深去"罩住"它**:那样只会把立绘下半部压得更黑、损害观感,
+     而可读性本来就已经达标——**不为了满足一个自己拍的几何指标去牺牲画面**。
+     **真正的硬指标是"实测对比度",不是"条顶落在第几个百分比"**;要改这层渐变,重新跑
+     verify_seatcard_equipscrim.js 的对比度实测即可,别照着这里的百分比数字反推。 */
+  .seat-scrim-bottom{position:absolute;bottom:0;left:0;right:0;height:60%;pointer-events:none;
+    background:linear-gradient(0deg,
+      rgba(0,0,0,.94) 0%,
+      rgba(0,0,0,.90) 35%,
+      rgba(0,0,0,.82) 62%,
+      rgba(0,0,0,.45) 80%,
+      rgba(0,0,0,0) 100%);}
   /* 标题栏:叠在顶部遮罩上(不再自带背景色,对比度由遮罩保证)。 */
   .seat-title{
     position:absolute;top:0;left:0;right:0;
@@ -341,21 +362,23 @@
     width:14px;height:14px;font-size:9px;
     z-index:2;
   }
-  /* 装备条:**沉底 + 完全不透明白底 + 深色文字**——这次方案的核心。不透明底衬意味着
-     对比度和背后的立绘完全无关,不管立绘是深是浅、是花是素,装备文字都一定看得清。
-     这是前两次"文字叠图片"失败时缺的那一环(那两次用的是半透明色块,依赖背后明暗)。
-     整条只在真的有装备行时才渲染(见 render.js),对手没装备时不留空白条压住立绘。 */
+  /* 装备条(第5次微调:**去掉不透明白底,改成白色文字直接叠在立绘下半部**)。
+     **对比度不再由自己的背景保证,而是由 .seat-scrim-bottom 那层深色渐变垫底保证**——
+     所以那层渐变的强度/覆盖高度是硬性依赖,改动它之前必须重新跑对比度实测(见其注释)。
+     额外叠一层 text-shadow 只是补强,**不是主要手段**(单靠描边顶不住中间调立绘,这是
+     本项目已经用数据证明过两次的结论)。 */
   .seat-equip-bar{
-    background:var(--seat-equip-bg);color:var(--seat-equip-fg);
+    background:none;color:var(--paper);
     display:flex;flex-direction:column;gap:1px;
-    padding:2px 3px;font-size:8px;line-height:1.35;
-    border-top:1px solid rgba(0,0,0,.18);
+    padding:2px 3px 3px;font-size:8px;line-height:1.35;
+    text-shadow:0 1px 2px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.85);
   }
   .seat-equip-bar .erow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    color:var(--seat-equip-fg);}
-  .seat-equip-bar .erow b{color:#8a6a2f;font-weight:700;margin-right:1px;} /* 类别首字:金褐色,和装备名区分 */
+    color:var(--paper);}
+  .seat-equip-bar .erow b{color:var(--gold);font-weight:700;margin-right:1px;} /* 类别首字:金色,和装备名区分 */
+  .seat-equip-bar .erow .efd{margin-right:2px;} /* 花色点数:颜色由 render.js 的 seatEquipFace 按红/黑分别给 */
   .seat-equip-bar .erow.filled{cursor:pointer;}
-  .seat-equip-bar .erow.empty-slot{color:#9a9086;} /* 空槽:灰化,仍在白底上,依然清晰 */
+  .seat-equip-bar .erow.empty-slot{color:var(--paper-dim);opacity:.75;} /* 空槽:淡化,但仍在深色渐变上,依然清晰 */
   /* 卡片底部区(判定区 + 装备条):**整块从底部往上堆叠的 flex column**。
      判定区必须显示在装备条"上方"(不能被不透明白底压住看不见),而装备条的高度取决于
      行数(对手1~4行不等、"我"固定4行)——如果给判定区写一个绝对定位的 bottom 偏移量,
@@ -942,16 +965,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=124"></script>
-<script src="data.js?v=124"></script>
-<script src="room-lifecycle.js?v=124"></script>
-<script src="game.js?v=124"></script>
-<script src="weapons.js?v=124"></script>
-<script src="skills.js?v=124"></script>
-<script src="render.js?v=124"></script>
-<script src="render-table.js?v=124"></script>
-<script src="render-hand.js?v=124"></script>
-<script src="render-controls.js?v=124"></script>
-<script src="render-log.js?v=124"></script>
+<script src="config.js?v=125"></script>
+<script src="data.js?v=125"></script>
+<script src="room-lifecycle.js?v=125"></script>
+<script src="game.js?v=125"></script>
+<script src="weapons.js?v=125"></script>
+<script src="skills.js?v=125"></script>
+<script src="render.js?v=125"></script>
+<script src="render-table.js?v=125"></script>
+<script src="render-hand.js?v=125"></script>
+<script src="render-controls.js?v=125"></script>
+<script src="render-log.js?v=125"></script>
 </body>
 </html>
