@@ -247,6 +247,9 @@ const GENERALS = {
   huanggai:      { id:'huanggai',      name:'黄盖',   gender:'male', maxHp:4, skill:'苦肉',
     desc:'出牌阶段,你可以失去1点体力,然后摸两张牌。',
     caps:{ kurou:true } },
+  huaxiong:      { id:'huaxiong',      name:'华雄',   gender:'male', maxHp:6, skill:'耀武',
+    desc:'耀武(锁定技):当你受到红色【杀】造成的伤害时，伤害来源选择一项：1.回复1点体力；2.摸一张牌。',
+    caps:{ yaowu:true } },
   huangyueying:  { id:'huangyueying',  name:'黄月英', gender:'female', maxHp:3, skill:'集智',
     desc:'当你使用一张锦囊牌时,你可以摸一张牌。',
     caps:{ jizhi:true } },
@@ -503,4 +506,17 @@ function buildDeck(){
   const d = LIST.map((c,i)=>({id:i, name:c[0], suit:c[1], rank:c[2]}));
   for(let i=d.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [d[i],d[j]]=[d[j],d[i]]; }
   return d;
+};
+
+// 导出给Node.js使用
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    GENERALS, GENERAL_IDS, getGeneral, generalMaxHp, hasCap,
+    EQUIPS, EQUIP_SLOTS, emptyEquips, getEquip,
+    SEATS, MIN_PLAYERS, MAX_HP, START_HAND, BASIC_CARDS,
+    DELAY_TRICKS,
+    buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
+    isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
+    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap
+  };
 }

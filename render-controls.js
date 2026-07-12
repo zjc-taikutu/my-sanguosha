@@ -748,6 +748,30 @@ function renderControls(g){
     setBanner('【刚烈】判定不为红桃,等待 '+escapeHtml(source?source.name:'伤害来源')+' 选择弃牌或受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害…');
     return;
   }
+  // 华雄【耀武】:伤害来源选择回复体力或摸牌
+  if(g.phase==='yaowu_choose' && g.pending && g.pending.type==='yaowu_choose' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    const src = g.players[g.pending.seat];
+    const disabledRecover = src && src.hp >= src.maxHp;
+    if (!disabledRecover) {
+      b1.textContent='回复1点体力';
+      b1.onclick=()=>respondYaowu('recover');
+      c.appendChild(b1);
+    }
+    const b2=document.createElement('button');
+    b2.textContent='摸一张牌';
+    b2.onclick=()=>respondYaowu('draw');
+    c.appendChild(b2);
+    const tgt = g.players[g.pending.target];
+    setBanner('【耀武】 '+escapeHtml(src?src.name:'你')+' 选择：'+(disabledRecover?'摸一张牌':'回复1点体力 或 摸一张牌')+'（由 '+escapeHtml(tgt?tgt.name:'华雄')+' 受到红色【杀】伤害触发）');
+    return;
+  }
+  if(g.phase==='yaowu_choose' && g.pending && g.pending.type==='yaowu_choose'){
+    const chooser = g.players[g.pending.seat];
+    const target = g.players[g.pending.target];
+    setBanner('【耀武】 等待 '+escapeHtml(chooser?chooser.name:'伤害来源')+' 选择…（由 '+escapeHtml(target?target.name:'华雄')+' 受到红色【杀】伤害触发）');
+    return;
+  }
   // 李典【忘隙】:伤害后可选发动,双方各摸牌
   if(g.phase==='wangxiAsk' && g.pending && g.pending.type==='wangxiAsk' && g.pending.seat===mySeat){
     const b1=document.createElement('button'); b1.className='primary';

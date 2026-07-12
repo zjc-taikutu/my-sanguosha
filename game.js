@@ -156,6 +156,16 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 华雄【耀武】选择阶段:seat=选择者(伤害来源), target=华雄, sourceCard=红色【杀】, resume=结算后恢复信息
+  if(g.pending && g.pending.type==='yaowu_choose'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.target!=='number' ||
+       !g.players[d.seat] || !g.players[d.target] ||
+       !d.sourceCard || typeof d.sourceCard!=='object' ||
+       !d.resume || typeof d.resume!=='object' || typeof d.resume.type!=='string'){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 方天画戟排队(g.fangtianQueue):非活跃时应为 null(和 g.pending/g.aoe 同款标量哨兵)。
   // 活跃时 from/idx 应是数字、targets 应是非空数组——任一不对就整体判无效清空,防止卡死。
   if(g.fangtianQueue===undefined) g.fangtianQueue=null;
@@ -1757,6 +1767,26 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   p.hp = Math.max(0, p.hp - amount);
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
+
+  // >>> 华雄【耀武】检测（红色【杀】伤害时触发伤害来源选择）
+  if (amount > 0 && Number.isInteger(sourceSeat) && sourceSeat !== seat && sourceCard) {
+    const tgt = g.players[seat];
+    const src = g.players[sourceSeat];
+    
+    // 检查：华雄受到红色【杀】的伤害
+    if (tgt && hasCap(tgt, 'yaowu') 
+        && sourceCard.name === '杀' 
+        && ['♥', '♦'].includes(sourceCard.suit)
+        && src && src.alive) {
+      
+      // 创建pending选择，由伤害来源选择，并保存resume信息以便选择完成后恢复流程
+      g.pending = { type: 'yaowu_choose', seat: sourceSeat, target: seat, sourceCard: sourceCard, resume: { type: srcType } };
+      g.phase = 'yaowu_choose';
+      g.log = pushLog(g.log, src.name + ' 需选择【耀武】效果：回复1点体力 或 摸一张牌');
+      return true; // 挂起，等待选择
+    }
+  }
+
   if(p.hp<=0){
     startDying(g, seat, srcType, sourceSeat, amount);
     return true; // 挂起:调用方立即 return,不做收尾(收尾延后到濒死解算时统一处理)
@@ -2146,6 +2176,42 @@ function respondGanglieChoice(action, picks){
     return g;
   });
 }
+
+// ===== 华雄【耀武】选择响应 =====
+function respondYaowu(choice) {
+  tx(g => {
+    if (g.phase !== 'yaowu_choose' || !g.pending || g.pending.type !== 'yaowu_choose' || g.pending.seat !== mySeat) return g;
+    const { seat: chooserSeat, target, sourceCard, resume } = g.pending;
+    const chooser = g.players[chooserSeat];
+    const huaxiong = g.players[target];
+    
+    if (!chooser || !chooser.alive || !huaxiong) {
+      // 选择者或华雄已不存在，清理并回到出牌阶段
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    if (choice === 'recover') {
+      // 回复1点体力
+      chooser.hp = Math.min(chooser.maxHp, chooser.hp + 1);
+      g.log = pushLog(g.log, chooser.name + ' 发动【耀武】，选择回复1点体力（体力' + chooser.hp + '）');
+      markSkillSound(g, '耀武');
+    } else if (choice === 'draw') {
+      // 摸一张牌
+      drawN(g, chooserSeat, 1);
+      g.log = pushLog(g.log, chooser.name + ' 发动【耀武】，选择摸一张牌');
+      markSkillSound(g, '耀武');
+    }
+    
+    // 选择完成后继续伤害结算流程
+    g.pending = null;
+    if (checkWin(g)) return g;
+    resumeAfterInterrupt(g, resume, chooserSeat);
+    return g;
+  });
+}
+
 // ===== 方天画戟:队列驱动的多目标杀,共用出口 =====
 // finishSingleShaTarget: 一个目标的杀响应/判定彻底结束时统一走这里(毅重/仁王盾无效、八卦阵/鬼才改判
 // 红色抵消、respondShan 出闪或命中受伤后的共用尾巴,均改走这个出口)——先 checkWin,再看 g.fangtianQueue
