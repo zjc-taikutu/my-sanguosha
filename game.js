@@ -61,6 +61,110 @@ function normalize(g){
   if(typeof g.luoyiActive!=='boolean') g.luoyiActive=false;
   // 鲁肃【缔盟】:回合内使用标记
   if(typeof g.dimengUsed!=='boolean') g.dimengUsed=false;
+  // 典韦【强袭】:回合内使用标记
+  if(typeof g.qiangxiUsed!=='boolean') g.qiangxiUsed=false;
+  // 典韦【强袭】目标选择阶段:pending 应包含 type、seat 等字段
+  if(g.pending && g.pending.type==='qiangxiPickTarget'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       typeof d.costType!=='string' || !['hp','weapon'].includes(d.costType)){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  // 典韦【强袭】消耗选择阶段:pending 应包含 type、seat 等字段
+  if(g.pending && g.pending.type==='qiangxiChooseCost'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  // 典韦【强袭】武器选择阶段（从手牌弃置武器时）
+  if(g.pending && g.pending.type==='qiangxiChooseWeaponFromHand'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.weaponIndices) || d.weaponIndices.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+  // 贾诩【乱武】:游戏内使用标记（限定技，全局只能使用一次）
+  if(typeof g.luanwuUsed!=='boolean') g.luanwuUsed=false;
+
+  // 辅诩【乱武】:乱武选择阶段
+  if(g.pending && g.pending.type==='luanwuChoose'){
+    const d = g.pending;
+    if(typeof d.currentSeat!=='number' || !g.players[d.currentSeat] || !g.players[d.currentSeat].alive ||
+       !Array.isArray(d.remainingSeats) || d.remainingSeats.length===0 ||
+       typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 贾诩【完杀】:回合内濒死状态标记
+  if(typeof g.wanshaActive!=='boolean') g.wanshaActive=false;
+  if(typeof g.wanshaDyingSeat!=='number') g.wanshaDyingSeat=null;
+
+  // 袁绍【乱击】:选择阶段
+  if(g.pending && g.pending.type==='luanjiChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.availablePairs) || d.availablePairs.length===0 ||
+       d.sourceSeat !== mySeat){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 袁绍【乱击】:确认使用阶段
+  if(g.pending && g.pending.type==='luanjiConfirm'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.cardIndices) || d.cardIndices.length !== 2 ||
+       d.sourceSeat !== mySeat){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 张角【雷击】:使用或打出闪后的雷击选择阶段
+  if(g.pending && g.pending.type==='leijiChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0 ||
+       d.sourceSeat !== mySeat){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 张角【雷击】:雷击判定阶段
+  if(g.pending && g.pending.type==='leijiJudge'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !d.resume || typeof d.resume.kind!=='string'){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 张角【鬼道】:询问是否发动鬼道阶段
+  if(g.pending && g.pending.type==='guiduAsk'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.judgedSeat!=='number' || !g.players[d.judgedSeat] || !g.players[d.judgedSeat].alive ||
+       !d.judgeCard || !d.judgeCard.suit ||
+       !d.resume || typeof d.resume.kind!=='string' ||
+       !Array.isArray(d.askedSeats)){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
   // 开局选将模式:'random'/'pick',开局前是 null,旧存档缺失同样回退 null
   if(g.generalMode===undefined) g.generalMode=null;
   g.players.forEach(p=>{ if(p){ p.hand = p.hand || []; if(typeof p.alive!=='boolean') p.alive=true;
@@ -496,6 +600,25 @@ function normalize(g){
       g.pending = null; g.phase = 'play';
     }
   }
+  // 公孙瓒【趫猛】:伤害结算后的选择阶段
+  if(g.pending && g.pending.type==='qiaomengChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       d.shaColor !== '♠' && d.shaColor !== '♣'){
+      g.pending = null; g.phase = 'play';
+    }
+  }
+  // 公孙瓒【趫猛】:装备选择阶段
+  if(g.pending && g.pending.type==='qiaomengPickEquip'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.availableSlots) || d.availableSlots.length === 0 ||
+       !g.players[d.targetSeat].equips || Object.keys(g.players[d.targetSeat].equips).length === 0){
+      g.pending = null; g.phase = 'play';
+    }
+  }
   if(g.pending && g.pending.type==='fanjianSuit'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !g.players[d.seat] || !g.players[d.targetSeat]){
@@ -779,7 +902,326 @@ function firstGuicaiAsker(g, judgedSeat){
 // 则不挂起,返回 undefined,调用方照常用原判定牌结算。
 // resume 记录"改判解决后用哪条逻辑消费最终判定牌"——resume.kind:'bagua'(走 finishBaguaColor,
 // resume.type 是 sha/aoe,和原本一致)或 'delayJudge'(走 DELAY_TRICKS[trickName].effect)。
+
+// ===== 张角【雷击】 =====
+// maybeStartLeiji: 张角使用或打出【闪】时触发雷击
+function maybeStartLeiji(g, sourceSeat, shanCard) {
+  const source = g.players[sourceSeat];
+  if(!source || !source.alive || !hasCap(source, 'leiji')) return false;
+  
+  // 找出所有其他存活角色
+  const aliveSeats = [];
+  for(let i = 0; i < g.players.length; i++){
+    if(g.players[i] && g.players[i].alive && i !== sourceSeat){
+      aliveSeats.push(i);
+    }
+  }
+  
+  if(aliveSeats.length === 0) return false;
+  
+  // 进入雷击选择阶段
+  g.pending = {
+    type: 'leijiChoose',
+    sourceSeat: sourceSeat,
+    availableTargets: aliveSeats,
+    shanCard: shanCard
+  };
+  g.phase = 'leijiChoose';
+  g.log = pushLog(g.log, source.name + ' 可以发动【雷击】,选择一名角色进行判定');
+  markSkillSound(g, '雷击');
+  return true;
+}
+
+// triggerLeiji: 选择雷击的目标角色
+function triggerLeiji(targetSeat) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'leijiChoose' || pending.sourceSeat !== mySeat) return g;
+    
+    if(!pending.availableTargets.includes(targetSeat)) return g;
+    
+    const source = g.players[mySeat];
+    const target = g.players[targetSeat];
+    
+    if (!source || !source.alive || !target || !target.alive) return g;
+    
+    // 进入雷击判定阶段
+    g.pending = {
+      type: 'leijiJudge',
+      sourceSeat: mySeat,
+      targetSeat: targetSeat,
+      resume: { kind: 'leijiJudge', sourceSeat: mySeat, targetSeat: targetSeat }
+    };
+    g.phase = 'leijiJudge';
+    g.log = pushLog(g.log, source.name + ' 对 ' + target.name + ' 发动【雷击】,进行判定');
+    
+    return g;
+  });
+}
+
+// doLeijiJudge: 执行雷击判定
+function doLeijiJudge(g) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'leijiJudge') return g;
+    
+    const { sourceSeat, targetSeat, resume } = pending;
+    const source = g.players[sourceSeat];
+    const target = g.players[targetSeat];
+    
+    if (!source || !source.alive || !target || !target.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 进行判定
+    const judgeCard = judge(g);
+    if(!judgeCard) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 先检查是否有改判技能（按照规则顺序）
+    // 这里先检查鬼道，因为鬼道应该先于其他改判技能被询问
+    if(maybeGuidu(g, targetSeat, judgeCard, resume) === 'pending') return g;
+    
+    // 然后检查鬼才
+    if(maybeGuicai(g, targetSeat, judgeCard, resume) === 'pending') return g;
+    
+    // 如果没有改判或改判完成后，检查判定结果
+    // 注意: 如果有改判，judgeCard可能已经被替换
+    const finalCard = judgeCard; // 如果有改判，会在finishGuidu或finishGuicai中处理
+    if(finalCard.suit === '♠'){
+      // 造成2点雷电伤害
+      dealDamage(g, targetSeat, 2, sourceSeat, source.name + ' 的【雷击】效果', 'leiji');
+      g.log = pushLog(g.log, target.name + ' 判定为' + finalCard.suit + rankText(finalCard.rank) + ',受到2点雷电伤害');
+    } else {
+      g.log = pushLog(g.log, target.name + ' 判定为' + finalCard.suit + rankText(finalCard.rank) + ',【雷击】无效');
+    }
+    
+    // 清理状态
+    g.pending = null;
+    g.phase = 'play';
+    
+    return g;
+  });
+}
+
+// cancelLeiji: 取消雷击
+function cancelLeiji() {
+  tx(g => {
+    if (g.pending && (g.pending.type === 'leijiChoose' || g.pending.type === 'leijiJudge') &&
+        g.pending.sourceSeat === mySeat) {
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【雷击】');
+    }
+    return g;
+  });
+}
+
+// ===== 张角【鬼道】 =====
+// maybeGuidu: 当判定牌即将生效时,检查是否有张角可以发动鬼道
+// 遵循规则:从当前回合角色开始,按逆时针座次顺序依次询问
+function maybeGuidu(g, judgedSeat, judgeCard, resume) {
+  // 获取当前回合角色
+  const currentTurn = g.turn;
+  const n = g.players.length;
+  
+  // 从当前回合角色开始,逆时针方向(即座位递减方向)寻找有资格的张角
+  // 座位顺序:0,1,2,3... -> 逆时针:currentTurn, (currentTurn-1+n)%n, (currentTurn-2+n)%n...
+  for(let k = 0; k < n; k++){
+    const s = (currentTurn - k + n) % n;
+    const p = g.players[s];
+    
+    if(p && p.alive && hasCap(p, 'guidu')) {
+      // 检查是否有黑色手牌可以打出
+      const hand = p.hand || [];
+      for(const card of hand){
+        if(card.suit === '♠' || card.suit === '♣'){
+          // 找到第一个有资格的张角
+          g.pending = {
+            type: 'guiduAsk',
+            sourceSeat: s,
+            judgedSeat: judgedSeat,
+            judgeCard: judgeCard,
+            resume: resume,
+            askedSeats: []
+          };
+          g.phase = 'guiduAsk';
+          g.log = pushLog(g.log, '询问 ' + p.name + ' 是否发动【鬼道】替换 ' + g.players[judgedSeat].name + ' 的判定牌');
+          return 'pending';
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+// triggerGuidu: 鬼道选择替换牌
+function triggerGuidu(cardIndex) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'guiduAsk' || pending.sourceSeat !== mySeat) return g;
+    
+    const source = g.players[mySeat];
+    const judgedSeat = pending.judgedSeat;
+    const judgeCard = pending.judgeCard;
+    const resume = pending.resume;
+    
+    if (!source || !source.alive || !source.hand || cardIndex >= source.hand.length) return g;
+    
+    const replaceCard = source.hand[cardIndex];
+    
+    // 检查是否为黑色牌
+    if(replaceCard.suit !== '♠' && replaceCard.suit !== '♣') {
+      g.log = pushLog(g.log, source.name + ' 只能打出黑色牌发动【鬼道】');
+      // 继续询问下一个张角
+      return askNextGuidu(g);
+    }
+    
+    // 打出黑色牌
+    source.hand.splice(cardIndex, 1);
+    g.discard.push(replaceCard);
+    
+    g.log = pushLog(g.log, source.name + ' 发动【鬼道】,用【' + replaceCard.name + '】替换判定牌');
+    markSkillSound(g, '鬼道');
+    
+    // 记录已询问的座位
+    if(!pending.askedSeats) pending.askedSeats = [];
+    pending.askedSeats.push(mySeat);
+    
+    // 继续询问下一个张角（支持后手优势）
+    return askNextGuidu(g, replaceCard);
+  });
+}
+
+// askNextGuidu: 询问下一个张角
+function askNextGuidu(g, currentReplaceCard = null) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'guiduAsk') {
+      if(currentReplaceCard) {
+        // 没有其他张角需要询问,使用当前替换牌作为最终判定牌
+        g.pending = null;
+        return finishGuidu(g, pending.judgedSeat, currentReplaceCard, pending.resume);
+      }
+      return g;
+    }
+    
+    const currentTurn = g.turn;
+    const n = g.players.length;
+    const judgedSeat = pending.judgedSeat;
+    const askedSeats = pending.askedSeats || [];
+    
+    // 从当前回合角色开始,逆时针寻找下一个有资格的张角
+    for(let k = 0; k < n; k++){
+      const s = (currentTurn - k + n) % n;
+      const p = g.players[s];
+      
+      // 跳过已经询问过的
+      if(askedSeats.includes(s)) continue;
+      
+      if(p && p.alive && hasCap(p, 'guidu')) {
+        // 检查是否有黑色手牌可以打出
+        const hand = p.hand || [];
+        for(const card of hand){
+          if(card.suit === '♠' || card.suit === '♣'){
+            // 找到下一个有资格的张角
+            pending.askedSeats = askedSeats;
+            pending.sourceSeat = s;
+            g.phase = 'guiduAsk';
+            g.log = pushLog(g.log, '询问 ' + p.name + ' 是否发动【鬼道】替换 ' + g.players[judgedSeat].name + ' 的判定牌');
+            return g;
+          }
+        }
+        // 标记为已询问（但无黑色牌）
+        askedSeats.push(s);
+      }
+    }
+    
+    // 没有其他张角需要询问
+    if(currentReplaceCard) {
+      // 使用当前替换牌作为最终判定牌
+      g.pending = null;
+      return finishGuidu(g, pending.judgedSeat, currentReplaceCard, pending.resume);
+    } else {
+      // 无人发动鬼道
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+  });
+}
+
+// finishGuidu: 鬼道替换后的处理函数
+function finishGuidu(g, judgedSeat, replaceCard, resume) {
+  // 使用替换后的牌作为判定结果
+  // 调用对应的判定处理函数
+  
+  if(resume.kind === 'bagua'){
+    // 八卦阵判定
+    return finishBaguaColor(g, judgedSeat, replaceCard);
+  } else if(resume.kind === 'delayJudge'){
+    // 延时锦囊判定
+    return finishDelayCard(g, judgedSeat, DELAY_TRICKS[resume.trickName], replaceCard, resume.card);
+  } else if(resume.kind === 'tieqiJudge'){
+    // 铁骑判定
+    return finishTieqiJudge(g, resume.from, resume.to, replaceCard, resume.sourceCard, undefined);
+  } else if(resume.kind === 'luoshenJudge'){
+    // 洛神判定
+    return finishLuoshenJudge(g, resume.seat, replaceCard);
+  } else if(resume.kind === 'shuangxiongJudge'){
+    // 双雄判定
+    return finishShuangxiongJudge(g, resume.seat, replaceCard);
+  } else if(resume.kind === 'ganglieJudge'){
+    // 刚烈判定
+    return finishGanglieJudge(g, replaceCard, resume.seat, resume.sourceSeat, resume.resume);
+  } else if(resume.kind === 'leijiJudge'){
+    // 雷击判定（特殊情况）
+    const { sourceSeat, targetSeat } = resume;
+    const target = g.players[targetSeat];
+    if(replaceCard.suit === '♠'){
+      dealDamage(g, targetSeat, 2, sourceSeat, g.players[sourceSeat].name + ' 的【雷击】效果', 'leiji');
+      g.log = pushLog(g.log, target.name + ' 被替换判定为' + replaceCard.suit + rankText(replaceCard.rank) + ',受到2点雷电伤害');
+    } else {
+      g.log = pushLog(g.log, target.name + ' 被替换判定为' + replaceCard.suit + rankText(replaceCard.rank) + ',【雷击】无效');
+    }
+  }
+  
+  // 清理状态
+  g.pending = null;
+  g.phase = 'play';
+  
+  return g;
+}
+
+// cancelGuidu: 取消鬼道
+function cancelGuidu() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'guiduAsk' && g.pending.sourceSeat === mySeat) {
+      const pending = g.pending;
+      // 记录已询问的座位
+      if(!pending.askedSeats) pending.askedSeats = [];
+      pending.askedSeats.push(mySeat);
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【鬼道】');
+      // 继续询问下一个张角
+      return askNextGuidu(g);
+    }
+    return g;
+  });
+}
+
+// 修改 maybeGuicai 函数,集成所有改判技能的统一询问逻辑
+// 所有改判技能(鬼道、鬼才等)都应使用相同的顺序规则
+// 先检查鬼道,因为鬼道和鬼才都使用相同的改判顺序规则
 function maybeGuicai(g, judgedSeat, card, resume){
+  // 先检查鬼道
+  if(maybeGuidu(g, judgedSeat, card, resume) === 'pending') return 'pending';
+  
   const asker=firstGuicaiAsker(g, judgedSeat);
   if(asker===null) return;
   g.pending={type:'guicai', seat:judgedSeat, asking:asker, judgeCard:card, resume};
@@ -1278,6 +1720,27 @@ const CARD_PLAYS = {
       // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【杀】的目标——距离校验之外额外叠加的
       // 一层限制,和距离一样都是"canTarget"这个 seam 的用途(见架构约定:只有杀挂了canTarget)。
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
+      
+      // 袁术【同疾】(锁定技):若袁术的手牌数大于体力值,且使用者在袁术的攻击范围内,只能选择袁术为目标
+      const yuanshuSeat = findPlayerWithCap(g, 'tongji');
+      if(yuanshuSeat !== null) {
+        const yuanshu = g.players[yuanshuSeat];
+        if(yuanshu && yuanshu.alive && yuanshuSeat !== mySeat) {
+          const handCount = (yuanshu.hand || []).length;
+          const hp = yuanshu.hp || 0;
+          if(handCount > hp) {
+            const dist = distance(g, mySeat, yuanshuSeat);
+            const range = attackRange(g, mySeat);
+            if(dist <= range) {
+              // 使用者在袁术的攻击范围内,只能选择袁术为目标
+              if(targetSeat !== yuanshuSeat) {
+                return false;
+              }
+            }
+          }
+        }
+      }
+      
       // 太史慈【天义】:天义赢时无距离限制
       if(g.tianyiWin && hasCap(me,'tianyi')) return true;
       return canReachSha(g, mySeat, targetSeat); // 只有杀受攻击距离限制
@@ -1307,9 +1770,12 @@ const CARD_PLAYS = {
     canPlay:(g,me,card)=> canUseAs(me,card,'决斗'),
     // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【决斗】的目标。决斗本身无距离限制,
     // 所以这里不像杀那样叠加 canReachSha,只单独处理这一条限制。
+    // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
+      // 帷幕检查：如果目标是贾诩且牌是黑色锦囊，不能成为目标
+      if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
       return true;
     },
     effect:(g,me,card,targetSeat)=>{
@@ -1349,6 +1815,16 @@ const CARD_PLAYS = {
       A && A.alive && ai!==mySeat && A.equips && A.equips.weapon &&
       g.players.some((B,bi)=> B && B.alive && bi!==ai && canReachSha(g,ai,bi))
     ),
+    canTarget:(g,me,card,targetSeat)=>{
+      // 借刀杀人特殊：第一个目标是A（有武器的角色），所以这里的canTarget需要特别处理
+      // 但是借刀杀人走的是专门的流程jieDaoShaRen，不是标准的目标选择流程
+      // 所以这个canTarget可能不会被调用，但为了安全起见还是添加帷幕检查
+      const target = g.players[targetSeat];
+      if(!target || !target.alive) return false;
+      // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+      if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
+      return true;
+    },
     effect:()=>{} // 正常流程不会走到这里(见上方注释);留空防御,避免万一被绕过时报错
   },
   '五谷丰登': {
@@ -1364,7 +1840,13 @@ const CARD_PLAYS = {
   '火攻': {
     target:true,
     canPlay:(g,me,card)=> card.name==='火攻',
-    canTarget:(g,me,card,targetSeat)=> !!(g.players[targetSeat] && (g.players[targetSeat].hand||[]).length>0),
+    canTarget:(g,me,card,targetSeat)=>{
+      const target=g.players[targetSeat];
+      if(!target || (target.hand||[]).length===0) return false;
+      // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+      if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
+      return true;
+    },
     effect:(g,me,card,targetSeat)=>{
       g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【火攻】');
       startTrick(g, {trick:'火攻', from:mySeat, to:targetSeat, sourceCard:card});
@@ -1374,6 +1856,13 @@ const CARD_PLAYS = {
     target:true,
     allowSelf:true,
     canPlay:(g,me,card)=> card.name==='铁索连环',
+    canTarget:(g,me,card,targetSeat)=>{
+      const target = g.players[targetSeat];
+      if(!target || !target.alive) return false;
+      // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+      if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
+      return true;
+    },
     effect:(g,me,card,targetSeat)=>{
       const targets=(Array.isArray(targetSeat)?targetSeat:[targetSeat])
         .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
@@ -1392,6 +1881,8 @@ const CARD_PLAYS = {
       if(distance(g, mySeat, targetSeat) > 1) return false;
       // 陆逊【谦逊】:不能成为顺手牵羊的目标
       if(hasCap(target,'qianxun')) return false;
+      // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+      if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
       return true;
     },
     effect:(g,me,card,targetSeat)=>{
@@ -1402,6 +1893,13 @@ const CARD_PLAYS = {
   '过河拆桥': {
     target:true,
     canPlay:(g,me,card)=> card.name==='过河拆桥',
+    canTarget:(g,me,card,targetSeat)=>{
+      const target = g.players[targetSeat];
+      if(!target || !target.alive) return false;
+      // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+      if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
+      return true;
+    },
     effect:(g,me,card,targetSeat)=>{
       g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【过河拆桥】');
       startTrick(g, {trick:'过河拆桥', from:mySeat, to:targetSeat});
@@ -1435,6 +1933,8 @@ const delayTrickPlay = {
     if(card.name==='兵粮寸断' && distance(g, mySeat, targetSeat) > 1) return false;
     // 陆逊【谦逊】:不能成为乐不思蜀的目标
     if(card.name==='乐不思蜀' && hasCap(g.players[targetSeat],'qianxun')) return false;
+    // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+    if(hasCap(g.players[targetSeat],'weimu') && isBlackTactics(card)) return false;
     // 官方规则:同一判定区不能有两张同名的延时类锦囊牌——之前只在闪电判定失败后的自动
     // 传递里做了这个检查,玩家主动打出时完全没校验,导致能对同一目标连续打两张同名延时锦囊。
     const tgt=g.players[targetSeat];
@@ -1472,6 +1972,7 @@ function equipDist(player, slot){
 // 再叠加 目标的 +1马 与 from 的 -1马,最小为 1。
 // from 方向的 -1 修正有两个独立来源、直接相加:装备的 -1 马(equipDist)+ 马超【马术】
 // 这类"锁定技距离-1"的 cap(extraMinus1)——两者不互斥,同时存在时效果叠加。
+// 公孙瓒【义从】:体力>2时自己计算距离-1;体力<=2时其他角色计算与他的距离+1
 function distance(g, from, to){
   if(from===to) return 0;
   const alive = g.players.map((p,i)=>i).filter(i=>g.players[i] && g.players[i].alive);
@@ -1481,7 +1982,15 @@ function distance(g, from, to){
   const cw = (((pt-pf)%m)+m)%m;                            // 顺时针步数(只数存活者)
   const base = Math.min(cw, m-cw);                         // 顺/逆取较小
   const fromMinus1 = equipDist(g.players[from],'minus1') + (hasCap(g.players[from],'extraMinus1') ? -1 : 0);
-  const d = base + equipDist(g.players[to],'plus1') + fromMinus1;
+  // 义从:公孙瓒体力>2时,自己计算与其他角色的距离-1
+  const yicongFromModifier = (hasCap(g.players[from],'yicong') && 
+                              g.players[from] && g.players[from].alive && 
+                              (g.players[from].hp > 2)) ? -1 : 0;
+  // 义从:公孙瓒体力<=2时,其他角色计算与他的距离+1
+  const yicongToModifier = (hasCap(g.players[to],'yicong') && 
+                            g.players[to] && g.players[to].alive && 
+                            (g.players[to].hp <= 2)) ? 1 : 0;
+  const d = base + equipDist(g.players[to],'plus1') + fromMinus1 + yicongFromModifier + yicongToModifier;
   return Math.max(1, d);
 }
 // attackRange: 该玩家攻击距离 = 武器 range,无武器默认 1。
@@ -1863,6 +2372,26 @@ function maybeStartLiuli(g, from, to, usedAs, shaColor, sourceCard){
   g.log=pushLog(g.log, target.name+' 是否发动【流离】,弃一张牌转移此【杀】…');
   return true;
 }
+// maybeStartQiaomeng: 公孙瓒【趫猛】—— 使用黑色【杀】造成伤害后触发
+function maybeStartQiaomeng(g, from, to, shaColor) {
+  const source = g.players[from];
+  const target = g.players[to];
+  // 检查条件:攻击者是公孙瓒,有趫猛技能,使用的是黑色杀,目标存活
+  if(!source || !source.alive || !target || !target.alive || from === to || !hasCap(source,'qiaomeng')) return false;
+  // 必须是黑色杀(♠黑桃或♣梅花)
+  if(shaColor !== '♠' && shaColor !== '♣') return false;
+  // 检查目标是否有装备
+  const equips = target.equips || {};
+  const equipSlots = Object.keys(equips).filter(slot => equips[slot] !== null);
+  if(equipSlots.length === 0) return false;
+  
+  // 进入趫猛选择阶段
+  g.pending={type:'qiaomengChoose', sourceSeat:from, targetSeat:to, shaColor:shaColor};
+  g.phase='qiaomengChoose';
+  g.log=pushLog(g.log, source.name + ' 发动【趫猛】,可以选择 ' + target.name + ' 的一张装备牌');
+  markSkillSound(g, 'qiaomeng');
+  return true;
+}
 function respondLiuli(choice, newTargetSeat){
   tx(g=>{
     if(g.phase!=='liuli'||!g.pending||g.pending.type!=='liuli'||g.pending.to!==mySeat) return g;
@@ -2056,6 +2585,17 @@ function startDying(g, seat, resumeType, sourceSeat, amount){
   const resume = {type:resumeType};
   if(typeof sourceSeat==='number') resume.sourceSeat=sourceSeat;
   if(typeof amount==='number') resume.amount=amount;
+  
+  // 贾诩【完杀】：检查是否在贾诩的回合内
+  const jiaxuSeat = findPlayerWithCap(g, 'wansha');
+  if (jiaxuSeat !== null && jiaxuSeat === g.turn) {
+    // 濒死角色进入完杀效果范围
+    g.wanshaActive = true;
+    g.wanshaDyingSeat = seat;
+    g.log = pushLog(g.log, `【完杀】发动,除 ${g.players[jiaxuSeat].name} 和 ${p.name} 以外的角色不能使用【桃】`);
+    markSkillSound(g, '完杀');
+  }
+  
   g.pending={type:'dying', seat, asking:seat, resume};
   g.phase='dying';
   g.log=pushLog(g.log, p.name+' 濒死！询问 '+p.name+' 是否使用【桃】自救…');
@@ -2091,6 +2631,19 @@ function respondDying(useTao, jijiuChoice){
     const me=g.players[mySeat];
     if(!me || !me.alive || g.pending.asking!==mySeat) return g;
     const dyingP=g.players[g.pending.seat];
+    
+    // 辅诩【完杀】：检查是否受到完杀限制
+    if(useTao && g.wanshaActive && g.wanshaDyingSeat === g.pending.seat) {
+      const jiaxuSeat = findPlayerWithCap(g, 'wansha');
+      if (jiaxuSeat !== null && jiaxuSeat === g.turn) {
+        // 只有贾诩和濒死角色自己可以使用桃
+        if (mySeat !== jiaxuSeat && mySeat !== g.pending.seat) {
+          g.log = pushLog(g.log, me.name + ' 因【完杀】效果,不能对 ' + dyingP.name + ' 使用【桃】');
+          return g; // 不能使用桃，直接返回
+        }
+      }
+    }
+    
     if(useTao){
       let card;
       if(jijiuChoice){
@@ -2232,6 +2785,14 @@ function finishDying(g, actuallyDied){
   const seat=g.pending.seat, resume=g.pending.resume;
   const p=g.players[seat];
   p.dying=false;
+  
+  // 贾诩【完杀】：清理完杀状态
+  if (g.wanshaActive && g.wanshaDyingSeat === seat) {
+    g.wanshaActive = false;
+    g.wanshaDyingSeat = null;
+    g.log = pushLog(g.log, `【完杀】效果结束`);
+  }
+  
   if(actuallyDied){
     p.alive=false;
     // 阵亡:所有手牌 + 装备牌 + 判定区(延时锦囊)弃置进弃牌堆(标准规则),让牌回流、牌库不被抽干
@@ -2991,6 +3552,10 @@ function respondShan(useShan){
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       markCardSound(g, '闪', mySeat, card);
       if(card.name!=='闪' && hasCap(me,'longdan')) markSkillSound(g,'龙胆');
+      // 张角【雷击】:使用或打出【闪】时可以发动雷击
+      if(hasCap(me,'leiji') && card.name==='闪'){
+        maybeStartLeiji(g, mySeat, card);
+      }
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
       // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
       if(maybeStartShaOffsetEffects(g, g.pending.from, mySeat, g.pending.sourceCard)) return g;
@@ -3015,6 +3580,8 @@ function respondShan(useShan){
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
       if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
+      // 公孙瓒【趫猛】:使用黑色【杀】造成伤害后,可以选择目标装备区的一张牌
+      if(maybeStartQiaomeng(g, g.pending.from, mySeat, shaColor)) return g;
     }
     g.pending=null;
     finishSingleShaTarget(g); // 单个目标响应完毕:方天画戟排队中还有下一个则继续,否则回到出牌阶段
@@ -3085,6 +3652,8 @@ function endTurn(){
     const me=g.players[mySeat];
     if(me.hand.length>me.hp && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
     if(maybeStartLiRangRecover(g, mySeat)) return g;
+    // 贾诩完杀：回合结束时清理状态
+    g.wanshaActive = false; g.wanshaDyingSeat = null;
     // 乐进【骁果】只在"正常走完弃牌阶段、即将结束回合"这里触发,不影响其它切回合路径
     // (决斗/濒死里回合玩家中途阵亡换人——那个人根本没走到结束阶段,规则本身就不该触发骁果)。
     advanceXiaoguo(g, mySeat, mySeat);
@@ -3123,7 +3692,9 @@ function startTurn(g, seat){
     g.roundSeatsActed.push(seat);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false;
+  // 贾诩完杀：回合开始时重置状态
+  g.wanshaActive = false; g.wanshaDyingSeat = null;
   // 夏侯渊【神速】
   g.shensuUsed = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
@@ -3451,5 +4022,32 @@ function respondLianying(activate){
     g.phase = 'play';
     return g;
   });
+}
+
+// findPlayerWithCap: 找到拥有指定能力(cap)的玩家座位号,返回座位号或null(如果没找到)
+function findPlayerWithCap(g, cap) {
+  if (!g || !g.players || !Array.isArray(g.players)) return null;
+  for (let i = 0; i < g.players.length; i++) {
+    const player = g.players[i];
+    if (player && player.alive && generalHasCap(player, cap)) {
+      return i;
+    }
+  }
+  return null;
+}
+
+// isBlackTactics: 判断是否为黑色锦囊牌
+function isBlackTactics(card) {
+  if (!card || !card.suit) return false;
+  // 黑色：♠黑桃或♣梅花
+  const isBlack = card.suit === '♠' || card.suit === '♣';
+  // 锦囊牌：常见的锦囊牌列表
+  const tacticsCards = [
+    '过河拆桥', '顺手牵羊', '无中生有', '决斗', '借刀杀人',
+    '无懈可击', '五谷丰登', '桃园结义', '南蛮入侵', '万箭齐发',
+    '调虎离山', '理确κου', '兵粮寸断', '乐不思蜀', '火攻'
+  ];
+  const isTactics = tacticsCards.includes(card.name);
+  return isBlack && isTactics;
 }
 
