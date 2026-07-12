@@ -101,6 +101,11 @@ function resetGanglie(){ gangliePicks=[]; }
 let quhuMode = false;
 let quhuCardIdx = null;
 function resetQuhu(){ quhuMode=false; quhuCardIdx=null; }
+// 太史慈【天义】:拼点模式
+let tianyiMode = false;
+let tianyiCardIdx = null;
+let tianyiTargetSeat = null;
+function resetTianyi(){ tianyiMode=false; tianyiCardIdx=null; tianyiTargetSeat=null; }
 let lijianMode = false;
 let lijianCardIdx = null;
 let lijianFromSeat = null;
@@ -447,6 +452,95 @@ function renderControls(g){
   if(g.phase==='haoshiPick' && g.pending && g.pending.type==='haoshiPick'){
     const p = g.players[g.pending.seat];
     waitAskBanner(p ? p.name : '鲁肃', '好施');
+    return;
+  }
+  
+  // 夏侯渊【神速】UI
+  // 神速1：在判定阶段开始前的触发点
+  if(g.phase==='shensuChoose1' && g.pending && g.pending.type==='shensuChoose1' && g.pending.seat===mySeat){
+    const p = g.players[mySeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【神速】发动时机';
+    div.appendChild(h4);
+    const p1=document.createElement('p'); p1.textContent='你可以发动【神速1】跳过判定和摸牌阶段，视为使用一张无距离限制的【杀】';
+    div.appendChild(p1);
+    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#d4a762';
+    b1.textContent='发动神速1';
+    b1.onclick=()=>triggerShensu1();
+    div.appendChild(b1);
+    const b2=document.createElement('button'); b2.className='cancel-btn';
+    b2.textContent='不发动';
+    b2.onclick=()=>skipShensu1();
+    div.appendChild(b2);
+    c.appendChild(div);
+    setBanner(p.name + ' 可以发动【神速1】跳过判定和摸牌阶段');
+    return;
+  }
+  if(g.phase==='shensuChoose1' && g.pending && g.pending.type==='shensuChoose1'){
+    const p = g.players[g.pending.seat];
+    waitAskBanner(p ? p.name : '夏侯渊', '神速1');
+    return;
+  }
+  
+  // 神速2：在摸牌结束后的触发点
+  if(g.phase==='shensuChoose2' && g.pending && g.pending.type==='shensuChoose2' && g.pending.seat===mySeat){
+    const p = g.players[mySeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【神速】发动时机';
+    div.appendChild(h4);
+    const p1=document.createElement('p'); p1.textContent='你可以发动【神速2】跳过出牌阶段并弃置一张装备牌，视为使用一张无距离限制的【杀】';
+    div.appendChild(p1);
+    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#d4a762';
+    b1.textContent='发动神速2';
+    b1.onclick=()=>triggerShensu2();
+    div.appendChild(b1);
+    const b2=document.createElement('button'); b2.className='cancel-btn';
+    b2.textContent='不发动';
+    b2.onclick=()=>skipShensu2();
+    div.appendChild(b2);
+    c.appendChild(div);
+    setBanner(p.name + ' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
+    return;
+  }
+  if(g.phase==='shensuChoose2' && g.pending && g.pending.type==='shensuChoose2'){
+    const p = g.players[g.pending.seat];
+    waitAskBanner(p ? p.name : '夏侯渊', '神速2');
+    return;
+  }
+  
+  // 神速杀目标选择
+  if(g.pending && g.pending.type==='shensuSha' && g.pending.seat===mySeat){
+    const p = g.players[mySeat];
+    const remaining = g.pending.remaining || 1;
+    const shensuShaRemaining = g.shensuShaRemaining || remaining;
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='选择【神速】的目标';
+    div.appendChild(h4);
+    const p1=document.createElement('p'); p1.textContent='请选择第' + (shensuShaRemaining - remaining + 1) + '张无距离限制的普通【杀】的目标（还需' + remaining + '次）';
+    div.appendChild(p1);
+    
+    // 添加目标选择按钮
+    g.players.forEach((tgt, seat) => {
+      if(!tgt || !tgt.alive || seat === mySeat) return;
+      const b=document.createElement('button');
+      b.className='target-btn';
+      b.textContent='攻击 ' + tgt.name;
+      b.onclick=()=>respondShensuSha(seat);
+      div.appendChild(b);
+    });
+    
+    const cancelBtn=document.createElement('button'); cancelBtn.className='cancel-btn';
+    cancelBtn.textContent='取消';
+    cancelBtn.onclick=()=>cancelShensuSha();
+    div.appendChild(cancelBtn);
+    c.appendChild(div);
+    setBanner(p.name + ' 选择【神速】的【杀】目标');
+    return;
+  }
+  if(g.pending && g.pending.type==='shensuSha'){
+    const p = g.players[g.pending.seat];
+    const remaining = g.pending.remaining || 1;
+    setBanner((p?p.name:'夏侯渊') + ' 正在选择第' + (g.shensuShaRemaining - remaining + 1) + '张无距离限制的【杀】目标（还需' + remaining + '次）…');
     return;
   }
   
@@ -947,6 +1041,23 @@ function renderControls(g){
   if(g.phase==='quhuRespond' && g.pending && g.pending.type==='quhuRespond'){
     const xun=g.players[g.pending.seat], target=g.players[g.pending.targetSeat];
     setBanner(escapeHtml(xun?xun.name:'荀彧')+' 发动【驱虎】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
+    return;
+  }
+  // 太史慈【天义】拼点响应
+  if(g.phase==='tianyiRespond' && g.pending && g.pending.type==='tianyiRespond' && g.pending.targetSeat===mySeat){
+    const source = g.players[g.pending.seat];
+    (me.hand||[]).forEach((card, idx)=>{
+      const b=document.createElement('button');
+      b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
+      b.onclick=()=>respondTianyi(idx);
+      c.appendChild(b);
+    });
+    setBanner(escapeHtml(source?source.name:'太史慈')+' 对你发动【天义】,选择一张手牌拼点。');
+    return;
+  }
+  if(g.phase==='tianyiRespond' && g.pending && g.pending.type==='tianyiRespond'){
+    const source = g.players[g.pending.seat], target = g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(source?source.name:'太史慈')+' 发动【天义】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
     return;
   }
   if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat){
@@ -1664,6 +1775,30 @@ function renderControls(g){
       }
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetQuhu(); render(g); }; c.appendChild(cb);
+    } else if(tianyiMode){
+      // 太史慈【天义】:先选一张手牌拼点,再选目标
+      setBanner(tianyiCardIdx===null
+        ? '【天义】选择一张手牌用于拼点。'
+        : '已选中拼点牌,选择一名其他角色拼点。');
+      (me.hand||[]).forEach((card, idx)=>{
+        const picked=tianyiCardIdx===idx;
+        const b=document.createElement('button');
+        if(picked) b.className='primary';
+        b.textContent=(picked?'✓ ':'')+'拼【'+card.name+'】'+card.suit+rankText(card.rank);
+        b.onclick=()=>{ tianyiCardIdx = picked ? null : idx; render(g); };
+        c.appendChild(b);
+      });
+      if(tianyiCardIdx!==null){
+        g.players.forEach((p,i)=>{
+          if(!p || !p.alive || i===mySeat || (p.hand||[]).length===0) return;
+          const b=document.createElement('button');
+          b.textContent='与 '+p.name+' 拼点';
+          b.onclick=()=>{ const idx=tianyiCardIdx; resetTianyi(); pickTianyiTarget(idx, i); };
+          c.appendChild(b);
+        });
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetTianyi(); render(g); }; c.appendChild(cb);
     } else if(fangtianMode){
       // 方天画戟选目标模式:点上方存活+范围内的其他玩家(见 seat 循环里的分支),不强制选满,选够1个即可确认。
       setBanner('【方天画戟】选择至多3个目标(已选 '+fangtianPicks.length+'/3，攻击距离 '+attackRange(g,mySeat)+')。');
@@ -1810,7 +1945,7 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode;
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
@@ -1874,6 +2009,12 @@ function renderControls(g){
       const qb=document.createElement('button'); qb.className='ghost';
       qb.textContent='发动【驱虎】'; qb.onclick=()=>{ selectedCardIdx=null; quhuMode=true; quhuCardIdx=null; render(g); }; c.appendChild(qb);
     }
+    // 太史慈【天义】:出牌阶段限一次,选择一名其他角色拼点
+    const hasTianyiTarget = g.players.some((p,i)=>p && p.alive && i!==mySeat && (p.hand||[]).length>=1);
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'tianyi') && !g.tianyiUsed && (me.hand||[]).length>=1 && hasTianyiTarget && myTurn){
+      const tb=document.createElement('button'); tb.className='ghost';
+      tb.textContent='发动【天义】'; tb.onclick=()=>{ selectedCardIdx=null; tianyiMode=true; tianyiCardIdx=null; tianyiTargetSeat=null; render(g); }; c.appendChild(tb);
+    }
     // 鲁肃【缔盟】:出牌阶段限一次,选择两名其他角色
     const hasDimengTarget = g.players.filter((p,i)=>p && p.alive && i!==mySeat).length >= 2;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'dimeng') && !g.dimengUsed && hasDimengTarget){
@@ -1886,7 +2027,7 @@ function renderControls(g){
       fb.textContent='追加目标(方天画戟)'; fb.onclick=()=>{ selectedCardIdx=null; fangtianMode=true; fangtianPicks=[]; render(g); }; c.appendChild(fb);
     }
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();endPlay();}; c.appendChild(b);
   } else if(g.phase==='discard'){
     const over = me.hand.length - me.hp;
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌

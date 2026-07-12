@@ -57,7 +57,9 @@ const SKILL_PINYIN = {
   '连环':'lianhuan', '涅槃':'niepan', '离间':'lijian', '闭月':'biyue',
   '双雄':'shuangxiong',
   '礼让':'lirang', '争义':'zhengyi',
-  '恂恂':'xunxun', '忘隙':'wangxi', '狂骨':'kuanggu'
+  '恂恂':'xunxun', '忘隙':'wangxi', '狂骨':'kuanggu',
+  '神速':'shensu',
+  '天义':'tianyi'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个

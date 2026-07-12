@@ -655,6 +655,142 @@ function respondQuhuDamage(targetSeat){
   });
 }
 
+// ===== 太史慈【天义】:拼点与杀使用规则改变 =====
+// 使用荀彧驱虎的pointText函数（在567行）
+
+function finishTianyi(g){
+  g.pending=null;
+  if(checkWin(g)) return;
+  g.phase='play';
+}
+
+function startTianyi() {
+  tx(g => {
+    if (g.phase !== 'play' || g.turn !== mySeat) return g;
+    const me = g.players[mySeat];
+    if (!me || !me.alive || !hasCap(me, 'tianyi') || g.tianyiUsed) return g;
+    
+    // 进入天义选择模式：先选牌，再选目标
+    g.pending = {
+      type: 'tianyiPickCard',
+      seat: mySeat
+    };
+    g.phase = 'tianyiPickCard';
+    g.log = pushLog(g.log, `${me.name} 发动【天义】,请选择一张手牌用于拼点`);
+    markSkillSound(g, '天义');
+    
+    return g;
+  });
+}
+
+function pickTianyiCard(cardIdx) {
+  tx(g => {
+    if (g.pending.type !== 'tianyiPickCard' || g.pending.seat !== mySeat) return g;
+    const me = g.players[mySeat];
+    if (!me || !me.alive) return g;
+    
+    const card = me.hand[cardIdx];
+    if (!card) return g;
+    
+    // 进入选择目标阶段
+    g.pending = {
+      type: 'tianyiPickTarget',
+      seat: mySeat,
+      cardIdx: cardIdx
+    };
+    g.phase = 'tianyiPickTarget';
+    g.log = pushLog(g.log, `${me.name} 选择了拼点牌,请选择一名其他角色拼点`);
+    
+    return g;
+  });
+}
+
+function pickTianyiTarget(cardIdx, targetSeat) {
+  tx(g => {
+    if (g.phase !== 'play' || g.turn !== mySeat) return g;
+    const me = g.players[mySeat];
+    const target = g.players[targetSeat];
+    
+    if (!me || !me.alive || !target || !target.alive) return g;
+    if (targetSeat === mySeat) return g; // 不能选自己
+    if ((target.hand || []).length === 0) return g; // 目标没有手牌
+    
+    const card = me.hand[cardIdx];
+    if (!card) return g;
+    
+    // 执行拼点：从玩家手牌中移除拼点牌
+    me.hand.splice(cardIdx, 1);
+    g.discard.push(card);
+    
+    // 设置拼点响应状态
+    g.tianyiUsed = true;
+    g.pending = {
+      type: 'tianyiRespond',
+      seat: mySeat,
+      targetSeat: targetSeat,
+      selfCard: card
+    };
+    g.phase = 'tianyiRespond';
+    g.log = pushLog(g.log, `${me.name} 发动【天义】,与 ${target.name} 拼点`);
+    
+    return g;
+  });
+}
+
+function respondTianyi(cardIdx) {
+  tx(g => {
+    if (g.phase !== 'tianyiRespond' || !g.pending || g.pending.type !== 'tianyiRespond' || 
+        g.pending.targetSeat !== mySeat) return g;
+    
+    const {seat, targetSeat, selfCard} = g.pending;
+    const source = g.players[seat];
+    const target = g.players[targetSeat];
+    
+    if (!source || !target || !source.alive || !target.alive) {
+      finishTianyi(g);
+      return g;
+    }
+    
+    const card = target.hand[cardIdx];
+    if (!card) return g;
+    
+    // 移除目标的拼点牌
+    target.hand.splice(cardIdx, 1);
+    g.discard.push(card);
+    
+    // 判断拼点结果：点数大的赢（数值比较）
+    const tianyiWin = (selfCard.rank || 0) > (card.rank || 0);
+    
+    g.log = pushLog(g.log, 
+      `${source.name} 出 ${pointText(selfCard)}, ${target.name} 出 ${pointText(card)},拼点${tianyiWin ? source.name + '赢' : source.name + '没赢'}`);
+    
+    if (tianyiWin) {
+      // 赢：设置本阶段的增益效果
+      g.tianyiWin = true;
+      g.log = pushLog(g.log, `${source.name} 【天义】拼点赢,本阶段内使用【杀】的次数上限+1、无距离限制、目标数上限+1`);
+    } else {
+      // 输：设置本阶段的禁用效果
+      g.tianyiLose = true;
+      g.log = pushLog(g.log, `${source.name} 【天义】拼点输,本阶段内不能使用【杀】`);
+    }
+    
+    finishTianyi(g);
+    return g;
+  });
+}
+
+function cancelTianyi() {
+  tx(g => {
+    if (g.pending && (g.pending.type === 'tianyiPickCard' || g.pending.type === 'tianyiPickTarget') && 
+        g.pending.seat === mySeat) {
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, `${g.players[mySeat].name} 取消发动【天义】`);
+    }
+    return g;
+  });
+}
+
 function finishJieming(g, resume, seat){
   g.pending=null;
   if(checkWin(g)) return;
@@ -1139,7 +1275,7 @@ function respondTiaoxinChoice(useSha){
       if(shaCard && shaCard.card){
         // 使用杀 - resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard)
         // 这里target是出杀者，from是目标
-        resolveShaUse(g, target, from, shaCard.role, singleCardShaColor(shaCard.card), shaCard.card);
+        resolveShaUse(g, target, from, shaCard.role, singleCardShaColor(shaCard.card), shaCard.card, undefined);
         g.pending=null; g.phase='play';
       } else {
         // 目标不能出杀，视为放弃使用杀，需要被弃置一张牌
@@ -1673,6 +1809,282 @@ function respondDimeng(seatA, seatB){
     g.log = pushLog(g.log, me.name+' 发动【缔盟】,弃置'+X+'张牌,令 '+g.players[seatA].name+' 与 '+g.players[seatB].name+' 交换手牌');
     markSkillSound(g, '缔盟');
     
+    return g;
+  });
+}
+
+// ============================================================================
+// 夏侯渊【神速】技能实现
+// ============================================================================
+
+// 发动神速1
+function triggerShensu1() {
+  tx(g => {
+    const seat = g.turn;
+    const p = g.players[seat];
+    
+    if (!p || !p.alive || !hasCap(p, 'shensu') || g.shensuUsed) return g;
+    
+    // 标记神速已使用
+    g.shensuUsed = true;
+    
+    // 设置跳过判定和摸牌标记
+    g.shensuSkipJudgingAndDraw = true;
+    
+    // 标记需要使用1张无距离限制的杀
+    g.shensuShaRemaining = 1;
+    
+    // 设置杀的目标选择
+    g.pending = {
+      type: 'shensuSha',
+      seat: seat,
+      remaining: 1,
+      noDistance: true,
+      fromShensu: 'shensu1'
+    };
+    
+    g.phase = 'shensuSha';
+    g.log = pushLog(g.log, p.name + ' 发动【神速1】,跳过判定和摸牌阶段,需使用1张无距离限制的【杀】');
+    markSkillSound(g, '神速');
+    
+    return g;
+  });
+}
+
+// 发动神速2
+function triggerShensu2() {
+  tx(g => {
+    const seat = mySeat;
+    const p = g.players[seat];
+    
+    if (!p || !p.alive || !hasCap(p, 'shensu') || g.shensuUsed) return g;
+    
+    // 标记神速已使用
+    g.shensuUsed = true;
+    
+    // 检查是否有装备牌可以弃置
+    let equipToDiscard = findShensuEquipToDiscard(p);
+    if (!equipToDiscard) {
+      // 检查手牌中的装备牌
+      const equipInHand = findShensuEquipCardInHand(p);
+      if (equipInHand !== null) {
+        equipToDiscard = { type: 'hand', index: equipInHand };
+      }
+    }
+    
+    if (!equipToDiscard) {
+      g.log = pushLog(g.log, p.name + ' 没有装备牌可弃置,无法发动【神速2】');
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 弃置装备牌
+    if (equipToDiscard.type === 'equip') {
+      discardShensuEquip(g, seat, equipToDiscard);
+    } else if (equipToDiscard.type === 'hand') {
+      discardShensuCardFromHand(g, seat, equipToDiscard.index);
+    }
+    
+    // 设置跳过出牌阶段标记
+    g.shensuSkipPlay = true;
+    
+    // 计算需要使用的杀数量
+    // 如果已经发动过神速1，那么这是第二刀杀
+    const shaCount = g.shensuShaRemaining + 1;
+    g.shensuShaRemaining = shaCount;
+    
+    // 设置杀的目标选择
+    g.pending = {
+      type: 'shensuSha',
+      seat: seat,
+      remaining: shaCount,
+      noDistance: true,
+      fromShensu: shaCount > 1 ? 'shensu1+2' : 'shensu2'
+    };
+    
+    g.phase = 'shensuSha';
+    g.log = pushLog(g.log, p.name + ' 发动【神速2】,跳过出牌阶段并弃置装备牌,需使用' + shaCount + '张无距离限制的【杀】');
+    markSkillSound(g, '神速');
+    
+    return g;
+  });
+}
+
+// 辅助函数：查找要弃置的装备牌（装备区）
+function findShensuEquipToDiscard(player) {
+  const equips = player.equips || {};
+  const slots = ['weapon', 'armor', 'plus1', 'minus1'];
+  
+  for (const slot of slots) {
+    if (equips[slot]) {
+      return { type: 'equip', slot, card: equips[slot] };
+    }
+  }
+  return null;
+}
+
+// 辅助函数：查找手牌中的装备牌
+function findShensuEquipCardInHand(player) {
+  const hand = player.hand || [];
+  // 装备牌列表
+  const equipNames = ['诸葛连弩', '丈八蛇矛', '青釭剑', '麒麟弓', '青龙偃月刀', 
+                     '寒冰剑', '方天画戟', '古锭刀', '贯石斧', '的卢', '绝影', 
+                     '爪黄飞电', '大宛', '赤兔', '紫骍', '骕骦', '八卦阵', '仁王盾'];
+  
+  for (let i = 0; i < hand.length; i++) {
+    if (hand[i] && equipNames.includes(hand[i].name)) {
+      return i; // 返回手牌中的索引
+    }
+  }
+  return null;
+}
+
+// 辅助函数：弃置一张装备
+function discardShensuEquip(g, seat, equipInfo) {
+  const player = g.players[seat];
+  if (!player || !player.alive) return;
+  
+  const slot = equipInfo.slot;
+  const card = equipInfo.card;
+  
+  if (player.equips && player.equips[slot] === card) {
+    player.equips[slot] = null;
+    g.discard.push(card);
+    g.log = pushLog(g.log, player.name + ' 弃置了装备牌【' + card.name + '】');
+  }
+}
+
+// 辅助函数：从手牌中弃置一张装备牌
+function discardShensuCardFromHand(g, seat, cardIndex) {
+  const player = g.players[seat];
+  if (!player || !player.alive) return;
+  
+  const card = player.hand[cardIndex];
+  if (card) {
+    player.hand.splice(cardIndex, 1);
+    g.discard.push(card);
+    g.log = pushLog(g.log, player.name + ' 弃置了手牌中的装备牌【' + card.name + '】');
+  }
+}
+
+// 处理神速杀的目标选择
+function respondShensuSha(targetSeat) {
+  tx(g => {
+    if (g.pending.type !== 'shensuSha' || g.pending.seat !== mySeat) return g;
+    
+    const me = g.players[mySeat];
+    const target = g.players[targetSeat];
+    
+    if (!target || !target.alive) return g;
+    
+    // 使用一张无距离限制的普通杀
+    const sha = { 
+      name: '杀', 
+      suit: '♠', 
+      rank: 2, 
+      id: 'shensu_sha_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)
+    };
+    
+    // 调用标准的杀处理函数
+    // 神速的杀不计入出杀次数限制，所以传递 skipShaLimit 标记
+    const shaInfo = {
+      noDistance: true,
+      fromShensu: true,
+      shensuType: g.pending.fromShensu,
+      skipShaLimit: true
+    };
+    
+    resolveShaUse(g, g.players[mySeat], targetSeat, '无距离限制的【杀】', singleCardShaColor(sha), sha, shaInfo);
+    
+    // 减少剩余杀数量
+    let remaining = (g.pending.remaining || 1) - 1;
+    
+    if (remaining > 0) {
+      // 更新剩余数量，继续等待选择下一个目标
+      g.pending.remaining = remaining;
+      g.log = pushLog(g.log, me.name + ' 还需要使用' + remaining + '张无距离限制的普通【杀】');
+    } else {
+      // 完成所有杀的使用
+      g.pending = null;
+      g.shensuShaRemaining = 0;
+      
+      // 检查是否需要跳过阶段
+      if (g.shensuSkipJudgingAndDraw && g.shensuSkipPlay) {
+        // 同时发动了神速1和神速2
+        g.shensuSkipJudgingAndDraw = false;
+        g.shensuSkipPlay = false;
+        g.phase = 'discard';
+        g.log = pushLog(g.log, me.name + ' 【神速1+2】效果生效，跳过判定、摸牌和出牌阶段，进入弃牌阶段');
+      } else if (g.shensuSkipJudgingAndDraw) {
+        // 只发动了神速1
+        g.shensuSkipJudgingAndDraw = false;
+        g.phase = 'play';
+        g.log = pushLog(g.log, me.name + ' 【神速1】效果生效，跳过判定和摸牌阶段，进入出牌阶段');
+      } else if (g.shensuSkipPlay) {
+        // 只发动了神速2
+        g.shensuSkipPlay = false;
+        g.phase = 'discard';
+        g.log = pushLog(g.log, me.name + ' 【神速2】效果生效，跳过出牌阶段，进入弃牌阶段');
+      } else {
+        // 正常返回出牌阶段
+        g.phase = 'play';
+      }
+    }
+    
+    return g;
+  });
+}
+
+// 跳过神速1
+function skipShensu1() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'shensuChoose1' && g.pending.seat === mySeat) {
+      g.pending = null;
+      g.phase = 'judge';
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 选择不发动【神速1】');
+    }
+    return g;
+  });
+}
+
+// 跳过神速2
+function skipShensu2() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'shensuChoose2' && g.pending.seat === mySeat) {
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 选择不发动【神速2】');
+    }
+    return g;
+  });
+}
+
+// 取消神速杀选择
+function cancelShensuSha() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'shensuSha' && g.pending.seat === mySeat) {
+      g.pending = null;
+      g.shensuShaRemaining = 0;
+      
+      // 检查是否有阶段跳过效果需要处理
+      if (g.shensuSkipJudgingAndDraw && g.shensuSkipPlay) {
+        g.shensuSkipJudgingAndDraw = false;
+        g.shensuSkipPlay = false;
+        g.phase = 'discard';
+        g.log = pushLog(g.log, g.players[mySeat].name + ' 取消使用【杀】，但【神速1+2】阶段跳过效果仍生效');
+      } else if (g.shensuSkipJudgingAndDraw) {
+        g.shensuSkipJudgingAndDraw = false;
+        g.phase = 'play';
+        g.log = pushLog(g.log, g.players[mySeat].name + ' 取消使用【杀】，但【神速1】阶段跳过效果仍生效');
+      } else if (g.shensuSkipPlay) {
+        g.shensuSkipPlay = false;
+        g.phase = 'discard';
+        g.log = pushLog(g.log, g.players[mySeat].name + ' 取消使用【杀】，但【神速2】阶段跳过效果仍生效');
+      } else {
+        g.phase = 'play';
+      }
+    }
     return g;
   });
 }

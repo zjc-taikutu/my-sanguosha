@@ -400,6 +400,11 @@ function normalize(g){
   if(typeof g.skipDraw!=='boolean') g.skipDraw=false;
   // 张郃【巧变】完整版:跳过弃牌阶段的标志位,和 g.skipDraw/g.skipPlay 同款防御
   if(typeof g.skipDiscard!=='boolean') g.skipDiscard=false;
+  // 夏侯渊【神速】:相关标志位
+  if(typeof g.shensuUsed!=='boolean') g.shensuUsed=false;
+  if(typeof g.shensuSkipJudgingAndDraw!=='boolean') g.shensuSkipJudgingAndDraw=false;
+  if(typeof g.shensuSkipPlay!=='boolean') g.shensuSkipPlay=false;
+  if(typeof g.shensuShaRemaining!=='number') g.shensuShaRemaining=0;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
   // 吕蒙【克己】辅助标志:本回合是否在决斗中打出过杀,和 g.shaUsed 同款防御
   if(typeof g.shaPlayedInDuel!=='boolean') g.shaPlayedInDuel=false;
@@ -414,6 +419,10 @@ function normalize(g){
   if(typeof g.qingNangUsed!=='boolean') g.qingNangUsed=false;
   // 荀彧【驱虎】:出牌阶段限一次
   if(typeof g.quHuUsed!=='boolean') g.quHuUsed=false;
+  // 太史慈【天义】:回合内使用标记 + 本阶段拼点结果标记
+  if(typeof g.tianyiUsed!=='boolean') g.tianyiUsed=false;
+  if(typeof g.tianyiWin!=='boolean') g.tianyiWin=false;
+  if(typeof g.tianyiLose!=='boolean') g.tianyiLose=false;
   // 貂蝉【离间】:出牌阶段限一次
   if(typeof g.liJianUsed!=='boolean') g.liJianUsed=false;
   // 周瑜【反间】:出牌阶段限一次
@@ -434,6 +443,37 @@ function normalize(g){
   // 曾经两者共用一段校验、都要求 selfCard 非空,quhuDamageChoice 从来不带这个字段,
   // 导致刚设置好 pending 就被下一次 normalize 判定"无效"直接清空、phase 打回 'play'——
   // 真实 bug:拼点赢了之后完全没机会选目标,见 CLAUDE.md 记录。
+  // 夏侯渊【神速】选择阶段
+  if(g.pending && g.pending.type==="shensuChoose1"){
+    const d = g.pending;
+    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending = null; g.phase = "judge";
+    }
+  }
+  if(g.pending && g.pending.type==="shensuChoose2"){
+    const d = g.pending;
+    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending = null; g.phase = "play";
+    }
+  }
+  if(g.pending && g.pending.type==="shensuSha"){
+    const d = g.pending;
+    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.remaining!=="number" || d.remaining <= 0 ||
+       typeof d.noDistance!=="boolean"){
+      g.pending = null;
+      g.phase = g.shensuSkipJudgingAndDraw ? "play" : (g.shensuSkipPlay ? "discard" : "play");
+    }
+  }
+  if(g.pending && g.pending.type==="shensuShaRespond"){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=="number" || typeof d.targetSeat!=="number" ||
+       !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       typeof d.needed!=="number" || typeof d.played!=="number"){
+      g.pending = null; g.phase = "play";
+    }
+  }
   if(g.pending && g.pending.type==='quhuRespond'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
@@ -445,6 +485,15 @@ function normalize(g){
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !Array.isArray(d.targets) || d.targets.length===0
        || !g.players[d.seat] || !g.players[d.targetSeat] || !d.targets.every(t=>Number.isInteger(t) && g.players[t] && g.players[t].alive)){
       g.pending=null; g.phase='play';
+    }
+  }
+  // 太史慈【天义】拼点阶段:pending 应包含 type、seat、targetSeat、selfCard 等字段
+  if(g.pending && g.pending.type==='tianyiRespond'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !d.selfCard || typeof d.selfCard.rank!=='number'){
+      g.pending = null; g.phase = 'play';
     }
   }
   if(g.pending && g.pending.type==='fanjianSuit'){
@@ -651,6 +700,15 @@ function finishDrawPhase(g, seat, n){
   
   // 乐不思蜀/张郃【巧变】:摸牌阶段照常摸牌,只是不给出牌(或弃牌)机会——advancePastPlay
   // 统一判断出牌/弃牌阶段是否被跳过,不在这里各自重复逻辑。
+  
+  // 夏侯渊【神速2】: 摸牌完成后检查是否可以发动
+  if (hasCap(g.players[seat], 'shensu') && !g.shensuUsed && seat === mySeat) {
+    g.pending = { type: 'shensuChoose2', seat: seat };
+    g.phase = 'shensuChoose2';
+    g.log = pushLog(g.log, g.players[seat].name + ' 可以发动【神速】跳过出牌阶段并弃置装备牌');
+    return;
+  }
+  
   advancePastPlay(g);
 }
 function damageAmount(g, sourceSeat, baseAmount, cardType){
@@ -785,7 +843,7 @@ function finishGuicai(g, finalCard){
     return;
   }
   if(resume.kind==='tieqiJudge'){
-    finishTieqiJudge(g, resume.from, resume.to, finalCard, resume.sourceCard);
+    finishTieqiJudge(g, resume.from, resume.to, finalCard, resume.sourceCard, undefined);
     return;
   }
   if(resume.kind==='luoshenJudge'){
@@ -1207,19 +1265,31 @@ function respondShuangxiong(activate){
 const CARD_PLAYS = {
   '杀': {
     target:true,
-    canPlay:(g,me,card)=> canUseAs(me,card,'杀') && (!g.shaUsed || hasCap(me,'unlimitedSha')), // 无限杀:张飞【咆哮】或诸葛连弩
+    canPlay:(g,me,card)=> {
+      // 太史慈【天义】:天义输时不能使用杀
+      if(g.tianyiLose && hasCap(me,'tianyi')) return false;
+      // 太史慈【天义】:天义赢时无视出杀次数限制
+      if(g.tianyiWin && hasCap(me,'tianyi')) return canUseAs(me,card,'杀');
+      // 正常判断
+      return canUseAs(me,card,'杀') && (!g.shaUsed || hasCap(me,'unlimitedSha')); // 无限杀:张飞【咆哮】或诸葛连弩
+    },
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
       // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【杀】的目标——距离校验之外额外叠加的
       // 一层限制,和距离一样都是"canTarget"这个 seam 的用途(见架构约定:只有杀挂了canTarget)。
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
+      // 太史慈【天义】:天义赢时无距离限制
+      if(g.tianyiWin && hasCap(me,'tianyi')) return true;
       return canReachSha(g, mySeat, targetSeat); // 只有杀受攻击距离限制
     },
     effect:(g,me,card,targetSeat)=>{
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
-      g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+      // 太史慈【天义】:天义赢时不消耗出杀次数（次数上限+1的效果）
+      if(!(g.tianyiWin && hasCap(me,'tianyi'))) {
+        g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+      }
       triggerJiangOnTarget(g, mySeat, targetSeat, 'sha', isRed(card));
-      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card);
+      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, undefined);
     }
   },
   '桃': {
@@ -1486,14 +1556,27 @@ function playCard(cardIdx, actionId, targetSeat){
 // 的合成杀完全绕过、不管用两张什么颜色的牌合成都不生效——真实规则里合成杀是有颜色的
 // (两张都红→红,两张都黑→黑,一红一黑→无色),不是"没有颜色"。改成 shaColor 之后这个
 // bug 自然消失,不需要在这里特殊处理"丈八蛇矛"这个武器,颜色早在调用方就算对了。
-function resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard){
+function resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo){
   const fromSeat=g.players.indexOf(me);
   if(maybeStartLiuli(g, fromSeat, targetSeat, usedAs, shaColor, sourceCard)) return;
-  resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard);
+  resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo);
 }
-function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard){
+function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo){
   const fromSeat=g.players.indexOf(me);
   const target=g.players[targetSeat];
+  
+  // 处理神速的杀的特殊标记
+  const isShensuSha = shaInfo && shaInfo.fromShensu;
+  const skipShaLimit = shaInfo && shaInfo.skipShaLimit;
+  const noDistance = shaInfo && shaInfo.noDistance;
+  
+  // 检查距离限制：如果是无距离限制的杀，跳过距离检查
+  if(!noDistance && !canReachSha(g, fromSeat, targetSeat)){
+    g.log=pushLog(g.log, me.name + ' 对 ' + target.name + ' 的攻击距离不足');
+    finishSingleShaTarget(g);
+    return;
+  }
+  
   // 于禁【毅重】(锁定技,目标无防具+黑色杀)/ 仁王盾(装备了这件防具+黑色杀) → 直接无效,
   // 不进响应阶段、不消耗闪、不受伤。两者共用同一个 hasCap 入口(武将能力/装备能力不分来源),
   // 只是 || 一个条件——"目标无防具"和"目标装备了仁王盾"structurally 互斥(装备区防具槽
@@ -1524,7 +1607,7 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard){
       return;
     }
   }
-  continueShaAfterTieqi(g, fromSeat, targetSeat, false, sourceCard);
+  continueShaAfterTieqi(g, fromSeat, targetSeat, false, sourceCard, shaInfo);
 }
 // respondLiegong: 仅攻击者(pending.from)可响应。不需要判定,玩家的选择直接就是 noShan 的值——
 // 复用 continueShaAfterTieqi 同一条尾巴(和铁骑判红共用"不可被闪抵消"这一效果)。
@@ -1559,7 +1642,7 @@ function respondJiedao(useSha){
       markCardSound(g, '杀', mySeat, card, seatB);
       if(card.name!=='杀'){ if(hasCap(A,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(A,'wusheng')) markSkillSound(g,'武圣'); }
       g.pending=null;
-      resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', singleCardShaColor(card), card);
+      resolveShaUse(g, A, seatB, '借刀杀人:出【杀】', singleCardShaColor(card), card, undefined);
       return g;
     }
     const weapon=A.equips.weapon;
@@ -1584,7 +1667,7 @@ function respondJiedao(useSha){
 // tryBagua(根本不给判定机会),进响应阶段但 pending.noShan 标记会挡掉出闪。是谁、为什么触发
 // noShan(铁骑判红、还是烈弓数值条件)由调用方(finishTieqiJudge/respondLiegong)自己记日志,
 // 这里只管接回流程,不重复归因到某个具体技能。
-function continueShaAfterTieqi(g, from, to, noShan, sourceCard){
+function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaInfo){
   const me=g.players[from];
   g.pending={from, to, noShan};
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
@@ -1619,25 +1702,25 @@ function respondTieqi(activate){
     const from=g.pending.from, to=g.pending.to;
     if(!activate){
       g.log=pushLog(g.log, g.players[from].name+'：不发动【铁骑】');
-      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard);
+      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, undefined);
       return g;
     }
     const card=judge(g);
-    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard); return g; } // 无牌可判,视为未发动
+    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, undefined); return g; } // 无牌可判,视为未发动
     if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard})==='pending') return g;
-    finishTieqiJudge(g, from, to, card, g.pending.sourceCard);
+    finishTieqiJudge(g, from, to, card, g.pending.sourceCard, undefined);
     return g;
   });
 }
 // finishTieqiJudge: 铁骑判定结算(不管是否被鬼才改判过)。红=不可被闪抵消,黑=无事发生。
-function finishTieqiJudge(g, from, to, card, sourceCard){
+function finishTieqiJudge(g, from, to, card, sourceCard, shaInfo){
   const red=isRedForPlayer(g.players[from], card);
   g.log=pushLog(g.log, g.players[from].name+' 发动【铁骑】,判定为'+(red?'红':'黑'));
   // 天妒:铁骑判定归属者是 from(发动铁骑的攻击者)自己的判定,若 from 恰好是郭嘉可以收下判定牌
   // (现实中不会发生——铁骑是马超专属 cap,一人不能同时是马超又是郭嘉——但函数写法上不应该
   // 硬编码排除这种情况,和 maybeTiandu 本身"只查 hasCap,不硬编码武将名"的原则一致)。
   maybeTiandu(g, from, card);
-  continueShaAfterTieqi(g, from, to, red, sourceCard);
+  continueShaAfterTieqi(g, from, to, red, sourceCard, shaInfo);
 }
 // playZhangbaSha: 丈八蛇矛特效——任意两张手牌当一个【杀】。与 playCard 平级(playCard 只吃单张)。
 // 次数/距离/目标响应与普通杀完全一致(共用 resolveShaUse);仅"凑杀"方式不同。
@@ -1663,7 +1746,7 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
     // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
     // 不是"没有颜色"——c1/c2 是 splice 之前存的引用,不受后面 splice 影响。
-    resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2), [c1, c2]);
+    resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2), [c1, c2], undefined);
     // 丈八蛇矛是两张牌合成一个杀,没有单一牌面对象可传(c1/c2 是两张不同的牌,传其中任一张
     // 都是拼凑/误导),中央出牌区只传座位(仍能显示"谁"),card 留空退化为不显示牌面。
     markCardSound(g, '杀', mySeat, null, targetSeat); // 丈八蛇矛两张当杀不走 playCard 统一出口,单独补一次
@@ -1704,7 +1787,7 @@ function playShaFangtian(cardIdx, targets){
     const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
     g.log=pushLog(g.log, me.name+' 发动【方天画戟】,'+usedAs+',指定 '+order.length+' 个目标：'+order.map(t=>g.players[t].name).join('、'));
     g.fangtianQueue = { from:mySeat, targets:order, idx:0, usedAs, shaColor:singleCardShaColor(card), sourceCard:card };
-    resolveShaUse(g, me, order[0], usedAs, singleCardShaColor(card), card);
+    resolveShaUse(g, me, order[0], usedAs, singleCardShaColor(card), card, undefined);
     markCardSound(g, '杀', mySeat, card, order); // 方天画戟多目标出杀不走 playCard 统一出口,单独补一次
     return g;
   });
@@ -2445,7 +2528,7 @@ function advanceFangtianQueue(g){
   q.idx++;
   while(q.idx<q.targets.length && (!g.players[q.targets[q.idx]] || !g.players[q.targets[q.idx]].alive)) q.idx++;
   if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.phase='play'; return; }
-  resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard);
+  resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard, undefined);
 }
 // checkWin: 存活<=1 则结束游戏(置 over/winner、清理 pending/aoe、记日志),返回 true;否则 false。
 function checkWin(g){
@@ -3040,7 +3123,9 @@ function startTurn(g, seat){
     g.roundSeatsActed.push(seat);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false;
+  // 夏侯渊【神速】
+  g.shensuUsed = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌
   const p = g.players[seat];
@@ -3063,6 +3148,33 @@ function startTurn(g, seat){
 // 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段,交给 advancePastPlay 继续判断
 // 出牌/弃牌阶段是否也被跳过——不在这里各自重复"检查下一个标志"的逻辑。
 function enterDrawPhase(g){
+  const p = g.players[g.turn];
+  if(!p || !p.alive) return;
+  
+  // 夏侯渊【神速1】: 在判定阶段开始前检查是否可以发动
+  if (hasCap(p, 'shensu') && !g.shensuUsed && !g.shensuSkipJudgingAndDraw) {
+    g.pending = { type: 'shensuChoose1', seat: g.turn };
+    g.phase = 'shensuChoose1';
+    g.log = pushLog(g.log, p.name + ' 可以发动【神速】跳过判定和摸牌阶段');
+    return;
+  }
+  
+  // 夏侯渊【神速2】的第二个触发点：刚发动完神速1后，即将进入出牌阶段前
+  if (hasCap(p, 'shensu') && g.shensuSkipJudgingAndDraw && !g.shensuUsed) {
+    g.pending = { type: 'shensuChoose2', seat: g.turn };
+    g.phase = 'shensuChoose2';
+    g.log = pushLog(g.log, p.name + ' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
+    return;
+  }
+  
+  // 检查神速1效果：如果已经发动神速1并需要跳过判定和摸牌
+  if (g.shensuSkipJudgingAndDraw) {
+    g.shensuSkipJudgingAndDraw = false;
+    g.phase = 'play';
+    g.log = pushLog(g.log, p.name + ' 【神速1】效果生效，跳过判定和摸牌阶段');
+    return;
+  }
+  
   if(g.skipDraw){
     g.skipDraw=false;
     g.log=pushLog(g.log, g.players[g.turn].name+' 因【兵粮寸断】跳过摸牌阶段');
@@ -3142,7 +3254,14 @@ function advancePastPlay(g){
     g.skipPlay=false;
     g.log=pushLog(g.log, g.players[g.turn].name+' 因【乐不思蜀】跳过出牌阶段');
     advancePastDiscard(g);
+  } else if(g.shensuSkipPlay){
+    g.shensuSkipPlay=false;
+    g.log=pushLog(g.log, g.players[g.turn].name+' 【神速2】效果生效，跳过出牌阶段');
+    advancePastDiscard(g);
   } else {
+    // 太史慈【天义】:出牌阶段开始时重置阶段标志
+    g.tianyiWin = false;
+    g.tianyiLose = false;
     g.phase='play';
   }
 }

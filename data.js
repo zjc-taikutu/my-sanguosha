@@ -333,6 +333,12 @@ const GENERALS = {
   lusu:          { id:'lusu',          name:'鲁肃',   gender:'male', maxHp:3, skill:'好施/缔盟',
     desc:'好施:摸牌阶段,你可以多摸两张牌,然后若你的手牌数大于5,你将一半的手牌(向下取整)交给除你以外全场手牌数最少的一名其他角色。缔盟:出牌阶段限一次,你可以选择两名其他角色并弃置X张牌(X为这两名角色的手牌数之差),令他们交换手牌。',
     caps:{ haoshi:true, extraDrawPhase:2, dimeng:true } },
+  xiahouyuan:    { id:'xiahouyuan',    name:'夏侯渊', gender:'male', maxHp:4, skill:'神速',
+    desc:'神速:出牌阶段限一次,你可以选择:1.准备阶段结束后,可以跳过判定和摸牌阶段,视为使用一张无距离限制的【杀】,然后进入出牌阶段;2.摸牌阶段结束后,可以跳过出牌阶段并弃置一张装备牌,视为使用一张无距离限制的【杀】,然后进入弃牌阶段。',
+    caps:{ shensu:true } },
+  taishici:      { id:'taishici',      name:'太史慈',   gender:'male', maxHp:4, skill:'天义',
+    desc:'天义:出牌阶段限一次,你可以与一名角色拼点,然后本阶段:若你赢,则你使用【杀】的次数上限+1、使用【杀】无距离限制、使用【杀】的目标数上限+1;否则你不能使用【杀】。',
+    caps:{ tianyi:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
