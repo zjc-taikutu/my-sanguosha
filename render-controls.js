@@ -19,7 +19,8 @@
 // 【留在 render.js 的三方共用函数，不在这里】showConfirm/confirmAndPlay/resolveActionId/
 // canShuangxiongDuelCard/playConfirmMsg/seatColor/setBanner——这些都被 render()/
 // renderControls/render-hand.js 三者中的至少两个共用，经核实后确认留在 core。
-// seatSlot 只被 render() 用，和 renderControls 无关，同样不在这里。
+// seatSlot(旧版环绕布局的槽位分配函数)已在骨架级重建(landscape-ui)里删除——对手行
+// 改用简单的回合顺序线性排列(见 render.js 的 oppOrder),不再需要按象限分配槽位。
 
 
 // ---------- helper functions ----------
@@ -1601,7 +1602,7 @@ function renderControls(g){
     setBanner(escapeHtml(from)+' 对 '+escapeHtml(to)+' 的【杀】被【闪】抵消,'+escapeHtml(from)+' 是否发动【青龙偃月刀】…');
     return;
   }
-  // 陆逊【连营】:失去最后1张手牌时是否发动
+  // 陆逊【连营】:失去最后1张手牌时是否发动（merge from wenwen_dev；main 曾 revert，本支保留）
   if(g.phase==='lianyingAsk' && g.pending && g.pending.type==='lianyingAsk' && g.pending.seat===mySeat){
     const b1=document.createElement('button'); b1.className='primary';
     b1.textContent='发动【连营】'; b1.onclick=()=>respondLianying(true);
@@ -1618,6 +1619,7 @@ function renderControls(g){
     return;
   }
   // 贯石斧:杀被闪抵消,装备者(攻击者)可弃自己2张牌(手牌/装备混合toggle多选)令这张杀依然
+  // 造成伤害。恰好选够2项才出现"确认发动";同屏始终有"不发动"。
   if(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat){
     const to=g.players[g.pending.to].name;
     const opts=guanshifuOptions(g.players[mySeat]);
