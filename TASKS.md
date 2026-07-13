@@ -13,7 +13,7 @@
 - [x] 静态回归检查（python，31 项）
 
 ## Phase 3/3 — 收尾
-- [ ] git commit / push
+- [x] git commit / push（`a43f40c` → `origin/wenwen_dev`）
 - [ ] 真机/浏览器联机抽测（无言南蛮、将驰三选一、落英弃梅花、酒诗②翻面）
 
 ### 关键成果
