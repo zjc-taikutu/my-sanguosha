@@ -2657,6 +2657,25 @@ function renderControls(g){
     setBanner(escapeHtml(from)+' 的【麒麟弓】发动,正在选择弃置 '+escapeHtml(to)+' 的哪匹坐骑…');
     return;
   }
+  if(g.pending && g.pending.type==='guhuoQuestion'){
+    const d=g.pending;
+    const source=g.players[d.sourceSeat];
+    if(d.asking===mySeat && !(me && me.chanyuan)){
+      setBanner((source?source.name:'于吉')+' 发动【蛊惑】声明为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】,是否质疑?');
+      const qb=document.createElement('button'); qb.className='primary';
+      qb.textContent='质疑';
+      qb.onclick=()=>respondGuhuoQuestion(true);
+      c.appendChild(qb);
+      const nb=document.createElement('button'); nb.className='ghost';
+      nb.textContent='不质疑';
+      nb.onclick=()=>respondGuhuoQuestion(false);
+      c.appendChild(nb);
+    } else {
+      const asker=g.players[d.asking];
+      setBanner((asker?asker.name:'其他玩家')+' 正在决定是否质疑【蛊惑】…');
+    }
+    return;
+  }
   if(!myTurn){
     setBanner('等待 '+escapeHtml(g.players[g.turn].name)+' 行动…');
     return;
@@ -2908,25 +2927,6 @@ function renderControls(g){
     if(g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat!==mySeat){
       const source = g.players[g.pending.sourceSeat];
       setBanner(source ? source.name + ' 正在确认【乱击】…' : '有人正在确认【乱击】…');
-      return;
-    }
-    if(g.pending && g.pending.type==='guhuoQuestion'){
-      const d=g.pending;
-      const source=g.players[d.sourceSeat];
-      if(d.asking===mySeat && !(me && me.chanyuan)){
-        setBanner((source?source.name:'于吉')+' 发动【蛊惑】声明为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】,是否质疑?');
-        const qb=document.createElement('button'); qb.className='primary';
-        qb.textContent='质疑';
-        qb.onclick=()=>respondGuhuoQuestion(true);
-        c.appendChild(qb);
-        const nb=document.createElement('button'); nb.className='ghost';
-        nb.textContent='不质疑';
-        nb.onclick=()=>respondGuhuoQuestion(false);
-        c.appendChild(nb);
-      } else {
-        const asker=g.players[d.asking];
-        setBanner((asker?asker.name:'其他玩家')+' 正在决定是否质疑【蛊惑】…');
-      }
       return;
     }
     if(g.pending && g.pending.type==='guhuoTarget'){
