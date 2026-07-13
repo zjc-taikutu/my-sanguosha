@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>极简三国杀 · 三人联机</title>
 
 <!-- Firebase (compat build, loaded from Google's CDN). These only run when you DEPLOY this file. -->
@@ -17,6 +17,11 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;}
+  /* 安全区(env(safe-area-inset-*)):横屏下 iPhone 的刘海/手势条位于屏幕两侧和底部,
+     之前完全没有处理(实测 body 的 padding-left/right/bottom 都是 0px)。配合 <head>
+     里 viewport-fit=cover(允许页面内容延伸到安全区之外、由页面自己负责避让),这里给
+     body 补上四个方向的 env() padding——不支持 env() 的浏览器/非刘海设备上,env() 求值
+     为 0,不影响任何现有布局;真正的横屏刘海设备上才会生效,让出两侧/底部的安全空间。 */
   body{
     background:
       radial-gradient(120% 80% at 50% -10%, #2a2420 0%, var(--ink) 60%),
@@ -25,6 +30,9 @@
     font-family:"Songti SC","Noto Serif SC",ui-serif,"STSong",serif;
     -webkit-font-smoothing:antialiased; line-height:1.5;
     min-height:100%;
+    padding-left:env(safe-area-inset-left);
+    padding-right:env(safe-area-inset-right);
+    padding-bottom:env(safe-area-inset-bottom);
   }
   .wrap{max-width:880px;margin:0 auto;padding:18px 16px 40px;}
 
@@ -515,6 +523,20 @@
     .seat-identity{top:15px;width:11px;height:11px;}
     .seat .seat-info-badge{top:27px;width:11px;height:11px;font-size:7px;}
   }
+  /* 横屏矮视口(见下方 max-height:460px 断点)把座位卡尺寸驱动方向反转成"按高度算宽度"
+     之后,7人局在 SE 这类矮视口下能算出比这之前任何"按宽度分档"场景都窄的卡(实测约
+     70px 宽、94px 高)——比上面 115px 这一档设计时参照的最坏情况(96.5px 宽)还要窄。
+     115px 那档的尺寸不够收,叠加内容(势力+4字武将名竖排+血量胶囊)总高度会比卡高多出
+     几像素、顶出卡片底部(真实测出的回归,不是猜的)。新增这一档专门收更紧,不修改上面
+     115px 那档(它仍然服务于"按宽度分档"的老场景,数值不变)。 */
+  @container (max-width:85px){
+    .seat-left{top:11px;gap:0;}
+    .seat-faction{width:8px;height:8px;}
+    .seat-gen-name{font-size:7px;letter-spacing:-.5px;}
+    .seat-hp-col{font-size:7px;padding:1px 1px;}
+    .seat-identity{top:11px;width:10px;height:10px;}
+    .seat .seat-info-badge{top:22px;width:10px;height:10px;font-size:6px;}
+  }
   /* 三选一选将阶段:候选卡片纵向堆叠,继续用 .avatar-box/.avatar/.avatar-placeholder
      这套独立于座位卡片的头像展示(侧边固定宽度+信息在旁边),和上面 .seat-art
      (铺满整卡+文字叠加)刻意不共用——选将卡片不需要文字叠图片那一整套遮罩/底衬,
@@ -950,6 +972,118 @@
   }
   .landscape-gate-text{font-size:18px;color:var(--paper);letter-spacing:.06em;line-height:1.6;}
 
+  /* ===== 手机横屏矮视口:全页面纵向压缩(修真机"一屏装不下"的bug) =====
+     **实测数据先于这段CSS存在,不是拍脑袋写的**:用 Playwright 在真实的"宽而矮"横屏
+     视口(iPhone SE 667×375 / iPhone 12·13 844×390 / iPhone 16 874×402,注意是宽×高,
+     高度是小的那个数)里跑完整布局,量出全页面纵向内容总量约 1163px——是这三档真机
+     视口高度的近 3 倍。**关键发现:不是只有座位卡超高**——剔除座位卡这个最大单项开销
+     (对手行279px+"我"的卡293px)之后,剩余的固定开销(标题栏91px+中央出牌区64px+
+     信息条243px+两行手牌标签36px+页脚提示37px,外加各处margin/padding)仍有约
+     700~750px,本身就已经是视口高度的近2倍——这不是"座位卡 aspect-ratio 方向反了"
+     这一个局部问题,是**全项目此前没有任何一条 @media (max-height:...) 规则、所有
+     断点清一色只按视口宽度分档**这个更根本的缺口(所有此前的验证,包括这次骨架级重建
+     反复截图确认过的"iPhone SE横屏667px"那一档,量的都是宽度方向,高度这个维度从
+     一开始就没被当作约束条件对待——桌面视口和手机横屏视口在"高度是否吃紧"这件事上
+     给出的是同一个从不吃紧的假象;这条教训记进了 CLAUDE.md 规则22)。
+
+     **座位卡尺寸驱动方向反转,是这次压缩里最核心的一步**:base rule(见上面 .seat/
+     .seat.me)是"设 width(flex/min/max-width),靠 aspect-ratio 反推 height"——这个
+     方向在桌面/横屏宽视口下没问题,但在矮视口下会让 height 完全不受控(宽度按对手
+     人数弹性分配多宽,高度就被反推成多高,和视口还剩多少高度毫无关系)。这里反过来:
+     显式设 height(用 clamp() 夹住一个和视口高度(dvh)相关的值),width:auto,
+     aspect-ratio:3/4 依然保留但求值方向变成"由 height 反推 width"——这是 CSS
+     aspect-ratio 规范本身支持的用法(显式设置一个维度、另一维度 auto,会按比例反推
+     另一维度),不需要额外 JS 计算逐帧读视口高度。
+     **横屏下稀缍的是高度,矮视口里就该让高度当主动变量、宽度当从属变量**——这正是
+     base rule 的方向在这个场景下颠倒过来的地方。
+
+     **"座位卡宽度会不会因此变得太窄不可读"这个疑虑,用实测回答,不是拍脑袋接受或
+     拒绝**:实测(measure_landscape_heights.js + zoom_opp_card.js 放大截图核对)——
+     最终 clamp(70px,25dvh,120px) 这个范围下,SE 横屏(375px高)7人局算出的对手卡宽度
+     实测约 70.3px,比此前"按宽度分档"年代定的90px下限更窄,但已用放大截图核对过这个
+     宽度下最坏文字组合(颜良文丑+青龙偃月刀)仍清晰可读,可读性下限已相应下调到68px
+     (这是设计变化的直接结果,不是回归,详见 CLAUDE.md);2~3人局(对手更少、height
+     会顶到 clamp 的120px上限)算出的宽度明显更宽裕,不构成风险。
+
+     **"我"的卡为什么用独立的、比对手更矮的 height 预算,而不是共用同一个 clamp**:
+     "我"的卡和 .hand(手牌)在同一个 .bottom-row 里左右并排,这一行的实际高度取
+     两者较高的那个——如果"我"的卡沿用桌面语境下"比对手更大更醒目"那个 220px-vs-200px
+     的比例、套进height-驱动的clamp里同样按比例放大,会比手牌卡明显高出一截,那部分
+     多出来的高度只是被浪费掉(手牌卡不会跟着变高,行高仍然取两者较高值),纯属浪费
+     宝贵的纵向预算。这里改成给"我"的卡单独一个更贴近手牌卡实际高度的 clamp,让
+     .bottom-row 这一整行的高度不再被"我"的卡单方面撑高——用实测验证过:调整后
+     .bottom-row 的高度和"我"的卡高度基本相等(不再比手牌卡高出一大截)。 */
+  @media (max-height:460px) and (orientation:landscape){
+    .wrap{padding:4px 8px 4px;}
+    /* h1/.sub 只在"游戏已经开始"时收紧(用 :has() 判断 #game 是否带 hidden class,
+       和大厅遥测里 #game.hidden 的开关是同一个既有机制,不需要新增 JS/新增 class)——
+       大厅界面本身不受这次纵向压缩影响,还是原来宽松的标题栏,矮视口下真正紧张的是
+       "已经在游戏中"这个场景。 */
+    .wrap:has(#game:not(.hidden)) h1{font-size:13px;letter-spacing:.1em;text-indent:.1em;margin:0;}
+    .wrap:has(#game:not(.hidden)) .sub{display:none;}
+    /* footnote("部署后…"这类大厅提示)对已经在游戏中的人毫无意义,纯粹是死重——用
+       CSS 相邻/后继兄弟选择器隐藏(footnote 在 DOM 里排在 #game 之后,可以用
+       #game:not(.hidden) ~ .footnote 判断),不需要碰 JS。大厅阶段(#game 带
+       hidden)footnote 仍正常显示。 */
+    #game:not(.hidden) ~ .footnote{display:none;}
+
+    .opp-row{padding:2px 4px;gap:4px;}
+    .seat{
+      height:clamp(70px, 25dvh, 120px);
+      width:auto;
+      aspect-ratio:3/4;
+      flex:0 0 auto; min-width:0; max-width:none;
+    }
+    /* **"我"的卡最初设计成贴近手牌卡高度(约64px),真实测出两个问题,已推翻那版设计**:
+       ①64px比对手卡矮,违反"我的卡必须比对手更醒目/更大"这条早就定过、有专门回归测试
+       锁定的既有规则(verify_stage1_seatcard.js);②更严重的是,64px这个高度让装备条
+       (4行·cqw字号已经卡在7px下限,行数/字号都缩不动了)在 .seat-scrim-bottom 这层
+       渐变里的相对位置整个移到了渐变已经变得很淡的区域——实测对比度从正常的12~14骤降到
+       2.6~3.2,远低于 WCAG AA 的 4.5(装备条+渐变这套系统是第5~7次微调专门用实测调出来的,
+       是针对"卡高112~260px"这个范围校准的,64px大幅跌出了这个范围,不是"再调一下渐变"
+       就能补的,是从根源上卡片矮到系统设计的下限之下了)。
+       **现在的解法**:给"我"的卡一个和对手同量级、只是略大一点的高度(不再追求贴近
+       手牌卡),牺牲掉"贴近手牌卡高度、bottom-row不浪费空间"这个最初的次要目标,换回
+       "落在装备条+渐变系统已验证过的安全高度范围内"这个更重要的正确性要求——已重新
+       实测确认这个高度下对比度恢复正常(见 debug_scrim_regression.js/verify_seatcard_equipscrim.js/verify_seatcard_round7.js,最低对比度回升到7.45,远高于WCAG AA的4.5)。 */
+    .seat.me{
+      height:clamp(74px, 26.5dvh, 124px);
+      width:auto;
+      flex:none; max-width:none;
+    }
+
+    .table-strip{min-height:24px;padding:2px 4px;}
+    /* #tableStrip 里真正撑起高度的是 .table-card 自己的 min-height:48px(基础规则),
+       .table-strip 的 min-height 只是外层包装,不改 .table-card 本身、上面那行
+       几乎不生效——这是排查溢出时才发现漏改的一处。 */
+    .table-card{min-height:18px;gap:1px;}
+
+    .panel.table{padding:2px 5px;margin:0;gap:1px 6px;}
+    .phase-pill{padding:1px 7px;font-size:9px;letter-spacing:.06em;}
+    .deckinfo{font-size:8px;}
+    .banner{padding:3px 5px;margin:1px 0 0;font-size:10px;line-height:1.25;}
+    .controls{gap:4px;margin-top:1px;}
+    .controls button{padding:3px 7px;font-size:10px;}
+    /* .log-panel(常驻的最近几条日志面板)是排查这次溢出时才发现漏算的一块真实开销
+       (68px+间距,几乎占了 .panel.table 剩余高度的一半)——它和上面 #myGeneral 的
+       完整描述是同一类"有独立入口能查看完整信息、这里只是常驻的便利副本"的东西
+       (点击📜按钮能看完整历史日志),矮视口下空间优先级不如把座位卡/中央出牌区/
+       手牌显示完整,这里直接隐藏,不影响任何功能(日志历史依然可查)。 */
+    .log-panel{display:none;}
+
+    /* #myGeneral(自己的武将名+技能+完整描述)在正常宽视口下只占一行,但描述文字本身
+       长短不一(比如郭嘉天妒+遗计两段说明,是全表最长的一条)——矮视口下宽度也跟着
+       变窄,长描述在窄宽度下会换行、吃掉不可预测的纵向空间。完整描述本来就能通过
+       座位卡的"?"说明入口(showGeneralInfo)随时查看,这里的内联描述是重复信息,
+       这个断点下直接隐藏描述部分(只留"你的武将:XX·技能名"这半句),从根源上
+       避免"某个武将描述特别长导致换行、把手牌行挤到视口外"这个不可控风险,不是
+       只测了几个短描述的武将就当作验证过了。 */
+    .hand-label{font-size:9px;margin:2px 0 1px;}
+    #myGeneral span{display:none;}
+    .bottom-row{gap:6px;}
+    .card{width:44px;height:64px;--badge:12px;}
+  }
+
   .hidden{display:none!important;}
 </style>
 </head>
@@ -1035,16 +1169,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=127"></script>
-<script src="data.js?v=127"></script>
-<script src="room-lifecycle.js?v=127"></script>
-<script src="game.js?v=127"></script>
-<script src="weapons.js?v=127"></script>
-<script src="skills.js?v=127"></script>
-<script src="render.js?v=127"></script>
-<script src="render-table.js?v=127"></script>
-<script src="render-hand.js?v=127"></script>
-<script src="render-controls.js?v=127"></script>
-<script src="render-log.js?v=127"></script>
+<script src="config.js?v=128"></script>
+<script src="data.js?v=128"></script>
+<script src="room-lifecycle.js?v=128"></script>
+<script src="game.js?v=128"></script>
+<script src="weapons.js?v=128"></script>
+<script src="skills.js?v=128"></script>
+<script src="render.js?v=128"></script>
+<script src="render-table.js?v=128"></script>
+<script src="render-hand.js?v=128"></script>
+<script src="render-controls.js?v=128"></script>
+<script src="render-log.js?v=128"></script>
 </body>
 </html>
