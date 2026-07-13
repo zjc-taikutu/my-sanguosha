@@ -4571,13 +4571,16 @@ function respondShan(useShan){
       // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
       if(maybeStartShaOffsetEffects(g, g.pending.from, mySeat, g.pending.sourceCard)) return g;
     } else {
+      const shaFrom = g.pending.from;
+      const shaSourceCard = g.pending.sourceCard;
+      const shaColor = g.pending.shaColor;
       // 寒冰剑:杀命中造成伤害之前,装备者(攻击者)可选择防止此伤害、改为弃置目标两张牌——
       // 目标(mySeat,这一刻要受伤的人)完全没有牌可弃时不能发动,直接走原有的正常受伤流程,
       // 不弹出一个"发动了但没什么可弃"的空询问。
-      const attackerHan=g.players[g.pending.from];
+      const attackerHan=g.players[shaFrom];
       if(hasCap(attackerHan,'hanbing') && hanbingDiscardCount(me)>0){
-        const sourceCard=g.pending.sourceCard;
-        g.pending={type:'hanbingAsk', from:g.pending.from, to:mySeat};
+        const sourceCard=shaSourceCard;
+        g.pending={type:'hanbingAsk', from:shaFrom, to:mySeat};
         if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
         g.phase='hanbingAsk';
         g.log=pushLog(g.log, attackerHan.name+' 是否发动【寒冰剑】,防止伤害,改为弃置 '+me.name+' 两张牌…');
@@ -4587,14 +4590,14 @@ function respondShan(useShan){
       // 若此刻恰好无手牌则这次伤害+1。整体按一次 dealDamage 调用结算(amount 先算好再传),
       // 不拆成两次调用,这样依赖"这次伤害共多少点"的钩子(如郭嘉【天妒】)才能看到正确数值。
       const gudingBonus = hasCap(attacker,'gudingdao') && (me.hand||[]).length===0 ? 1 : 0;
-      const dying = dealDamage(g, mySeat, damageAmount(g, g.pending.from, 1+gudingBonus, 'sha'), g.pending.from, '不闪', 'sha', g.pending.sourceCard);
+      const dying = dealDamage(g, mySeat, damageAmount(g, shaFrom, 1+gudingBonus, 'sha'), shaFrom, '不闪', 'sha', shaSourceCard);
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
-      if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
+      if(maybeStartQilin(g, shaFrom, mySeat)) return g;
       // 公孙瓒【趫猛】:使用黑色【杀】造成伤害后,可以选择目标装备区的一张牌
-      if(maybeStartQiaomeng(g, g.pending.from, mySeat, g.pending.shaColor)) return g;
+      if(maybeStartQiaomeng(g, shaFrom, mySeat, shaColor)) return g;
       // 祝融【烈刃】:使用【杀】造成伤害后,可以与目标拼点
-      if(maybeStartLieRen(g, g.pending.from, mySeat)) return g;
+      if(maybeStartLieRen(g, shaFrom, mySeat)) return g;
     }
     g.pending=null;
     finishSingleShaTarget(g); // 单个目标响应完毕:方天画戟排队中还有下一个则继续,否则回到出牌阶段
