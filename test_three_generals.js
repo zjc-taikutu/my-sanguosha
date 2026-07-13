@@ -76,7 +76,7 @@ assert(controlsSrc.includes("phase==='jiangchiAsk'"), 'UI jiangchi');
 assert(controlsSrc.includes("phase==='luoyingAsk'"), 'UI luoying');
 assert(controlsSrc.includes("phase==='jiushiFlipAsk'"), 'UI jiushi');
 
-assert(indexSrc.includes('?v=126'), 'cache bust 126');
+assert(indexSrc.includes('?v=130'), 'cache bust 129');
 
 // 非基本牌口径:装备不是 BASIC_CARDS
 assert(!BASIC_CARDS.includes('过河拆桥'), 'trick not basic');

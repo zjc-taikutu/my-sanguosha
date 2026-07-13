@@ -342,6 +342,18 @@ function continueQiaobianCheck(g, seat){
     g.log=pushLog(g.log, p.name+' 是否发动【巧变】…');
     return;
   }
+  continueShensu1Check(g, seat);
+}
+// 夏侯渊【神速1】:必须在判定区结算(resolveDelayTricks)之前询问。
+// 旧实现挂在 enterDrawPhase(判定之后),导致「跳过判定」永远晚一拍——官方是准备阶段跳过判定+摸牌。
+function continueShensu1Check(g, seat){
+  const p=g.players[seat];
+  if(p && p.alive && hasCap(p,'shensu') && !g.shensuUsed && !g.shensuSkipJudgingAndDraw){
+    g.pending = { type: 'shensuChoose1', seat };
+    g.phase = 'shensuChoose1';
+    g.log = pushLog(g.log, p.name + ' 可以发动【神速】跳过判定和摸牌阶段');
+    return;
+  }
   continueDelayResolution(g, seat);
 }
 
@@ -353,7 +365,7 @@ function qiaobianDecline(){
     if(g.phase!=='qiaobianTurnStart'||!g.pending||g.pending.type!=='qiaobianTurnStart'||g.pending.seat!==mySeat) return g;
     g.log=pushLog(g.log, g.players[mySeat].name+'：不发动【巧变】');
     g.pending=null;
-    continueDelayResolution(g, mySeat);
+    continueShensu1Check(g, mySeat);
     return g;
   });
 }
@@ -367,7 +379,7 @@ function respondQiaobianMove(move){
     if(move) doQiaobianMove(g, move);
     g.pending=null;
     g.skipPlay=true;
-    continueDelayResolution(g, mySeat);
+    continueShensu1Check(g, mySeat);
     return g;
   });
 }
@@ -707,7 +719,10 @@ function pickTianyiCard(cardIdx) {
 
 function pickTianyiTarget(cardIdx, targetSeat) {
   tx(g => {
-    if (g.phase !== 'play' || g.turn !== mySeat) return g;
+    // 天义选目标阶段 phase 是 tianyiPickTarget(不是 play);UI 走客户端 tianyiMode 时也可能直接调本函数
+    const inPendingPick = g.pending && g.pending.type === 'tianyiPickTarget' && g.pending.seat === mySeat;
+    const inClientMode = g.phase === 'play' && g.turn === mySeat && hasCap(g.players[mySeat], 'tianyi') && !g.tianyiUsed;
+    if (!inPendingPick && !inClientMode) return g;
     const me = g.players[mySeat];
     const target = g.players[targetSeat];
     
@@ -1476,25 +1491,28 @@ function startSanyao(g, seat) {
 // 响应散谣 — 选择弃置的牌
 function respondSanyao(cardType, cardIdxOrSlot) {
   tx(g => {
+    if(!g.pending || g.pending.type !== 'sanyao' || g.phase !== 'sanyao') return g;
     const p = g.players[g.pending.from];
-    if(!p || !p.alive || g.phase !== 'sanyao') return g;
+    if(!p || !p.alive) return g;
     const targetSeat = g.pending.target;
     const target = g.players[targetSeat];
-    if(!target || !target.alive) { g.phase = 'play'; return g; }
+    if(!target || !target.alive) { g.pending=null; g.phase = 'play'; return g; }
     
     let discardedCard = null;
     if(cardType === 'hand') {
-      if(!p.hand || p.hand.length === 0) { g.phase = 'play'; return g; }
+      if(!p.hand || p.hand.length === 0) return g;
       const idx = cardIdxOrSlot;
-      if(idx < 0 || idx >= p.hand.length) { g.phase = 'play'; return g; }
+      if(idx < 0 || idx >= p.hand.length) return g;
       discardedCard = p.hand.splice(idx, 1)[0];
     } else if(EQUIP_SLOTS.includes(cardType)) {
-      if(!p.equips || !p.equips[cardType]) { g.phase = 'play'; return g; }
+      if(!p.equips || !p.equips[cardType]) return g;
       discardedCard = p.equips[cardType];
       p.equips[cardType] = null;
     } else if(cardType === 'delay' && typeof cardIdxOrSlot === 'number') {
-      if(!p.delays || cardIdxOrSlot < 0 || cardIdxOrSlot >= p.delays.length) { g.phase = 'play'; return g; }
+      if(!p.delays || cardIdxOrSlot < 0 || cardIdxOrSlot >= p.delays.length) return g;
       discardedCard = p.delays.splice(cardIdxOrSlot, 1)[0];
+    } else {
+      return g;
     }
     
     if(discardedCard && !discardedCard.virtual) {
@@ -1504,9 +1522,12 @@ function respondSanyao(cardType, cardIdxOrSlot) {
     }
     
     g.sanyaoUsed = true;
-    dealDamage(g, targetSeat, 1, undefined, p.name + '发动【散谣】', 'skill', discardedCard);
+    // dealDamage 可能挂起濒死/受伤后技能;若被打断则保留其 pending,不可无条件清空
+    const interrupted = dealDamage(g, targetSeat, 1, undefined, p.name + '发动【散谣】', 'skill', discardedCard);
+    if(interrupted) return g;
     g.pending = null;
     g.phase = 'play';
+    if(checkWin(g)) return g;
     return g;
   });
 }
@@ -2052,13 +2073,13 @@ function respondShensuSha(targetSeat) {
   });
 }
 
-// 跳过神速1
+// 跳过神速1:回到判定区结算链路(不是写一个不存在的 phase='judge')
 function skipShensu1() {
   tx(g => {
     if (g.pending && g.pending.type === 'shensuChoose1' && g.pending.seat === mySeat) {
       g.pending = null;
-      g.phase = 'judge';
       g.log = pushLog(g.log, g.players[mySeat].name + ' 选择不发动【神速1】');
+      continueDelayResolution(g, mySeat);
     }
     return g;
   });
@@ -2432,13 +2453,12 @@ function pickQiangxiTarget(targetSeat) {
     // 标记技能已使用
     g.qiangxiUsed = true;
     
-    // 造成1点伤害
-    dealDamage(g, targetSeat, 1, mySeat, `${me.name} 的【强袭】`, 'qiangxi');
-    
-    // 清理pending
+    // 造成1点伤害;若挂起濒死/受伤后技能,保留其 pending,不可无条件清空
+    const interrupted = dealDamage(g, targetSeat, 1, mySeat, `${me.name} 的【强袭】`, 'qiangxi');
+    if(interrupted) return g;
     g.pending = null;
     g.phase = 'play';
-    
+    if(checkWin(g)) return g;
     return g;
   });
 }
@@ -2455,39 +2475,18 @@ function cancelQiangxi() {
   });
 }
 
-// getAttackRange: 计算角色的攻击范围
+// getAttackRange: 与 game.js 的 attackRange 同口径(武器 range 即攻击距离,无武器默认 1)。
+// 旧实现曾错误地"基础1 + 武器range + 马",导致所有武器射程+1、马被算进攻击距离。
 function getAttackRange(g, seat) {
-  const p = g.players[seat];
-  if (!p || !p.alive) return 0;
-  
-  // 基础攻击范围为1
-  let range = 1;
-  
-  // 装备修正：武器的射程
-  if (p.equips && p.equips.weapon) {
-    const weaponInfo = getEquip(p.equips.weapon.name);
-    if (weaponInfo && typeof weaponInfo.range === 'number') {
-      range += weaponInfo.range;
-    }
-  }
-  
-  // 装备修正：-1马增加攻击范围
-  if (p.equips && p.equips.minus1) {
-    range += 1;
-  }
-  
-  // 武将技能修正：如马术等（未来扩展）
-  // 当前典韦无此类技能，但保留接口
-  
-  return range;
+  return attackRange(g, seat);
 }
 
 // ============================================
 // 贾诩【乱武】技能相关函数
 // ============================================
 
-// 全局变量：存储乱武中每个角色的最近目标
-let luanwuTargetMap = {};
+// 乱武最近目标只存 g.pending.targetMap(Firebase 同步),禁止客户端全局变量——
+// 非发动者浏览器没有发动时写入的 map,读全局会拿空/错目标。
 
 // findNearestTarget: 找到一个角色距离最近的其他角色（排除自己和源头）
 function findNearestTarget(g, seat, excludeSeat) {
@@ -2552,13 +2551,12 @@ function startLuanwu() {
       return g;
     }
     
-    // 为每个角色预计算最近的目标
+    // 为每个角色预计算最近的目标(写入 pending,随 Firebase 同步到所有客户端)
     const targetMap = {};
     for (const seat of otherSeats) {
       const nearest = findNearestTarget(g, seat, mySeat);
       targetMap[seat] = nearest;
     }
-    luanwuTargetMap = targetMap;
     
     // 进入乱武选择阶段,从第一个角色开始
     g.pending = {
@@ -2591,33 +2589,24 @@ function chooseLuanwuOption(option) {
       return g;
     }
     
-    // 处理选择
+    // 处理选择——目标只信 pending.targetMap(全客户端同步)
     if (option === 'sha') {
-      // 尝试使用杀
-      const targetSeat = luanwuTargetMap[currentSeat];
+      const map = g.pending.targetMap || {};
+      const targetSeat = map[currentSeat];
       
-      if (targetSeat !== null && targetSeat !== currentSeat) {
-        const target = g.players[targetSeat];
-        
-        // 检查是否有杀
+      if (typeof targetSeat === 'number' && targetSeat !== currentSeat) {
         const hasSha = hasShaCard(g, currentSeat);
-        
-        // 检查距离是否在攻击范围内
         const canAttack = canReachSha(g, currentSeat, targetSeat);
         
         if (hasSha && canAttack) {
-          // 使用杀
           useShaForLuanwu(g, currentSeat, targetSeat);
         } else {
-          // 不能使用杀，必须失去体力
           loseHpForLuanwu(g, currentSeat);
         }
       } else {
-        // 无合法目标，必须失去体力
         loseHpForLuanwu(g, currentSeat);
       }
     } else if (option === 'hp') {
-      // 直接失去体力
       loseHpForLuanwu(g, currentSeat);
     }
     
@@ -2625,7 +2614,8 @@ function chooseLuanwuOption(option) {
   });
 }
 
-// useShaForLuanwu: 乱武中使用杀处理
+// useShaForLuanwu: 乱武中使用杀——走完整 resolveShaUse(铁骑/烈弓/八卦/闪/伤害/武器),
+// 不再直接 dealDamage。杀结算跨 pending,链状态存 g.luanwuResume,由 finishSingleShaTarget 接回。
 function useShaForLuanwu(g, sourceSeat, targetSeat) {
   const source = g.players[sourceSeat];
   const target = g.players[targetSeat];
@@ -2646,18 +2636,43 @@ function useShaForLuanwu(g, sourceSeat, targetSeat) {
   
   if (!shaCard) return g;
   
+  // 快照乱武链(resolveShaUse 会覆盖 g.pending)
+  const luanwuSnap = (g.pending && g.pending.type==='luanwuChoose') ? {
+    remainingSeats: (g.pending.remainingSeats||[]).slice(),
+    sourceSeat: g.pending.sourceSeat,
+    targetMap: g.pending.targetMap || null
+  } : {
+    remainingSeats: [],
+    sourceSeat: g.pending && g.pending.sourceSeat,
+    targetMap: (g.pending && g.pending.targetMap) || null
+  };
+  
   // 移除杀
   source.hand.splice(shaIndex, 1);
   g.discard.push(shaCard);
+  maybeStartLianying(g, sourceSeat, 1);
   
-  // 造成伤害
-  dealDamage(g, targetSeat, 1, sourceSeat, `${source.name} 的【乱武】效果`, 'luanwu');
+  g.log = pushLog(g.log, `${source.name} 选择对 ${target.name} 使用【杀】(乱武)`);
+  markCardSound(g, '杀', sourceSeat, shaCard, targetSeat);
+  if(shaCard.name!=='杀'){
+    if(hasCap(source,'longdan')) markSkillSound(g,'龙胆');
+    else if(hasCap(source,'wusheng')) markSkillSound(g,'武圣');
+  }
   
-  g.log = pushLog(g.log, `${source.name} 选择对 ${target.name} 使用【杀】`);
-  
-  // 继续下一个角色的选择
-  proceedToNextLuanwu(g);
-  
+  // 存链状态:杀完整结算后 finishSingleShaTarget → continueLuanwuAfterSha
+  g.luanwuResume = {
+    remainingSeats: luanwuSnap.remainingSeats,
+    sourceSeat: luanwuSnap.sourceSeat,
+    targetMap: luanwuSnap.targetMap
+  };
+  g.pending = null;
+  // 完整杀结算(无距离限制:乱武选目标时已校验 canReachSha;skip 次数限制)
+  resolveShaUse(g, source, targetSeat, '【乱武】出【杀】', singleCardShaColor(shaCard), shaCard, {
+    skipShaLimit: true,
+    noDistance: true
+  });
+  // 若 resolve 同步结束(毅重无效等走 finishSingleShaTarget),luanwuResume 已被消费;
+  // 若进入 respond/tieqi 等,等该路径收尾再 continueLuanwuAfterSha。
   return g;
 }
 
@@ -2669,11 +2684,16 @@ function loseHpForLuanwu(g, seat) {
   player.hp--;
   g.log = pushLog(g.log, `${player.name} 选择失去1点体力`);
   
-  // 检查是否死亡
+  // 检查是否死亡——用 startDying 挂起;链状态进 luanwuResume 供 finishDying 接回
   if (player.hp <= 0) {
+    const snap = (g.pending && g.pending.type==='luanwuChoose') ? {
+      remainingSeats: (g.pending.remainingSeats||[]).slice(),
+      sourceSeat: g.pending.sourceSeat,
+      targetMap: g.pending.targetMap || null
+    } : null;
+    if(snap) g.luanwuResume = snap;
     startDying(g, seat, 'luanwu', seat, 1);
   } else {
-    // 继续下一个角色的选择
     proceedToNextLuanwu(g);
   }
   

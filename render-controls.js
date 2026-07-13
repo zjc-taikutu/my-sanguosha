@@ -2520,8 +2520,9 @@ function renderControls(g){
   // 贾诩【乱武】:乱武选择阶段（当前选择的角色）
   if(g.phase==='luanwuChoose' && g.pending && g.pending.type==='luanwuChoose' && g.pending.currentSeat===mySeat) {
     const sourcePlayer = g.players[g.pending.sourceSeat];
-    const nearestSeat = luanwuTargetMap[mySeat];
-    const nearestPlayer = nearestSeat !== null && nearestSeat !== mySeat ? g.players[nearestSeat] : null;
+    const map = g.pending.targetMap || {};
+    const nearestSeat = map[mySeat];
+    const nearestPlayer = (typeof nearestSeat === 'number' && nearestSeat !== mySeat) ? g.players[nearestSeat] : null;
     
     // 检查是否有杀
     const hasSha = hasShaCard(g, mySeat);

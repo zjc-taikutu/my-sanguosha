@@ -55,6 +55,14 @@ function normalize(g){
   // (类型/结构检查),读(render→normalize)写(tx→normalize)两条路径都该跑,和下面那条
   // "状态转换"性质的兜底清空刻意分属两类、分开维护(见 pruneExchangeCards 的说明)。
   g.exchangeCards.forEach(e=>{ if(e && e.targets!=null && !Array.isArray(e.targets)) e.targets=null; });
+  // 陆逊【连营】:失去最后手牌时先入队,等当前 pending 空闲再询问(防 playCard effect 覆盖)
+  if(!Array.isArray(g.lianyingQueue)) g.lianyingQueue=[];
+  g.lianyingQueue = g.lianyingQueue.filter(s=>Number.isInteger(s));
+  // 贾诩【乱武】:杀结算跨 pending 时用此字段接回链(不塞进 g.pending,避免被杀响应覆盖)
+  if(g.luanwuResume===undefined) g.luanwuResume=null;
+  if(g.luanwuResume && (typeof g.luanwuResume.sourceSeat!=='number' || !Array.isArray(g.luanwuResume.remainingSeats))){
+    g.luanwuResume=null;
+  }
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   // 许褚【裸衣】:本回合伤害加成标记。回合开始重置,旧存档缺失回退 false。
@@ -575,6 +583,7 @@ function normalize(g){
   if(typeof g.shensuSkipJudgingAndDraw!=='boolean') g.shensuSkipJudgingAndDraw=false;
   if(typeof g.shensuSkipPlay!=='boolean') g.shensuSkipPlay=false;
   if(typeof g.shensuShaRemaining!=='number') g.shensuShaRemaining=0;
+  if(typeof g.qiaobianSkipJudge!=='boolean') g.qiaobianSkipJudge=false;
   // 徐晃【断粮】:出牌阶段限一次的标志位,和 g.shaUsed 同款防御
   // 吕蒙【克己】辅助标志:本回合是否在决斗中打出过杀,和 g.shaUsed 同款防御
   if(typeof g.shaPlayedInDuel!=='boolean') g.shaPlayedInDuel=false;
@@ -659,12 +668,32 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
-  // 太史慈【天义】拼点阶段:pending 应包含 type、seat、targetSeat、selfCard 等字段
+  // 太史慈【天义】选牌/选目标/拼点响应
+  if(g.pending && (g.pending.type==='tianyiPickCard' || g.pending.type==='tianyiPickTarget')){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending = null; g.phase = 'play';
+    }
+  }
   if(g.pending && g.pending.type==='tianyiRespond'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        !d.selfCard || typeof d.selfCard.rank!=='number'){
+      g.pending = null; g.phase = 'play';
+    }
+  }
+  // 周泰【不屈】询问
+  if(g.pending && g.pending.type==='buquAsk'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending = null; g.phase = 'play';
+    }
+  }
+  // 陆逊【连营】询问
+  if(g.pending && g.pending.type==='lianyingAsk'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
       g.pending = null; g.phase = 'play';
     }
   }
@@ -1971,7 +2000,15 @@ function pruneExchangeCards(g){
     g.exchangeCards=[];
   }
 }
-function tx(fn){ gameRef.transaction(g => { if(!g) return g; normalize(g); pruneExchangeCards(g); return stripUndefined(fn(g) || g); }); }
+function tx(fn){ gameRef.transaction(g => {
+  if(!g) return g;
+  normalize(g);
+  pruneExchangeCards(g);
+  const result = fn(g) || g;
+  // 连营队列:本 tx 内 effect/杀结算可能覆盖 pending;收尾再尝试挂起询问
+  tryFlushLianying(result);
+  return stripUndefined(result);
+}); }
 
 function doDraw(){
   tx(g=>{
@@ -2903,17 +2940,19 @@ function qiaobianDeclare(cardIdx, phaseChoice){
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【巧变】,跳过'+phaseLabel);
     g.pending=null;
     if(phaseChoice==='judge'){
-      continueTurnStart(g, mySeat); // 直接跳过 resolveDelayTricks,判定区的牌不动
+      // 跳过判定区结算,但仍须先过神速1询问(神速1 在判定前)
+      g.qiaobianSkipJudge=true;
+      continueShensu1Check(g, mySeat);
       return g;
     }
     if(phaseChoice==='draw'){
       g.skipDraw=true;
-      continueDelayResolution(g, mySeat);
+      continueShensu1Check(g, mySeat);
       return g;
     }
     if(phaseChoice==='discard'){
       g.skipDiscard=true;
-      continueDelayResolution(g, mySeat);
+      continueShensu1Check(g, mySeat);
       return g;
     }
     // phaseChoice==='play':先问是否移动一张装备/判定牌,skipPlay 留到 respondQiaobianMove 里设
@@ -3337,37 +3376,44 @@ function respondBuqu(useBuqu){
     const me=g.players[mySeat];
     if(!me || !me.alive || g.pending.seat!==mySeat) return g;
     
-    const p = g.players[g.pending.seat];
-    if(!p || !p.alive || p.general !== 'zhoutai') return g;
+    const seat = g.pending.seat;
+    const p = g.players[seat];
+    // 走 hasCap,不硬编码武将 id(断肠后 skillsLost 也会正确失效)
+    if(!p || !p.alive || !hasCap(p, 'buqu')) return g;
     
+    const resume = g.pending.resume || {type:'sha'};
     if(useBuqu && (g.deck || []).length > 0) {
       // 从牌堆顶放置一张不屈牌
-      const card = g.deck.pop();
-      p.buquCards.push(card);
-      g.log = pushLog(g.log, p.name+' 发动【不屈】,放置了一张不屈牌（'+card.name+' '+card.suit+card.rank+'）');
-      markSkillSound(g, '不屈');
-      
-      // 检查防死条件:所有不屈牌点数都唯一
-      const allUnique = checkBuquUnique(p);
-      if(allUnique) {
-        // 防止死亡：体力设置为0
-        p.hp = 0;
-        g.log = pushLog(g.log, p.name+' 所有不屈牌点数唯一,防止死亡（体力设为0）');
-        // 清理pending并恢复流程
-        g.pending = null;
-        g.phase = 'play';
-        return g;
+      ensureDeck(g);
+      if((g.deck || []).length === 0){
+        g.log = pushLog(g.log, p.name+' 牌堆为空,无法发动【不屈】');
+      } else {
+        const card = g.deck.pop();
+        if(!Array.isArray(p.buquCards)) p.buquCards = [];
+        p.buquCards.push(card);
+        g.log = pushLog(g.log, p.name+' 发动【不屈】,放置了一张不屈牌（'+card.name+' '+card.suit+card.rank+'）');
+        markSkillSound(g, '不屈');
+        
+        // 检查防死条件:所有不屈牌点数都唯一
+        const allUnique = checkBuquUnique(p);
+        if(allUnique) {
+          // 防止死亡：体力设置为0,接回原伤害流程(不可硬写 phase=play 丢 resume)
+          p.hp = 0;
+          g.log = pushLog(g.log, p.name+' 所有不屈牌点数唯一,防止死亡（体力设为0）');
+          g.pending = null;
+          if(checkWin(g)) return g;
+          resumeAfterInterrupt(g, resume, seat);
+          return g;
+        }
+        // 放置了不屈牌但防死条件不满足,继续进入濒死流程
+        g.log = pushLog(g.log, p.name+' 发动【不屈】但防死条件不满足,继续濒死流程');
       }
-      // 如果放置了不屈牌但防死条件不满足，继续进入濒死流程
-      g.log = pushLog(g.log, p.name+' 发动【不屈】但防死条件不满足,继续濒死流程');
     } else {
       g.log = pushLog(g.log, p.name+' 选择不发动【不屈】');
     }
     
-    // 如果没有防死,继续调用startDying
-    const resume = g.pending.resume;
-    startDying(g, g.pending.seat, resume.type, resume.sourceSeat, resume.amount);
-    g.pending = null;
+    // startDying 自己会写 g.pending=dying; 绝不可在其后 g.pending=null 覆盖掉
+    startDying(g, seat, resume.type, resume.sourceSeat, resume.amount);
     return g;
   });
 }
@@ -3383,7 +3429,8 @@ function checkBuquUnique(player) {
 // 返回true表示移除了不屈牌且恢复了1点体力（最后一张被移除时）
 function removeBuquCard(g, seat) {
   const p = g.players[seat];
-  if(!p || p.general !== 'zhoutai' || !p.buquCards || p.buquCards.length === 0) return false;
+  // 走 hasCap,不硬编码武将 id(断肠 skillsLost 后也不再移除)
+  if(!p || !hasCap(p, 'buqu') || !p.buquCards || p.buquCards.length === 0) return false;
   
   // 移除最后一张不屈牌（从数组末尾移除）
   const removedCard = p.buquCards.pop();
@@ -3578,8 +3625,14 @@ function resumeAfterInterrupt(g, resume, seat){
   } else if(resume.type==='enyuan'){
     // 恩怨反伤致死后接回原伤害流程
     resumeAfterInterrupt(g, resume.resume || {type:'sha'}, resume.seat);
-  } else { // 'sha' 及其它:攻击者继续出牌阶段——若这是方天画戟排队目标中的一个,继续问下一个而不是直接回play
-    if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
+  } else if(resume.type==='luanwu'){
+    // 乱武失体力濒死接回(杀路径走 luanwuResume + finishSingleShaTarget)
+    if(g.luanwuResume) continueLuanwuAfterSha(g);
+    else g.phase='play';
+  } else { // 'sha' 及其它
+    if(g.fangtianQueue){ advanceFangtianQueue(g); }
+    else if(g.luanwuResume){ continueLuanwuAfterSha(g); }
+    else { g.phase='play'; }
   }
 }
 // ===== 夏侯惇【刚烈】:受伤后可选判定,非红桃则伤害来源弃2手牌或受1点伤害 =====
@@ -3714,7 +3767,25 @@ function respondYaowu(choice) {
 // 是否还有排队中的下一个目标,有则继续,没有(或本来就不是方天画戟触发的)才真正回到出牌阶段。
 function finishSingleShaTarget(g){
   if(checkWin(g)) return;
-  if(g.fangtianQueue){ advanceFangtianQueue(g); } else { g.phase='play'; }
+  if(g.fangtianQueue){ advanceFangtianQueue(g); return; }
+  // 乱武借 resolveShaUse 出的杀结算完:接回乱武链
+  if(g.luanwuResume){ continueLuanwuAfterSha(g); return; }
+  g.phase='play';
+}
+// 乱武中某次杀(完整 resolveShaUse 路径)结算完毕后接回"问下一个人"
+function continueLuanwuAfterSha(g){
+  const r = g.luanwuResume;
+  g.luanwuResume = null;
+  if(!r){ g.phase='play'; return; }
+  g.pending = {
+    type:'luanwuChoose',
+    currentSeat: null,
+    remainingSeats: Array.isArray(r.remainingSeats) ? r.remainingSeats.slice() : [],
+    sourceSeat: r.sourceSeat,
+    targetMap: r.targetMap || {}
+  };
+  if(typeof proceedToNextLuanwu === 'function') proceedToNextLuanwu(g);
+  else { g.pending=null; g.phase='play'; }
 }
 // advanceFangtianQueue: 推进到方天画戟队列里的下一个目标,重新走一遍完整的 resolveShaUse(毅重/仁王盾/
 // 铁骑/烈弓/青釭剑/八卦阵/响应阶段全部照常各自独立判定)。跳过中途已阵亡的排队目标(防御性,理论上
@@ -4573,8 +4644,9 @@ function cancelXuanfeng() {
 // 每个候选人发动或不发动之后都会调这个函数继续找下一个,直到问完一圈——理论上支持多个乐进都发动。
 function advanceXiaoguo(g, endingSeat, current){
   const asker=nextXiaoguoAsker(g, endingSeat, current);
-  // 骁果问完后继续结束阶段后续(旋风/举荐/据守),不再直接 finishTurn
-  if(asker===null){ continueEndPhaseAfterXiaoguo(g, endingSeat); return; }
+  // 骁果问完一圈:必须先置空 pending,再交结束阶段后续(旋风/举荐/据守/finishTurn)。
+  // 若不清空,过期 xiaoguo pending 会漏进下一回合,卡住中央出牌区(见 050d965 同类修复)。
+  if(asker===null){ g.pending=null; continueEndPhaseAfterXiaoguo(g, endingSeat); return; }
   g.pending={type:'xiaoguo', endingSeat, asking:asker};
   g.phase='xiaoguo';
   g.log=pushLog(g.log, '结束阶段:询问 '+g.players[asker].name+' 是否发动【骁果】…');
@@ -4673,6 +4745,7 @@ function startTurn(g, seat){
   g.wanshaActive = false; g.wanshaDyingSeat = null;
   // 夏侯渊【神速】
   g.shensuUsed = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
+  g.qiaobianSkipJudge = false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌(走 cap,不硬编码武将 id)
   if(p && p.alive && hasCap(p,'zhiji') && (p.hand||[]).length===0 && !p.zhijiAwakened){
@@ -4694,26 +4767,14 @@ function startTurn(g, seat){
 // 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段,交给 advancePastPlay 继续判断
 // 出牌/弃牌阶段是否也被跳过——不在这里各自重复"检查下一个标志"的逻辑。
 function enterDrawPhase(g){
+  // 洛神/判定链等"循环结束"入口假定进来时 pending 已空;统一在此置空,避免过期 pending 漏进摸牌/出牌阶段卡住中央区。
+  // 后续神速/礼让等会按需重新赋值 pending。
+  g.pending=null;
   const p = g.players[g.turn];
   if(!p || !p.alive) return;
   
-  // 夏侯渊【神速1】: 在判定阶段开始前检查是否可以发动
-  if (hasCap(p, 'shensu') && !g.shensuUsed && !g.shensuSkipJudgingAndDraw) {
-    g.pending = { type: 'shensuChoose1', seat: g.turn };
-    g.phase = 'shensuChoose1';
-    g.log = pushLog(g.log, p.name + ' 可以发动【神速】跳过判定和摸牌阶段');
-    return;
-  }
-  
-  // 夏侯渊【神速2】的第二个触发点：刚发动完神速1后，即将进入出牌阶段前
-  if (hasCap(p, 'shensu') && g.shensuSkipJudgingAndDraw && !g.shensuUsed) {
-    g.pending = { type: 'shensuChoose2', seat: g.turn };
-    g.phase = 'shensuChoose2';
-    g.log = pushLog(g.log, p.name + ' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
-    return;
-  }
-  
-  // 检查神速1效果：如果已经发动神速1并需要跳过判定和摸牌
+  // 神速1 已挪到 continueShensu1Check(判定区结算之前)。此处只处理「已发动神速1、跳过摸牌」的兜底,
+  // 以及神速2(摸牌结束后,由 finishDrawPhase 等路径挂起,不在这里开 shensuChoose1)。
   if (g.shensuSkipJudgingAndDraw) {
     g.shensuSkipJudgingAndDraw = false;
     g.phase = 'play';
@@ -4905,6 +4966,12 @@ function discardOrVanish(g, card){
 // seat;若新挂起是鬼才(g.pending.type==='guicai'),它的 resume 在 maybeGuicai 里已经自带完整
 // 信息,绝不能覆盖。'done' 时统一走 enterDrawPhase,进入(或跳过)摸牌阶段。
 function continueDelayResolution(g, seat){
+  // 巧变跳过判定:不翻判定区,直接进洛神/摸牌链路(神速1 已在 continueShensu1Check 问过)
+  if(g.qiaobianSkipJudge){
+    g.qiaobianSkipJudge=false;
+    continueTurnStart(g, seat);
+    return;
+  }
   if(resolveDelayTricks(g, seat)==='pending'){
     if(g.pending && (g.pending.type==='dying' || g.pending.type==='yijiAsk' || g.pending.type==='luoyingAsk')){
       // luoyingAsk 若已自带 resume 则不覆盖
@@ -4971,23 +5038,32 @@ function finishLuoshenJudge(g, seat, card){
   }
 }
 
-// 陆逊【连营】:当玩家失去最后1张手牌时,若其拥有连营技能,可摸1张牌。
-// 这个函数需要在每次玩家失去手牌后调用,检查是否满足触发条件。
-// 参数: g - 游戏状态, seat - 失去手牌的玩家座位号, cardsLost - 本次失去的牌数量(通常为1)
-// 返回: 若触发连营并成功挂起询问,返回true;否则返回false
+// 陆逊【连营】:失去最后1张手牌时可摸1张。
+// 实现为队列:调用点只入队,不立刻写 g.pending——避免 playCard 里 effect/resolveShaUse
+// 随后覆盖 pending 导致连营永远问不到。真正挂起由 tryFlushLianying 在 pending 空闲时做
+// (tx 收尾统一调用一次)。
+// 返回:条件满足并入队则 true,否则 false。
 function maybeStartLianying(g, seat, cardsLost=1){
   const p = g.players[seat];
   if(!p || !p.alive || !hasCap(p,'lianying')) return false;
-  
-  // 连营的触发条件:失去手牌前恰好有1张手牌,且本次失去的牌导致手牌变为0张
-  // 由于cardsLost通常为1,我们检查:失去前的手牌数 = cardsLost,失去后的手牌数 = 0
   const handAfter = (p.hand || []).length;
   const handBefore = handAfter + cardsLost;
-  
-  // 只有当失去前有1张手牌,且失去后变成0张时才触发
   if(handBefore === 1 && handAfter === 0 && cardsLost >= 1){
-    // 挂起询问是否发动连营
-    g.pending = { type:'lianyingAsk', seat, resume:{type:'lianyingAsk'} };
+    if(!Array.isArray(g.lianyingQueue)) g.lianyingQueue=[];
+    if(!g.lianyingQueue.includes(seat)) g.lianyingQueue.push(seat);
+    return true;
+  }
+  return false;
+}
+// 当前无其它挂起时,从队列取出一名连营角色开询问。
+function tryFlushLianying(g){
+  if(!g || g.pending || g.aoe) return false;
+  if(!Array.isArray(g.lianyingQueue) || g.lianyingQueue.length===0) return false;
+  while(g.lianyingQueue.length>0){
+    const seat = g.lianyingQueue.shift();
+    const p = g.players[seat];
+    if(!p || !p.alive || !hasCap(p,'lianying')) continue;
+    g.pending = { type:'lianyingAsk', seat };
     g.phase = 'lianyingAsk';
     g.log = pushLog(g.log, p.name+' 是否发动【连营】,摸1张牌…');
     return true;
@@ -5011,7 +5087,9 @@ function respondLianying(activate){
       g.log = pushLog(g.log, p.name+'：不发动【连营】');
     }
     g.pending = null;
-    g.phase = 'play';
+    // 回到出牌阶段(若仍是自己的回合且无其它链);队列里若还有人,tx 收尾 tryFlush 会再挂
+    if(g.players[g.turn] && g.players[g.turn].alive) g.phase = 'play';
+    else g.phase = 'play';
     return g;
   });
 }
