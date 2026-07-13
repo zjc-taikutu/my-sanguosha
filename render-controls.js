@@ -3753,23 +3753,24 @@ function renderRenxinChoose(g) {
   const me = g.players[mySeat];
   if (!target || !me) return '';
   
+  const slotLabels = { weapon:'武器', armor:'防具', plus1:'+1马', minus1:'-1马' };
   let html = '<div class="skill-choose">';
   html += '<h4>【仁心】保护 ' + escapeHtml(target.name) + '</h4>';
   html += '<p>' + escapeHtml(target.name) + ' 体力为1受到伤害，你可以弃置一张装备牌并翻面来防止此伤害：</p>';
   html += '<div class="equip-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 10px 0;">';
   
-  p.equipIndices.forEach(equipIndex => {
-    const equipCard = me.equip[equipIndex];
+  (p.equipSlots || []).forEach(slot => {
+    const equipCard = me.equips && me.equips[slot];
     if (equipCard) {
-      html += '<button onclick="chooseRenxinEquip(' + equipIndex + ')" class="equip-btn" style="padding: 10px; border: 2px solid #4a90d9; border-radius: 5px; background: white; cursor: pointer;">';
-      html += '弃置 ' + escapeHtml(equipCard.name);
+      html += '<button onclick="chooseRenxinEquip(\'' + slot + '\')" class="equip-btn" style="padding: 10px; border: 2px solid #4a90d9; border-radius: 5px; background: white; cursor: pointer;">';
+      html += '弃置【' + escapeHtml(equipCard.name) + '】(' + (slotLabels[slot]||slot) + ')';
       html += '</button>';
     }
   });
   
   html += '</div>';
-  html += '<p><small>注意：翻面后你将变为 ' + (me.faceUp ? '背面朝上' : '正面朝上') + ' 状态</small></p>';
-  html += '<button onclick="cancelRenxin()" class="skill-btn" style="background: #999;">取消</button>';
+  html += '<p><small>注意：翻面后你将变为 ' + (me.faceup === false ? '正面朝上' : '背面朝上') + ' 状态</small></p>';
+  html += '<button onclick="cancelRenxin()" class="skill-btn" style="background: #999;">不发动</button>';
   html += '</div>';
   return html;
 }

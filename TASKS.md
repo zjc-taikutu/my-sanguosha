@@ -1,26 +1,23 @@
 # 任务进度追踪
 
-## Phase 1/3 — 设计文档审核修正
-- [x] 确认 `xushu_design.md` / `caozhang_design.md` / `caozhi_design.md` 存在
-- [x] 对照当前代码审核并重写三份设计（API/挂点/边界）
+## Phase 1/2 — code review 修复（相对 origin/main）
+- [x] 制蛮：多选项暂停伤害；不发动重放伤害
+- [x] dealDamage 时序：致命先濒死/不屈；耀武认 isShaName；恩怨延后到存活后
+- [x] 仁心 equips/faceup 字段 + cancel 重放 + skip 防循环
+- [x] 断肠 skillsLost 真正失效 generalHasCap/hasCap/hooks
+- [x] 翻面跳回合 startTurn(nextAlive) 不调 endTurn()
+- [x] 志继/不屈 hasCap；神速2 用 g.turn；zhimeng pending 不污染
+- [x] 忘隙去掉 hooks 双路径；结束阶段骁果→旋风→举荐→据守链路
+- [x] `?v=` 126→127
+- [x] 回归脚本 16 项核心断言通过
 
-## Phase 2/3 — 三武将实装
-- [x] 徐庶【无言/举荐】：data + dealDamage + endTurn + skills + UI + 音效
-- [x] 曹彰【将驰】：continueEnterDrawPhase + 禁杀/多杀/无距 + UI
-- [x] 曹植【落英/酒诗②】：弃牌/判定入口 + 酒诗② + UI（酒诗①暂缓）
-- [x] 修 endTurn 骁果挂点（避免误 finishTurn 挡掉结束阶段技能）
-- [x] `?v=` 125→126；CLAUDE.md 进度条更新
-- [x] 静态回归检查（python，31 项）
-
-## Phase 3/3 — 收尾
-- [x] git commit / push（`a43f40c` → `origin/wenwen_dev`）
-- [ ] 真机/浏览器联机抽测（无言南蛮、将驰三选一、落英弃梅花、酒诗②翻面）
+## Phase 2/2 — 收尾
+- [ ] 真机联机抽测：制蛮/耀武火杀/仁心/断肠/翻面/结束阶段举荐
+- [ ] commit + push（用户确认后）
 
 ### 关键成果
-- 三个武将数据已入 `GENERALS`
-- 无言/举荐/将驰/落英/酒诗②逻辑与 UI 已接入
-- 设计文档已与代码对齐
+- 审查 9🔴7🟡 中硬 bug 已落地修复
+- 结束阶段技能链不再被骁果/旋风截断
 
 ### 下一步
-- commit + push 到 `wenwen_dev`
-- 联机验证上述关键路径
+- 联机验证后 commit

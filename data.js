@@ -206,32 +206,8 @@ const GENERALS = {
     caps:{ extraMinus1:true, tieqi:true } },
   lidian:        { id:'lidian',        name:'李典',   gender:'male', maxHp:3, skill:'恂恂/忘隙',
     desc:'恂恂:摸牌阶段,你可以放弃摸牌,改为亮出牌堆顶至多4张牌,获得其中2张,其余按任意顺序置于牌堆底。忘隙:每当一名其他角色对你造成1点伤害后,或你对其他角色造成1点伤害后,你与其各摸1张牌(每点伤害触发一次,可选发动)。',
-    caps:{ xunxun:true, wangxi:true },
-    hooks:{
-      onDamaged: function(g, seat, ctx){
-        const p=g.players[seat];
-        if(!p || !p.alive) return;
-        // 非致命/合法来源/非自杀才挂起
-        const sourceSeat = ctx && ctx.sourceSeat;
-        if(typeof sourceSeat !== 'number' || sourceSeat === seat) return; // 无来源/是自己 -> 静默跳过
-        if(ctx.amount <= 0) return; // amount 必须 > 0
-        
-        // 仅非致命时触发受伤侧（致命时在 finishDying 处理造成侧）
-        if(p.hp <= 0) return; // 已经致命，跳过
-        
-        g.pending = { 
-          type:'wangxiAsk', 
-          seat, 
-          otherSeat: sourceSeat,
-          death: false,
-          amount: ctx.amount,
-          resume:{type:ctx.srcType}
-        };
-        g.phase='wangxiAsk';
-        g.log=pushLog(g.log, p.name+' 是否发动【忘隙】…');
-      }
-    }
-  },
+    // 忘隙不在 hooks.onDamaged 挂:与 dealDamage 造成侧统一入口,避免双路径互盖 pending
+    caps:{ xunxun:true, wangxi:true } },
   pangde:        { id:'pangde',        name:'庞德',   gender:'male', maxHp:4, skill:'马术/猛进',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。猛进:当你使用的【杀】被目标角色的【闪】抵消时,你可以弃置其一张牌。',
     caps:{ extraMinus1:true, mengjin:true } },
@@ -421,11 +397,14 @@ const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 // 查询某玩家的武将是否拥有某项被动能力(能力声明在 GENERALS.caps,业务层不写武将名)
 function generalHasCap(player, cap){
+  // 蔡文姬【断肠】等:武将技能整体失效后,不再从 GENERALS.caps 读取
+  if(player && player.skillsLost) return false;
   const gen = player && getGeneral(player.general);
   return !!(gen && gen.caps && gen.caps[cap]);
 }
 // 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;通用数值 seam,当前暂无武将/装备使用)
 function generalCapValue(player, cap, fallback){
+  if(player && player.skillsLost) return fallback;
   const gen = player && getGeneral(player.general);
   const v = gen && gen.caps && gen.caps[cap];
   return (typeof v === 'number') ? v : fallback;
@@ -445,7 +424,12 @@ function equipHasCap(player, cap){
   });
 }
 // 统一能力入口:武将 caps 或 装备 cap 任一提供即算拥有。实时查询无缓存 —— 卸下/替换装备后自然失效。
-function hasCap(player, cap){ return generalHasCap(player, cap) || equipHasCap(player, cap) || (player.caps && player.caps[cap]); }
+// player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
+function hasCap(player, cap){
+  if(equipHasCap(player, cap)) return true;
+  if(player && player.skillsLost) return false;
+  return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]);
+}
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
 function cardSuitForPlayer(player, card){
@@ -517,6 +501,7 @@ function findUsableAs(hand, player, role){
 // 触发型技能分发:查 seat 玩家武将的 hooks[hookName] 并执行(在调用方的 tx 内,直接改 g)。
 function triggerHook(g, seat, hookName, ctx){
   const p = g.players[seat];
+  if(p && p.skillsLost) return; // 断肠等:武将 hooks 一并失效
   const gen = p && getGeneral(p.general);
   const fn = gen && gen.hooks && gen.hooks[hookName];
   if(typeof fn === 'function') fn(g, seat, ctx);

@@ -1012,7 +1012,7 @@ function renDe(cardIdx, targetSeat){
       g.log=pushLog(g.log, me.name+' 【仁德】发动,回复1点体力');
       markSkillSound(g, '仁德');
       // 周泰【不屈】:回复体力时移除一张不屈牌
-      if (me.general === 'zhoutai' && me.buquCards && me.buquCards.length > 0) {
+      if (hasCap(me,'buqu') && me.buquCards && me.buquCards.length > 0) {
         const removedCard = me.buquCards.pop();
         g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
         if(me.buquCards.length === 0) {
@@ -1050,7 +1050,7 @@ function qingNang(cardIdx, targetSeat){
     }
     // 周泰【不屈】:回复体力时移除一张不屈牌
     const targetSeat = g.players.findIndex(p => p === tgt);
-    if (targetSeat !== -1 && tgt.general === 'zhoutai' && tgt.buquCards && tgt.buquCards.length > 0) {
+    if (targetSeat !== -1 && hasCap(tgt,'buqu') && tgt.buquCards && tgt.buquCards.length > 0) {
       const removedCard = tgt.buquCards.pop();
       g.log = pushLog(g.log, tgt.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
       if(tgt.buquCards.length === 0) {
@@ -1219,7 +1219,7 @@ function respondZhijiChoice(healOrDraw){
       p.hp = Math.min(p.hp + 1, p.maxHp);
       g.log = pushLog(g.log, p.name + ' 选择回复1点体力');
       // 周泰【不屈】:回复体力时移除一张不屈牌
-      if (p.general === 'zhoutai' && p.buquCards && p.buquCards.length > 0) {
+      if (hasCap(p,'buqu') && p.buquCards && p.buquCards.length > 0) {
         const removedCard = p.buquCards.pop();
         g.log = pushLog(g.log, p.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
         if(p.buquCards.length === 0) {
@@ -1405,7 +1405,7 @@ function respondZaiqi() {
     if (recoverAmount > 0) {
       me.hp = Math.min(me.maxHp, me.hp + recoverAmount);
       // 周泰【不屈】:回复体力时移除一张不屈牌
-      if (me.general === 'zhoutai' && me.buquCards && me.buquCards.length > 0) {
+      if (hasCap(me,'buqu') && me.buquCards && me.buquCards.length > 0) {
         const removedCard = me.buquCards.pop();
         g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
         if(me.buquCards.length === 0) {
@@ -1561,7 +1561,10 @@ function getZhimengOptions(g, targetSeat) {
   return options;
 }
 
-// 触发制蛮询问
+// 触发制蛮询问。返回:
+//   'prevented' — 已防止伤害(唯一选项自动结算)
+//   'ask'       — 已挂起询问,调用方应立即 return true 暂停伤害
+//   false       — 不触发
 function triggerZhimeng(g, from, to, ctx) {
   if(from === to) return false;
   
@@ -1580,7 +1583,7 @@ function triggerZhimeng(g, from, to, ctx) {
   
   if(options.length === 1) {
     zhimengAutoResolve(g, from, to, options[0]);
-    return true;
+    return 'prevented';
   }
   
   g.pending = {
@@ -1593,10 +1596,10 @@ function triggerZhimeng(g, from, to, ctx) {
   g.phase = 'zhimengAsk';
   g.log = pushLog(g.log, attacker.name + ' 是否发动【制蛮】防止此伤害并获得目标一张牌…');
   
-  return true;
+  return 'ask';
 }
 
-// 自动结算制蛮（唯一选项时）
+// 自动结算制蛮（唯一选项时）——只拿牌+记日志,不碰异类型 pending
 function zhimengAutoResolve(g, from, to, option) {
   const attacker = g.players[from];
   const target = g.players[to];
@@ -1613,6 +1616,7 @@ function zhimengAutoResolve(g, from, to, option) {
     if(target.equips && target.equips[option.type]) {
       gainedCard = target.equips[option.type];
       target.equips[option.type] = null;
+      triggerHook(g, to, 'onLoseEquip', {count:1});
     }
   } else if(option.type === 'delay') {
     if(target.delays && target.delays[option.index]) {
@@ -1623,14 +1627,46 @@ function zhimengAutoResolve(g, from, to, option) {
   if(gainedCard) {
     attacker.hand = attacker.hand || [];
     attacker.hand.push(gainedCard);
-    g.log = pushLog(g.log, attacker.name + ' 获得了' + (gainedCard.virtual ? '' : '【' + gainedCard.name + '】'));
+    g.log = pushLog(g.log, attacker.name + ' 发动【制蛮】,防止伤害并获得' + (gainedCard.virtual ? '一张牌' : '【' + gainedCard.name + '】'));
+  } else {
+    g.log = pushLog(g.log, attacker.name + ' 发动【制蛮】,防止伤害(目标已无牌可获)');
   }
   
-  g.pending = g.pending || {};
-  g.pending.preventDamage = true;
-  g.pending.zhimengResolved = true;
-  
   markSkillSound(g, '制蛮');
+}
+
+// 制蛮结束后接回原伤害流程(不发动时重放伤害;发动后 resume)
+function finishZhimeng(g, originalCtx, prevented){
+  g.pending = null;
+  if(!originalCtx){
+    g.phase = 'play';
+    return;
+  }
+  // aoe/delay 等 resume 用受害座位;sha 用攻击者座位(见 resumeAfterInterrupt)
+  const resumeSeat = (originalCtx.srcType==='aoe' || originalCtx.srcType==='delay')
+    ? originalCtx.to
+    : originalCtx.sourceSeat;
+  if(prevented){
+    // 伤害被防止:只接回调用方尾巴(等同 dealDamage 返回 false 后的路径)
+    if(checkWin(g)) return;
+    resumeAfterInterrupt(g, {type: originalCtx.srcType, seat: originalCtx.to}, resumeSeat);
+    return;
+  }
+  // 不发动:按原参数重放伤害,跳过制蛮防递归
+  const dying = dealDamage(
+    g,
+    originalCtx.to != null ? originalCtx.to : undefined,
+    originalCtx.amount,
+    originalCtx.sourceSeat,
+    originalCtx.reason,
+    originalCtx.srcType,
+    originalCtx.sourceCard,
+    false, false, false,
+    true // skipZhimeng
+  );
+  if(dying) return;
+  if(checkWin(g)) return;
+  resumeAfterInterrupt(g, {type: originalCtx.srcType, seat: originalCtx.to}, resumeSeat);
 }
 
 // 响应制蛮选择
@@ -1639,14 +1675,20 @@ function respondZhimeng(activate) {
     if(g.phase !== 'zhimengAsk') return g;
     
     const pending = g.pending;
-    if(!pending) {
+    if(!pending || pending.type !== 'zhimengAsk') {
       g.phase = 'play';
       return g;
     }
+    if(pending.from !== mySeat) return g;
+    
+    const originalCtx = pending.originalCtx || {};
+    // 补 to 字段(重放伤害目标)
+    originalCtx.to = pending.to;
+    originalCtx.sourceSeat = pending.from;
     
     if(!activate) {
-      g.pending = null;
-      g.phase = 'play';
+      g.log = pushLog(g.log, g.players[mySeat].name + '：不发动【制蛮】');
+      finishZhimeng(g, originalCtx, false);
       return g;
     }
     
@@ -1656,15 +1698,13 @@ function respondZhimeng(activate) {
     const target = g.players[to];
     
     if(!attacker || !attacker.alive || !target || !target.alive) {
-      g.pending = null;
-      g.phase = 'play';
+      finishZhimeng(g, originalCtx, false);
       return g;
     }
     
     if(pending.options.length === 1) {
       zhimengAutoResolve(g, from, to, pending.options[0]);
-      g.pending = null;
-      g.phase = 'play';
+      finishZhimeng(g, originalCtx, true);
       return g;
     }
     
@@ -1673,7 +1713,7 @@ function respondZhimeng(activate) {
       from: from,
       to: to,
       options: pending.options.slice(),
-      originalCtx: pending.originalCtx
+      originalCtx: originalCtx
     };
     g.phase = 'zhimengPick';
     g.log = pushLog(g.log, attacker.name + ' 选择获得哪一张牌…');
@@ -1688,10 +1728,15 @@ function respondZhimengPick(optionType, optionIndex) {
     if(g.phase !== 'zhimengPick') return g;
     
     const pending = g.pending;
-    if(!pending) {
+    if(!pending || pending.type !== 'zhimengPick') {
       g.phase = 'play';
       return g;
     }
+    if(pending.from !== mySeat) return g;
+    
+    const originalCtx = pending.originalCtx || {};
+    originalCtx.to = pending.to;
+    originalCtx.sourceSeat = pending.from;
     
     const from = pending.from;
     const to = pending.to;
@@ -1699,8 +1744,7 @@ function respondZhimengPick(optionType, optionIndex) {
     const target = g.players[to];
     
     if(!attacker || !attacker.alive || !target || !target.alive) {
-      g.pending = null;
-      g.phase = 'play';
+      finishZhimeng(g, originalCtx, false);
       return g;
     }
     
@@ -1713,44 +1757,10 @@ function respondZhimengPick(optionType, optionIndex) {
       }
     }
     
-    if(!selectedOption) {
-      g.phase = 'play';
-      return g;
-    }
+    if(!selectedOption) return g;
     
-    let gainedCard = null;
-    
-    if(selectedOption.type === 'hand') {
-      const hand = target.hand || [];
-      if(hand.length > 0) {
-        const idx = Math.floor(Math.random() * hand.length);
-        gainedCard = hand.splice(idx, 1)[0];
-      }
-    } else if(EQUIP_SLOTS.includes(selectedOption.type)) {
-      if(target.equips && target.equips[selectedOption.type]) {
-        gainedCard = target.equips[selectedOption.type];
-        target.equips[selectedOption.type] = null;
-      }
-    } else if(selectedOption.type === 'delay') {
-      if(target.delays && target.delays[selectedOption.index]) {
-        gainedCard = target.delays.splice(selectedOption.index, 1)[0];
-      }
-    }
-    
-    if(gainedCard) {
-      attacker.hand = attacker.hand || [];
-      attacker.hand.push(gainedCard);
-      g.log = pushLog(g.log, attacker.name + ' 获得了【' + gainedCard.name + '】');
-    }
-    
-    g.pending = {
-      preventDamage: true,
-      zhimengResolved: true
-    };
-    
-    g.phase = 'play';
-    markSkillSound(g, '制蛮');
-    
+    zhimengAutoResolve(g, from, to, selectedOption);
+    finishZhimeng(g, originalCtx, true);
     return g;
   });
 }
