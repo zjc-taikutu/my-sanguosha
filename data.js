@@ -407,6 +407,15 @@ const GENERALS = {
   caochong:       { id:'caochong',       name:'曹冲',   gender:'male', maxHp:3, skill:'称象/仁心',
     desc:'称象:当你受到伤害后,你可以亮出牌堆顶的四张牌,获得其中任意张点数之和不大于13的牌。仁心:当其他角色受到伤害时,若其体力值为1,你可以翻面并弃置一张装备牌,防止此伤害。',
     caps:{ chengxiang:true, renxin:true } },
+  xushu:          { id:'xushu',          name:'徐庶',   gender:'male', maxHp:3, skill:'无言/举荐',
+    desc:'无言:锁定技,你使用锦囊牌造成伤害时防止之;你受到锦囊牌伤害时防止之。举荐:结束阶段,你可以弃置一张非基本牌,令一名其他角色选择:摸两张牌/回复1点体力/复原武将牌。',
+    caps:{ wuyan:true, jujian:true } },
+  caozhang:       { id:'caozhang',       name:'曹彰',   gender:'male', maxHp:4, skill:'将驰',
+    desc:'将驰:摸牌阶段,你可以选择一项:1.多摸1张,本回合不能使用或打出杀;2.少摸1张,本回合使用杀无距离限制且可多使用1张杀;3.不发动。',
+    caps:{ jiangchi:true } },
+  caozhi:         { id:'caozhi',         name:'曹植',   gender:'male', maxHp:3, skill:'落英/酒诗',
+    desc:'落英:当其他角色的梅花牌因判定或弃置进入弃牌堆时,你可以获得之。酒诗:当你受到伤害后,若你的武将牌背面朝上且受伤时也背面朝上,你可以翻回正面。',
+    caps:{ luoying:true, jiushi:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

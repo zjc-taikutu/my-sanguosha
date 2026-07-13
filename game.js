@@ -240,6 +240,10 @@ function normalize(g){
     if(typeof p.chained!=='boolean') p.chained=false;
     if(typeof p.turnedOver!=='boolean') p.turnedOver=false;
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
+    if(typeof p.jujianUsed!=='boolean') p.jujianUsed=false;
+    // 曹彰【将驰】本回合效果
+    if(typeof p.jiangchiNoSlash!=='boolean') p.jiangchiNoSlash=false;
+    if(typeof p.jiangchiNoDistance!=='boolean') p.jiangchiNoDistance=false;
     if(!Number.isInteger(p.zhengyiTurn)) p.zhengyiTurn=-1;
     // 姜维【志继】觉醒标记
     if(typeof p.zhijiAwakened!=='boolean') p.zhijiAwakened=false;
@@ -593,6 +597,8 @@ function normalize(g){
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
   // 马谡【散谣】:出牌阶段限一次
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
+  // 曹彰【将驰】:本回合额外出杀次数剩余
+  if(typeof g.jiangchiExtraShaLeft!=='number') g.jiangchiExtraShaLeft=0;
   // 孔融【礼让】:每轮限一次 + 当前礼让对象/弃牌阶段记录
   if(!Number.isInteger(g.liRangRound)) g.liRangRound=0;
   if(!g.liRangRecord || typeof g.liRangRecord!=='object') g.liRangRecord=null;
@@ -746,6 +752,47 @@ function normalize(g){
        d.seat !== mySeat){
       g.pending = null;
       g.phase = 'end';
+    }
+  }
+  // 徐庶【举荐】三阶段
+  if(g.pending && (g.pending.type==='jujianPickCard' || g.pending.type==='jujianPickTarget' || g.pending.type==='jujianChooseEffect')){
+    const d = g.pending;
+    const srcOk = Number.isInteger(d.sourceSeat) && g.players[d.sourceSeat] && g.players[d.sourceSeat].alive;
+    if(!srcOk){
+      g.pending = null;
+      if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
+    } else if(d.type==='jujianChooseEffect'){
+      const tgtOk = Number.isInteger(d.targetSeat) && g.players[d.targetSeat] && g.players[d.targetSeat].alive;
+      if(!tgtOk){
+        g.pending = null;
+        if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
+      }
+    }
+  }
+  // 曹彰【将驰】摸牌阶段询问
+  if(g.pending && g.pending.type==='jiangchiAsk'){
+    const d = g.pending;
+    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending = null;
+      if(g.phase==='jiangchiAsk') g.phase = 'draw';
+    }
+  }
+  // 曹植【落英】
+  if(g.pending && g.pending.type==='luoyingAsk'){
+    const d = g.pending;
+    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.cardIds)){
+      g.pending = null;
+      if(g.phase==='luoyingAsk') g.phase = 'play';
+    }
+  }
+  // 曹植【酒诗②】翻面询问
+  if(g.pending && g.pending.type==='jiushiFlipAsk'){
+    const d = g.pending;
+    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.wasFacedown!=='boolean'){
+      g.pending = null;
+      if(g.phase==='jiushiFlipAsk') g.phase = 'play';
     }
   }
   // 蔡文姬【悲歌】:伤害后选择是否发动
@@ -2021,12 +2068,18 @@ const CARD_PLAYS = {
   '杀': {
     target:true,
     canPlay:(g,me,card)=> {
+      // 曹彰【将驰】选项1:本回合不能使用或打出杀
+      if(me.jiangchiNoSlash) return false;
       // 太史慈【天义】:天义输时不能使用杀
       if(g.tianyiLose && hasCap(me,'tianyi')) return false;
       // 太史慈【天义】:天义赢时无视出杀次数限制
       if(g.tianyiWin && hasCap(me,'tianyi')) return canUseAs(me,card,'杀');
-      // 正常判断
-      return canUseAs(me,card,'杀') && (!g.shaUsed || hasCap(me,'unlimitedSha')); // 无限杀:张飞【咆哮】或诸葛连弩
+      if(!canUseAs(me,card,'杀')) return false;
+      if(hasCap(me,'unlimitedSha')) return true; // 无限杀:张飞【咆哮】或诸葛连弩
+      if(!g.shaUsed) return true;
+      // 曹彰【将驰】选项2:额外出杀次数
+      if(g.jiangchiExtraShaLeft > 0 && g.turn === mySeat) return true;
+      return false;
     },
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
@@ -2058,13 +2111,19 @@ const CARD_PLAYS = {
       
       // 太史慈【天义】:天义赢时无距离限制
       if(g.tianyiWin && hasCap(me,'tianyi')) return true;
+      // 曹彰【将驰】选项2:本回合使用杀无距离限制(仍过空城等合法性)
+      if(me.jiangchiNoDistance && g.turn === mySeat) return true;
       return canReachSha(g, mySeat, targetSeat); // 只有杀受攻击距离限制
     },
     effect:(g,me,card,targetSeat)=>{
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
       // 太史慈【天义】:天义赢时不消耗出杀次数（次数上限+1的效果）
       if(!(g.tianyiWin && hasCap(me,'tianyi'))) {
-        g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+        if(!g.shaUsed){
+          g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+        } else if(g.jiangchiExtraShaLeft > 0){
+          g.jiangchiExtraShaLeft--;
+        }
       }
       triggerJiangOnTarget(g, mySeat, targetSeat, 'sha', isRed(card));
       
@@ -2517,6 +2576,8 @@ function respondJiedao(useSha){
     const seatB=g.pending.seatB;
     const A=g.players[mySeat];
     if(useSha){
+      // 曹彰【将驰】选项1:本回合不能打出杀
+      if(A.jiangchiNoSlash) return g;
       const idx=findUsableAs(A.hand, A, '杀');
       if(idx<0) return g; // 没有可用的杀:不生效(按钮本就不该渲染)
       const card=A.hand.splice(idx,1)[0];
@@ -2617,10 +2678,12 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     const c1=me.hand[idx1], c2=me.hand[idx2];
     if(!c1||!c2) return g;
     if(!hasCap(me,'twoAsSha')) return g;                       // 无丈八(卸下/被拆即失效)
-    if(g.shaUsed && !hasCap(me,'unlimitedSha')) return g;      // 次数限制(除非无限杀)
+    if(me.jiangchiNoSlash) return g; // 曹彰【将驰】选项1
+    if(g.shaUsed && !hasCap(me,'unlimitedSha') && !(g.jiangchiExtraShaLeft > 0)) return g; // 次数限制(除非无限杀/将驰+1)
     const tgt=g.players[targetSeat];
     if(targetSeat===mySeat||!tgt||!tgt.alive) return g;
-    if(!canReachSha(g, mySeat, targetSeat)) return g;          // 攻击距离(丈八 range3)
+    // 曹彰【将驰】选项2:无距离;否则查攻击距离(丈八 range3)
+    if(!(me.jiangchiNoDistance && g.turn===mySeat) && !canReachSha(g, mySeat, targetSeat)) return g;
     // 诸葛亮【空城】:丈八蛇矛这条路径不走 CARD_PLAYS['杀'].canTarget,单独补上同一条限制
     // ——这仍然是"使用杀"这件事,空城不区分杀是怎么凑出来的。
     if(hasCap(tgt,'kongcheng') && (tgt.hand||[]).length===0) return g;
@@ -2628,7 +2691,8 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     const hi=Math.max(idx1,idx2), lo=Math.min(idx1,idx2);
     g.discard.push(me.hand.splice(hi,1)[0]);
     g.discard.push(me.hand.splice(lo,1)[0]);
-    g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+    if(!g.shaUsed) g.shaUsed=true;
+    else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
     // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
     // 不是"没有颜色"——c1/c2 是 splice 之前存的引用,不受后面 splice 影响。
     resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2), [c1, c2], undefined);
@@ -2650,7 +2714,8 @@ function playShaFangtian(cardIdx, targets){
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat], card=me.hand[cardIdx];
     if(!card || !canUseAs(me,card,'杀')) return g;
-    if(g.shaUsed && !hasCap(me,'unlimitedSha')) return g; // 出杀次数限制,和普通杀一致
+    if(me.jiangchiNoSlash) return g;
+    if(g.shaUsed && !hasCap(me,'unlimitedSha') && !(g.jiangchiExtraShaLeft > 0)) return g; // 出杀次数限制,和普通杀一致
     if(!hasCap(me,'fangtian') || me.hand.length!==1) return g; // 锁定技触发条件:必须是最后一张手牌
     if(!Array.isArray(targets) || targets.length<1 || targets.length>3) return g;
     const seen=new Set();
@@ -2658,7 +2723,8 @@ function playShaFangtian(cardIdx, targets){
       if(seen.has(t)) return g; // 目标不能重复
       seen.add(t);
       const tp=g.players[t];
-      if(!tp || !tp.alive || t===mySeat || !canReachSha(g, mySeat, t)) return g;
+      if(!tp || !tp.alive || t===mySeat) return g;
+      if(!(me.jiangchiNoDistance && g.turn===mySeat) && !canReachSha(g, mySeat, t)) return g;
       // 诸葛亮【空城】:方天画戟这条路径同样不走 CARD_PLAYS['杀'].canTarget,逐个目标补上
       // 同一条限制——多目标里任何一个是空城状态的诸葛亮都不能被列入。
       if(hasCap(tp,'kongcheng') && (tp.hand||[]).length===0) return g;
@@ -2668,7 +2734,8 @@ function playShaFangtian(cardIdx, targets){
     for(let i=0;i<g.players.length;i++){ s=nextAlive(g,s); if(targets.includes(s)) order.push(s); }
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
-    g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
+    if(!g.shaUsed) g.shaUsed=true;
+    else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
     const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
     g.log=pushLog(g.log, me.name+' 发动【方天画戟】,'+usedAs+',指定 '+order.length+' 个目标：'+order.map(t=>g.players[t].name).join('、'));
     g.fangtianQueue = { from:mySeat, targets:order, idx:0, usedAs, shaColor:singleCardShaColor(card), sourceCard:card };
@@ -2887,6 +2954,26 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
 function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, skipTianxiang, skipZhengyi, skipChain){
   const p=g.players[seat];
   if(!p) return false;
+
+  // 徐庶【无言】:锦囊伤害防止(锁定技)。连环传导仍带原 sourceCard,同样防止。
+  if(amount > 0 && sourceCard && isTrickCardName(sourceCard.name)){
+    const src = (typeof sourceSeat === 'number') ? g.players[sourceSeat] : null;
+    const tgt = g.players[seat];
+    if(src && src.alive && generalHasCap(src, 'wuyan')){
+      g.log = pushLog(g.log, src.name + ' 发动【无言】,防止其锦囊造成的伤害');
+      markSkillSound(g, '无言');
+      return false;
+    }
+    if(tgt && tgt.alive && generalHasCap(tgt, 'wuyan')){
+      g.log = pushLog(g.log, tgt.name + ' 发动【无言】,防止锦囊伤害');
+      markSkillSound(g, '无言');
+      return false;
+    }
+  }
+
+  // 曹植【酒诗②】:扣血前记录是否背面(受伤时状态)
+  const jiushiFacedownAtDamage = (p.faceup === false);
+
   if(!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   if(!skipTianxiang && maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   
@@ -3017,6 +3104,19 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(sourceCard!==undefined) ctx.sourceCard=sourceCard;
     triggerHook(g, seat, 'onDamaged', ctx);
     if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
+
+    // 曹植【酒诗②】:受到伤害后,若受伤时背面且当前仍背面,可翻回正面
+    if(p.alive && generalHasCap(p, 'jiushi') && jiushiFacedownAtDamage && p.faceup === false){
+      g.pending = {
+        type: 'jiushiFlipAsk',
+        seat,
+        wasFacedown: true,
+        resume: { type: srcType }
+      };
+      g.phase = 'jiushiFlipAsk';
+      g.log = pushLog(g.log, p.name + ' 是否发动【酒诗】翻回正面…');
+      return true;
+    }
     
     // 曹冲【称象】:检查受伤者是否可以发动称象
     if(amount > 0 && p && p.alive && generalHasCap(p, 'chengxiang')) {
@@ -3649,6 +3749,8 @@ function duelResponse(useSha){
     const opp=(mySeat===g.pending.from)?g.pending.to:g.pending.from;
     const needed = (!hasCap(me,'wushuang') && hasCap(g.players[opp],'wushuang')) ? 2 : 1;
     if(useSha){
+      // 曹彰【将驰】选项1:本回合不能打出杀
+      if(me.jiangchiNoSlash) return g;
       const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0];
@@ -4085,6 +4187,8 @@ function aoeRespond(useCard){
     if(!me || !me.alive || g.pending.to!==mySeat) return g;
     const need=g.pending.need;
     if(useCard){
+      // 曹彰【将驰】选项1:本回合不能打出杀(南蛮响应)
+      if(need==='杀' && me.jiangchiNoSlash) return g;
       const idx=findUsableAs(me.hand,me,need); // 龙胆:杀/闪可互转,优先用本名牌
       if(idx<0) return g; // 没牌:界面按钮保留,等其改点"不出"
       const card=me.hand.splice(idx,1)[0];
@@ -4203,6 +4307,8 @@ function discardCard(cardIdx){
       g.liRangRecord.discarded.push(card);
     }
     g.log=pushLog(g.log, me.name+' 弃置一张牌');
+    // 曹植【落英】
+    if(maybeStartLuoying(g, mySeat, [card], 'discard', {phase:'discard'})) return g;
     return g;
   });
 }
@@ -4236,6 +4342,8 @@ function discardCards(cardIdxList){
       g.liRangRecord.discarded.push(...discarded);
     }
     g.log=pushLog(g.log, me.name+' 弃置了'+discarded.length+'张牌');
+    // 曹植【落英】
+    if(maybeStartLuoying(g, mySeat, discarded, 'discard', {phase:'discard'})) return g;
     return g;
   });
 }
@@ -4253,7 +4361,17 @@ function endTurn(){
     }
     // 乐进【骁果】只在"正常走完弃牌阶段、即将结束回合"这里触发,不影响其它切回合路径
     // (决斗/濒死里回合玩家中途阵亡换人——那个人根本没走到结束阶段,规则本身就不该触发骁果)。
-    advanceXiaoguo(g, mySeat, mySeat);
+    // 注意:不能直接 advanceXiaoguo——它在"无人可问"时会 finishTurn,导致后面的旋风/举荐/据守
+    // 再也挂不上,或在"有人可问"时被后面的 if 覆盖 pending。结束阶段入口只负责"若有骁果候选人则挂起并 return"。
+    {
+      const xiaoguoAsker = nextXiaoguoAsker(g, mySeat, mySeat);
+      if(xiaoguoAsker !== null){
+        g.pending={type:'xiaoguo', endingSeat:mySeat, asking:xiaoguoAsker};
+        g.phase='xiaoguo';
+        g.log=pushLog(g.log, '结束阶段:询问 '+g.players[xiaoguoAsker].name+' 是否发动【骁果】…');
+        return g;
+      }
+    }
     // 凌统【旋风】：弃牌阶段弃置过至少两张牌时触发
     if (generalHasCap(me, 'xuanfeng') && me.alive && !g.xuanfengDiscardUsed) {
       // 使用准确的弃牌计数器（避免依赖g.discard.length导致的错误）
@@ -4274,6 +4392,19 @@ function endTurn(){
         g.xuanfengDiscardUsed = true;
         g.phase = 'xuanfengPick';
         g.log = pushLog(g.log, `${me.name} 可以发动【旋风】,弃置其他角色的共计至多两张牌`);
+        return g;
+      }
+    }
+    // 徐庶【举荐】：结束阶段可选(在据守之前,与据守同属结束阶段挂起)
+    // 注意:advanceXiaoguo 无候选人时会直接 finishTurn;有骁果/旋风挂起时本函数已 return,
+    // 那些流程结束后不会自动再问举荐——与现有据守同一局限,接受。
+    if (generalHasCap(me, 'jujian') && me.alive && !me.jujianUsed) {
+      const hasNonBasic = (me.hand || []).some(c => c && c.name && !BASIC_CARDS.includes(c.name));
+      const hasOther = g.players.some((p, i) => i !== mySeat && p && p.alive);
+      if (hasNonBasic && hasOther) {
+        g.pending = { type: 'jujianPickCard', sourceSeat: mySeat, endingSeat: mySeat };
+        g.phase = 'jujianPickCard';
+        g.log = pushLog(g.log, me.name + ' 是否发动【举荐】…');
         return g;
       }
     }
@@ -4505,13 +4636,16 @@ function startTurn(g, seat){
     return endTurn(g);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];
   if(currentPlayer) {
     currentPlayer.fenxunUsed = false;
     currentPlayer.fenxunTarget = null;
+    currentPlayer.jujianUsed = false;
+    currentPlayer.jiangchiNoSlash = false;
+    currentPlayer.jiangchiNoDistance = false;
   }
   // 贾诩完杀：回合开始时重置状态
   g.wanshaActive = false; g.wanshaDyingSeat = null;
@@ -4604,6 +4738,13 @@ function continueEnterDrawPhase(g){
       g.log = pushLog(g.log, p.name+' 尝试发动【恂恂】,但牌堆为空,无法发动');
       g.phase='draw';
     }
+  } else if(hasCap(g.players[g.turn], 'jiangchi')){
+    // 曹彰【将驰】:摸牌阶段三选一
+    const seat = g.turn;
+    const p = g.players[seat];
+    g.pending = { type:'jiangchiAsk', seat, baseDraw: drawPhaseCount(g, seat) };
+    g.phase = 'jiangchiAsk';
+    g.log = pushLog(g.log, p.name + ' 是否发动【将驰】…');
   } else {
     g.phase='draw';
   }
@@ -4722,6 +4863,11 @@ function finishDelayCard(g, seat, spec, finalCard, card){
   } else {
     discardOrVanish(g, card);
   }
+  // 曹植【落英】:其他角色的判定梅花牌进入弃牌堆后可获得(finalCard 已在 discard)
+  // 若 effect 已挂起濒死,不再覆盖 pending
+  if(result!=='pending' && finalCard && maybeStartLuoying(g, seat, [finalCard], 'judge', {type:'delay', seat})){
+    return 'pending';
+  }
   return result==='pending' ? 'pending' : 'done';
 }
 // discardOrVanish: 延时锦囊的牌"离场"时的统一去向——真实牌进弃牌堆;虚拟牌(card.virtual,
@@ -4738,7 +4884,12 @@ function discardOrVanish(g, card){
 // 信息,绝不能覆盖。'done' 时统一走 enterDrawPhase,进入(或跳过)摸牌阶段。
 function continueDelayResolution(g, seat){
   if(resolveDelayTricks(g, seat)==='pending'){
-    if(g.pending.type==='dying' || g.pending.type==='yijiAsk') g.pending.resume={type:'delay', seat};
+    if(g.pending && (g.pending.type==='dying' || g.pending.type==='yijiAsk' || g.pending.type==='luoyingAsk')){
+      // luoyingAsk 若已自带 resume 则不覆盖
+      if(g.pending.type!=='luoyingAsk' || !g.pending.resume){
+        g.pending.resume={type:'delay', seat};
+      }
+    }
     return;
   }
   continueTurnStart(g, seat);

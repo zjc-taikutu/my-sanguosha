@@ -3022,3 +3022,239 @@ function cancelLieRen() {
     return g;
   });
 }
+
+// ===== 徐庶【举荐】 =====
+function isNonBasicCard(card){
+  return !!(card && card.name && !BASIC_CARDS.includes(card.name));
+}
+function respondJujianPickCard(cardIdx){
+  tx(g=>{
+    if(g.phase!=='jujianPickCard'||!g.pending||g.pending.type!=='jujianPickCard') return g;
+    if(g.pending.sourceSeat!==mySeat) return g;
+    const me=g.players[mySeat];
+    const card=me.hand[cardIdx];
+    if(!isNonBasicCard(card)) return g;
+    const candidates=[];
+    for(let i=0;i<g.players.length;i++){
+      if(i!==mySeat && g.players[i] && g.players[i].alive) candidates.push(i);
+    }
+    if(!candidates.length) return g;
+    g.pending={
+      type:'jujianPickTarget',
+      sourceSeat:mySeat,
+      endingSeat:g.pending.endingSeat,
+      cardIdx,
+      cardId:card.id,
+      candidates
+    };
+    g.phase='jujianPickTarget';
+    return g;
+  });
+}
+function respondJujianPickTarget(targetSeat){
+  tx(g=>{
+    if(g.phase!=='jujianPickTarget'||!g.pending||g.pending.type!=='jujianPickTarget') return g;
+    if(g.pending.sourceSeat!==mySeat) return g;
+    if(!(g.pending.candidates||[]).includes(targetSeat)) return g;
+    const me=g.players[mySeat];
+    const endingSeat=g.pending.endingSeat;
+    let idx=g.pending.cardIdx;
+    let card=me.hand[idx];
+    if(!card || card.id!==g.pending.cardId){
+      idx=(me.hand||[]).findIndex(c=>c && c.id===g.pending.cardId);
+      if(idx<0){
+        g.pending=null;
+        finishTurn(g, endingSeat);
+        return g;
+      }
+      card=me.hand[idx];
+    }
+    if(!isNonBasicCard(card)) return g;
+    me.hand.splice(idx,1);
+    g.discard.push(card);
+    g.pending={
+      type:'jujianChooseEffect',
+      sourceSeat:mySeat,
+      endingSeat,
+      targetSeat,
+      discardCard:card
+    };
+    g.phase='jujianChooseEffect';
+    g.log=pushLog(g.log, me.name+' 发动【举荐】,弃置【'+card.name+'】,令 '+g.players[targetSeat].name+' 选择一项');
+    markSkillSound(g, '举荐');
+    return g;
+  });
+}
+function respondJujianEffect(opt){
+  tx(g=>{
+    if(g.phase!=='jujianChooseEffect'||!g.pending||g.pending.type!=='jujianChooseEffect') return g;
+    if(g.pending.targetSeat!==mySeat) return g;
+    const src=g.players[g.pending.sourceSeat];
+    const tgt=g.players[g.pending.targetSeat];
+    const endingSeat=g.pending.endingSeat;
+    if(!tgt||!tgt.alive){
+      if(src) src.jujianUsed=true;
+      g.pending=null;
+      finishTurn(g, endingSeat);
+      return g;
+    }
+    if(opt==='draw'){
+      drawN(g, g.pending.targetSeat, 2);
+      g.log=pushLog(g.log, tgt.name+' 因【举荐】摸2张牌');
+    } else if(opt==='recover'){
+      if(tgt.hp<tgt.maxHp){
+        tgt.hp++;
+        g.log=pushLog(g.log, tgt.name+' 因【举荐】回复1点体力');
+      } else {
+        g.log=pushLog(g.log, tgt.name+' 体力已满,【举荐】回复无效果');
+      }
+    } else if(opt==='reset'){
+      const need=! (tgt.faceup!==false) || !!tgt.chained;
+      tgt.faceup=true;
+      tgt.chained=false;
+      g.log=pushLog(g.log, need ? (tgt.name+' 因【举荐】复原武将牌') : (tgt.name+' 无需复原'));
+    } else {
+      return g;
+    }
+    if(src) src.jujianUsed=true;
+    g.pending=null;
+    finishTurn(g, endingSeat);
+    return g;
+  });
+}
+function cancelJujian(){
+  tx(g=>{
+    if(!g.pending) return g;
+    if(g.pending.type==='jujianChooseEffect') return g; // 已弃牌不可取消
+    if(g.pending.sourceSeat!==mySeat) return g;
+    if(g.pending.type!=='jujianPickCard' && g.pending.type!=='jujianPickTarget') return g;
+    const endingSeat=g.pending.endingSeat;
+    g.pending=null;
+    g.log=pushLog(g.log, g.players[mySeat].name+' 取消【举荐】');
+    finishTurn(g, endingSeat);
+    return g;
+  });
+}
+
+// ===== 曹彰【将驰】 =====
+function respondJiangchi(optionId){
+  tx(g=>{
+    if(g.phase!=='jiangchiAsk'||!g.pending||g.pending.type!=='jiangchiAsk') return g;
+    if(g.pending.seat!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me||!me.alive||!generalHasCap(me,'jiangchi')) return g;
+    const base=Number.isInteger(g.pending.baseDraw) ? g.pending.baseDraw : drawPhaseCount(g, mySeat);
+    g.pending=null;
+    if(optionId==='more'){
+      me.jiangchiNoSlash=true;
+      me.jiangchiNoDistance=false;
+      g.jiangchiExtraShaLeft=0;
+      g.log=pushLog(g.log, me.name+' 发动【将驰】:多摸1张,本回合不能使用或打出杀');
+      markSkillSound(g, '将驰');
+      finishDrawPhase(g, mySeat, base+1);
+    } else if(optionId==='less'){
+      me.jiangchiNoSlash=false;
+      me.jiangchiNoDistance=true;
+      g.jiangchiExtraShaLeft=1;
+      g.log=pushLog(g.log, me.name+' 发动【将驰】:少摸1张,本回合杀无距离限制且可多出1张杀');
+      markSkillSound(g, '将驰');
+      finishDrawPhase(g, mySeat, Math.max(0, base-1));
+    } else {
+      me.jiangchiNoSlash=false;
+      me.jiangchiNoDistance=false;
+      g.jiangchiExtraShaLeft=0;
+      g.log=pushLog(g.log, me.name+'：不发动【将驰】');
+      finishDrawPhase(g, mySeat, base);
+    }
+    return g;
+  });
+}
+
+// ===== 曹植【落英】 =====
+function isClubCard(card){
+  return !!(card && card.suit==='♣');
+}
+// fromSeat: 牌的来源角色; cards: 已进入弃牌堆的牌; reason: 'judge'|'discard'
+// resume: 结束后接回(如 {type:'delay',seat} 或 {phase:'discard'})
+function maybeStartLuoying(g, fromSeat, cards, reason, resume){
+  if(reason!=='judge' && reason!=='discard') return false;
+  if(!Array.isArray(cards) || !cards.length) return false;
+  if(g.pending) return false; // 已有更高优先级挂起则不覆盖
+  const clubCards=cards.filter(isClubCard);
+  if(!clubCards.length) return false;
+  for(let k=0;k<g.players.length;k++){
+    const i=(fromSeat+1+k)%g.players.length;
+    if(i===fromSeat) continue;
+    const p=g.players[i];
+    if(!p||!p.alive||!generalHasCap(p,'luoying')) continue;
+    g.pending={
+      type:'luoyingAsk',
+      seat:i,
+      fromSeat,
+      reason,
+      cardIds:clubCards.map(c=>c.id).filter(id=>id!=null),
+      cardsPreview:clubCards.map(c=>({id:c.id,name:c.name,suit:c.suit,rank:c.rank})),
+      resume:resume||null
+    };
+    g.phase='luoyingAsk';
+    g.log=pushLog(g.log, p.name+' 是否发动【落英】获得'+clubCards.length+'张梅花牌…');
+    return true;
+  }
+  return false;
+}
+function respondLuoying(activate){
+  tx(g=>{
+    if(g.phase!=='luoyingAsk'||!g.pending||g.pending.type!=='luoyingAsk') return g;
+    if(g.pending.seat!==mySeat) return g;
+    const me=g.players[mySeat];
+    const resume=g.pending.resume;
+    if(activate && me && me.alive){
+      const got=[];
+      (g.pending.cardIds||[]).forEach(id=>{
+        const idx=(g.discard||[]).findIndex(c=>c && c.id===id);
+        if(idx>=0){
+          const [card]=g.discard.splice(idx,1);
+          got.push(card);
+        }
+      });
+      if(got.length){
+        me.hand.push(...got);
+        g.log=pushLog(g.log, me.name+' 发动【落英】,获得'+got.length+'张牌');
+        markSkillSound(g, '落英');
+      } else {
+        g.log=pushLog(g.log, me.name+' 发动【落英】,但牌已不在弃牌堆');
+      }
+    } else {
+      g.log=pushLog(g.log, me.name+'：不发动【落英】');
+    }
+    g.pending=null;
+    if(resume && resume.type==='delay' && Number.isInteger(resume.seat)){
+      continueDelayResolution(g, resume.seat);
+    } else if(resume && resume.phase){
+      g.phase=resume.phase;
+    } else {
+      g.phase='play';
+    }
+    return g;
+  });
+}
+
+// ===== 曹植【酒诗②】 =====
+function respondJiushiFlip(activate){
+  tx(g=>{
+    if(g.phase!=='jiushiFlipAsk'||!g.pending||g.pending.type!=='jiushiFlipAsk') return g;
+    if(g.pending.seat!==mySeat) return g;
+    const me=g.players[mySeat];
+    const resume=g.pending.resume;
+    if(activate && me && me.alive && g.pending.wasFacedown){
+      me.faceup=true;
+      g.log=pushLog(g.log, me.name+' 发动【酒诗】,翻回正面');
+      markSkillSound(g, '酒诗');
+    } else {
+      g.log=pushLog(g.log, me.name+'：不发动【酒诗】');
+    }
+    g.pending=null;
+    resumeAfterInterrupt(g, resume||{type:'sha'}, mySeat);
+    return g;
+  });
+}

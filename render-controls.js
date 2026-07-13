@@ -582,6 +582,157 @@ function renderControls(g){
     return;
   }
 
+  // 徐庶【举荐】:选非基本牌
+  if(g.phase==='jujianPickCard' && g.pending && g.pending.type==='jujianPickCard' && g.pending.sourceSeat===mySeat){
+    const me=g.players[mySeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【举荐】弃置一张非基本牌';
+    div.appendChild(h4);
+    (me.hand||[]).forEach((card, idx)=>{
+      if(!card || BASIC_CARDS.includes(card.name)) return;
+      const b=document.createElement('button');
+      b.className='skill-btn';
+      b.textContent=card.name+(card.suit||'')+(card.rank!=null?rankText(card.rank):'');
+      b.onclick=()=>respondJujianPickCard(idx);
+      div.appendChild(b);
+    });
+    const cancel=document.createElement('button'); cancel.className='cancel'; cancel.textContent='取消';
+    cancel.onclick=cancelJujian;
+    div.appendChild(cancel);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='jujianPickCard' && g.pending && g.pending.type==='jujianPickCard'){
+    const p=g.players[g.pending.sourceSeat];
+    waitAskBanner(p?p.name:'徐庶', '举荐');
+    return;
+  }
+  // 徐庶【举荐】:选目标
+  if(g.phase==='jujianPickTarget' && g.pending && g.pending.type==='jujianPickTarget' && g.pending.sourceSeat===mySeat){
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【举荐】选择一名其他角色';
+    div.appendChild(h4);
+    (g.pending.candidates||[]).forEach(seat=>{
+      const tp=g.players[seat];
+      if(!tp) return;
+      const b=document.createElement('button');
+      b.className='skill-btn';
+      b.textContent=tp.name;
+      b.onclick=()=>respondJujianPickTarget(seat);
+      div.appendChild(b);
+    });
+    const cancel=document.createElement('button'); cancel.className='cancel'; cancel.textContent='取消';
+    cancel.onclick=cancelJujian;
+    div.appendChild(cancel);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='jujianPickTarget' && g.pending && g.pending.type==='jujianPickTarget'){
+    const p=g.players[g.pending.sourceSeat];
+    waitAskBanner(p?p.name:'徐庶', '举荐');
+    return;
+  }
+  // 徐庶【举荐】:被举荐者选效果
+  if(g.phase==='jujianChooseEffect' && g.pending && g.pending.type==='jujianChooseEffect' && g.pending.targetSeat===mySeat){
+    const src=g.players[g.pending.sourceSeat];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent=(src?src.name:'徐庶')+' 举荐你,请选择一项';
+    div.appendChild(h4);
+    [['draw','摸两张牌'],['recover','回复1点体力'],['reset','复原武将牌']].forEach(([k,txt])=>{
+      const b=document.createElement('button');
+      b.className='skill-btn';
+      b.textContent=txt;
+      b.onclick=()=>respondJujianEffect(k);
+      div.appendChild(b);
+    });
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='jujianChooseEffect' && g.pending && g.pending.type==='jujianChooseEffect'){
+    const p=g.players[g.pending.targetSeat];
+    setBanner('等待 '+(p?p.name:'目标')+' 选择【举荐】效果…');
+    return;
+  }
+
+  // 曹彰【将驰】
+  if(g.phase==='jiangchiAsk' && g.pending && g.pending.type==='jiangchiAsk' && g.pending.seat===mySeat){
+    const base=Number.isInteger(g.pending.baseDraw)?g.pending.baseDraw:2;
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【将驰】请选择';
+    div.appendChild(h4);
+    [
+      ['more', '多摸1张(共'+(base+1)+'张),本回合不能用/打出杀'],
+      ['less', '少摸1张(共'+Math.max(0,base-1)+'张),杀无距且可多出1张杀'],
+      ['skip', '不发动,摸'+base+'张']
+    ].forEach(([id,txt])=>{
+      const b=document.createElement('button');
+      b.className='skill-btn';
+      b.textContent=txt;
+      b.onclick=()=>respondJiangchi(id);
+      div.appendChild(b);
+    });
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='jiangchiAsk' && g.pending && g.pending.type==='jiangchiAsk'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'曹彰', '将驰');
+    return;
+  }
+
+  // 曹植【落英】
+  if(g.phase==='luoyingAsk' && g.pending && g.pending.type==='luoyingAsk' && g.pending.seat===mySeat){
+    const n=(g.pending.cardIds||[]).length;
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【落英】获得梅花牌';
+    div.appendChild(h4);
+    const p=document.createElement('p');
+    p.textContent='可获得 '+(n||0)+' 张梅花牌';
+    div.appendChild(p);
+    if(Array.isArray(g.pending.cardsPreview)){
+      g.pending.cardsPreview.forEach(card=>{
+        const span=document.createElement('span');
+        span.style.margin='0 4px';
+        span.textContent='【'+(card.name||'?')+'】'+(card.suit||'');
+        div.appendChild(span);
+      });
+    }
+    const ok=document.createElement('button'); ok.className='primary'; ok.textContent='获得';
+    ok.onclick=()=>respondLuoying(true);
+    const no=document.createElement('button'); no.className='cancel'; no.textContent='不获得';
+    no.onclick=()=>respondLuoying(false);
+    div.appendChild(document.createElement('br'));
+    div.appendChild(ok); div.appendChild(no);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='luoyingAsk' && g.pending && g.pending.type==='luoyingAsk'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'曹植', '落英');
+    return;
+  }
+
+  // 曹植【酒诗②】
+  if(g.phase==='jiushiFlipAsk' && g.pending && g.pending.type==='jiushiFlipAsk' && g.pending.seat===mySeat){
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【酒诗】翻面';
+    div.appendChild(h4);
+    const p=document.createElement('p'); p.textContent='你受到伤害且武将牌背面朝上,可以翻回正面';
+    div.appendChild(p);
+    const ok=document.createElement('button'); ok.className='primary'; ok.textContent='翻回正面';
+    ok.onclick=()=>respondJiushiFlip(true);
+    const no=document.createElement('button'); no.className='cancel'; no.textContent='不发动';
+    no.onclick=()=>respondJiushiFlip(false);
+    div.appendChild(ok); div.appendChild(no);
+    c.appendChild(div);
+    return;
+  }
+  if(g.phase==='jiushiFlipAsk' && g.pending && g.pending.type==='jiushiFlipAsk'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'曹植', '酒诗');
+    return;
+  }
+
   // 曹仁【据守】:选择阶段
   if(g.phase==='jushouChoose' && g.pending && g.pending.type==='jushouChoose' && g.pending.seat===mySeat){
     const div = document.createElement('div'); div.className = 'centered';

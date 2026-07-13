@@ -1,5 +1,8 @@
 # 徐庶 武将设计文档
 
+> **审核基准**：对照当前仓库 `data.js` / `game.js` / `skills.js` / `render.js` / `render-controls.js` 真实实现（2026-07-13）。
+> 本文只写**可落地**方案，不发明项目里不存在的 API。
+
 ## 一、基本信息
 
 | 项目 | 内容 |
@@ -13,50 +16,44 @@
 
 ---
 
-## 二、技能说明
+## 二、技能说明（本项目采用的版本）
 
 ### 无言（锁定技）
-**时机**：伤害计算时
+**时机**：伤害结算扣血前（`dealDamage` 内）
 
 **效果**：
-1. 当你使用锦囊牌造成伤害时，防止此伤害
-2. 当你受到锦囊牌造成的伤害时，防止此伤害
+1. 你使用锦囊牌对其他角色造成伤害时，防止此伤害
+2. 你受到锦囊牌造成的伤害时，防止此伤害
 
-**设计要点**：
-- 属于**锁定技**，无需玩家操作，自动触发
-- **关键修正**：必须在 `dealDamage` 函数中集成，而不是假设 `beforeDamage` 钩子
-- 仅**防止伤害本身**，不影响锦囊牌的其他结算（如南蛮的多目标效果）
-- **关键修正**：排除连环传导伤害（传导时 `skipChain=true`，无言不挡传导）
-- 必须判断伤害的**使用者**是徐庶（主动使用锦囊），或**目标**是徐庶（受到锦囊伤害）
-- 防止伤害意味着：设置 `amount = 0` 并直接返回，但不阻断后续流程
+**口径**：
+- 判定“是不是锦囊伤害”：`sourceCard` 存在且 `isTrickCardName(sourceCard.name)` 为真
+  - `isTrickCardName` 已在 `game.js`：`!BASIC_CARDS.includes(name) && !getEquip(name)`
+  - 因此覆盖普通锦囊、延时锦囊（如闪电）、火攻等；不含基本牌/装备牌
+- **连环传导同样算原牌伤害**：`propagateChainedDamage` 会带着原 `sourceCard` 再进 `dealDamage` 且 `skipChain=true`。无言**仍应防止**（不要用 `!skipChain` 排除传导）
+- 防止方式：不扣血、不触发受伤后钩子、不进濒死；`return false`（表示“本次未挂起”，调用方按“伤害未造成后续”继续；与制蛮防止伤害后的返回语义一致）
+- 徐庶自己用南蛮/万箭：每个目标结算伤害时 `sourceSeat` 是徐庶、`sourceCard` 是该锦囊 → **每个目标的伤害都被防止**（不是“只防自己”）
 
 ### 举荐
-**时机**：结束阶段
+**时机**：结束阶段（本项目里等价于 `endTurn()` 即将 `finishTurn` 前，与曹仁【据守】同一挂点）
 
 **效果**：
-1. 你可以弃置一张非基本牌
-2. 令一名其他角色选择一项：
-   - 1. 摸两张牌
-   - 2. 回复1点体力
-   - 3. 复原武将牌
+1. 你可以弃置一张**非基本牌**（锦囊或装备，手牌）
+2. 令一名其他存活角色选择一项：
+   - 摸两张牌
+   - 回复 1 点体力（已满血则无实际回复，但可选）
+   - 复原武将牌（`faceup=true` 且 `chained=false`）
 
-**设计要点**：
-- 属于**结束阶段主动技能**，每回合每名玩家可使用一次
-- **关键修正**：使用 `p.marks.jujian_used` 而不是全局标志，避免多人局串台
-- **非基本牌**的判断：使用 `!isTrickCardName(card.name)`，兼容项目中实际的判断方式
-- **关键修正**：弃牌操作延迟到选择目标后执行，防止取消时牌丢失
-- **关键修正**：复原武将牌需同时处理 `flipped`（翻面）和 `chained`（横置）状态
-- **关键修正**：失败回退到 `'end'` 阶段而非 `'play'` 阶段
-- **关键修正**：使用 DOM API 创建 UI 元素，避免 XSS 注入风险
-- **关键修正**：`onEndPhase` 为纯函数，避免嵌套事务
-- **关键修正**：效果选择仅允许被举荐者操作，防止越权
-- **关键修正**：手牌索引漂移保护，通过 card.id 校验
+**口径**：
+- 非基本牌：`!BASIC_CARDS.includes(card.name)`  
+  **不要**写成 `isTrickCardName`——那会漏掉装备牌
+- 限一次：挂在**玩家字段** `p.jujianUsed`（布尔），`startTurn` 重置；**不要**用全局 `g.jujianUsed`，也**不要**发明 `p.marks.*`（项目主流是顶层玩家字段，如 `fenxunUsed`）
+- 弃牌时机：选完目标后再弃，避免“选牌后取消丢牌”
+- 效果选择权限：仅 `targetSeat === mySeat` 的被举荐者可点
 
 ---
 
 ## 三、数据定义（data.js）
 
-### 武将表条目
 ```javascript
 xushu: {
   id: 'xushu',
@@ -64,608 +61,304 @@ xushu: {
   gender: 'male',
   maxHp: 3,
   skill: '无言/举荐',
-  desc: '无言:锁定技,当你使用锦囊牌造成伤害时,或受到锦囊牌造成的伤害时,防止此伤害。举荐:结束阶段,你可以弃置一张非基本牌,令一名其他角色选择一项:1.摸两张牌;2.回复1点体力;3.复原武将牌。',
+  desc: '无言:锁定技,你使用锦囊牌造成伤害时防止之;你受到锦囊牌伤害时防止之。举荐:结束阶段,你可以弃置一张非基本牌,令一名其他角色选择:摸两张牌/回复1点体力/复原武将牌。',
   caps: { wuyan: true, jujian: true }
 }
 ```
 
-**注意**：无言为锁定技，通过 `caps` 声明即可，无需 `hooks`
+无言锁定技只靠 `caps`，不需要 `hooks`。
 
 ---
 
-## 四、技能实现
+## 四、关键 API 约束（写代码时必须遵守）
 
-### 通用辅助函数
+| 项目现状 | 错误写法 | 正确写法 |
+|----------|----------|----------|
+| `markSkillSound(g, skillName)` 只收**中文技能名** | `markSkillSound(g, seat, 'wuyan')` | `markSkillSound(g, '无言')` |
+| 音效表是 `render.js` 的 `SKILL_PINYIN` | 新建 `SKILL_SOUNDS` | `SKILL_PINYIN['无言']='wuyan'` 等 |
+| `ensureDeck(g)` 无第二参数 | `ensureDeck(g, 2)` | `ensureDeck(g); drawN(g, seat, 2)` |
+| 无 `recoverHp` | `recoverHp(g, seat, 1)` | `p.hp = Math.min(p.maxHp, p.hp+1)`（可先判断 `p.hp < p.maxHp`） |
+| 翻面字段是 `p.faceup`（`false`=背面） | `flipped` / 只改 `turnedOver` | 复原：`p.faceup = true` |
+| 连环字段是 `p.chained` | 忽略连环 | 复原同时 `p.chained = false` |
+| 无 `disabledSlots` | 清理废除栏 | **不要写** |
+| 无 `p.marks` 体系 | `p.marks.jujian_used` | `p.jujianUsed` |
+| `endTurn` 入口 `phase==='discard'` | 假设稳定 `phase==='end'` 再挂技能 | 仿据守：在 `endTurn` 里设 `phase='jujianPickCard'` 后 `return g` |
+| `dealDamage` 返回值 | `return false` 当“阻止并中断一切” | `true`=挂起（濒死/询问）；`false`=本次未挂起（含“伤害被防止后正常返回”） |
+
+---
+
+## 五、无言实现（game.js · dealDamage）
+
+插入位置：函数开头、`maybeStartZhengyi` / `maybeStartTianxiang` / 扣血 **之前**。
 
 ```javascript
-// 基本牌判断，使用项目中实际的 isTrickCardName 函数
-// isTrickCardName 在 game.js 中已定义：
-// function isTrickCardName(name){
-//   return !!name && !BASIC_CARDS.includes(name) && !getEquip(name);
-// }
-// 所以非基本牌 = 锦囊牌 = isTrickCardName(card.name) === true
-function isNonBasic(card) {
-  return card && isTrickCardName(card.name);
-}
-
-// 清理举荐使用标记
-function clearJujian(g, seat) {
-  const p = g.players[seat];
-  if (p?.marks) p.marks.jujian_used = false;
-}
-
-// 徐庶状态规范化
-function normalizeXuShu(g) {
-  g.players.forEach(p => {
-    if (!p.marks) p.marks = {};
-    if (typeof p.marks.jujian_used !== 'boolean') p.marks.jujian_used = false;
-  });
-  if (g.pending?.type?.startsWith('jujian')) {
-    const d = g.pending;
-    if (typeof d.sourceSeat !== 'number' || !g.players[d.sourceSeat]?.alive) {
-      g.pending = null;
-      if (g.phase?.startsWith('jujian')) g.phase = 'end';
-    }
+// 徐庶【无言】：锦囊伤害防止（锁定技）
+// sourceCard 走 isTrickCardName；连环传导仍带原 sourceCard，同样防止
+if (amount > 0 && sourceCard && isTrickCardName(sourceCard.name)) {
+  const src = (typeof sourceSeat === 'number') ? g.players[sourceSeat] : null;
+  const tgt = g.players[seat];
+  // 1) 徐庶使用锦囊造成伤害
+  if (src && src.alive && generalHasCap(src, 'wuyan')) {
+    g.log = pushLog(g.log, src.name + ' 发动【无言】,防止其锦囊造成的伤害');
+    markSkillSound(g, '无言');
+    return false;
+  }
+  // 2) 徐庶受到锦囊伤害
+  if (tgt && tgt.alive && generalHasCap(tgt, 'wuyan')) {
+    g.log = pushLog(g.log, tgt.name + ' 发动【无言】,防止锦囊伤害');
+    markSkillSound(g, '无言');
+    return false;
   }
 }
 ```
 
+**不要**写 `if (... && !skipChain)`。
+
 ---
 
-### 无言实现
+## 六、举荐实现
 
-**集成点**：直接在 `dealDamage` 函数中添加检测
+### 6.1 状态字段
 
-由于项目中没有 `beforeDamage` 钩子，无言需要直接集成到 `dealDamage` 中：
-
+`normalize`：
 ```javascript
-// 在 game.js 的 dealDamage 函数中添加无言检测
-// 位置：在扣减体力前，检查是否为锦囊牌伤害
-function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, skipTianxiang, skipZhengyi, skipChain) {
-  const p = g.players[seat];
-  if (!p) return false;
-  
-  // >>> 无言检测：在真正扣减体力前拦截 <<<
-  // 判断是否为锦囊牌造成的伤害
-  const isTrickDamage = sourceCard && isTrickCardName(sourceCard.name);
-  
-  if (isTrickDamage && !skipChain) { // skipChain 为 true 时是传导伤害，无言不挡
-    const src = g.players[sourceSeat];
-    const tgt = g.players[seat];
-    
-    // 徐庶使用锦囊牌造成伤害时，防止此伤害
-    if (src && src.alive && generalHasCap(src, 'wuyan')) {
-      g.log = pushLog(g.log, `${src.name} 发动【无言】,防止了其锦囊造成的伤害`);
-      markSkillSound(g, sourceSeat, 'wuyan');
-      return false; // 防止伤害，返回 false 表示不继续后续流程
-    }
-    
-    // 徐庶受到锦囊牌造成的伤害时，防止此伤害
-    if (tgt && tgt.alive && generalHasCap(tgt, 'wuyan')) {
-      g.log = pushLog(g.log, `${tgt.name} 发动【无言】,防止了锦囊伤害`);
-      markSkillSound(g, seat, 'wuyan');
-      return false; // 防止伤害，返回 false 表示不继续后续流程
-    }
+g.players.forEach(p => {
+  if (!p) return;
+  if (typeof p.jujianUsed !== 'boolean') p.jujianUsed = false;
+});
+// pending 防御
+if (g.pending && (g.pending.type === 'jujianPickCard' ||
+                  g.pending.type === 'jujianPickTarget' ||
+                  g.pending.type === 'jujianChooseEffect')) {
+  const d = g.pending;
+  const srcOk = Number.isInteger(d.sourceSeat) && g.players[d.sourceSeat] && g.players[d.sourceSeat].alive;
+  if (!srcOk) {
+    g.pending = null;
+    // 无法可靠恢复结束阶段流程时，交给 finishTurn 更安全的做法：
+    // 若 phase 仍是 jujian*，直接 finishTurn(g, g.turn) 可能重复切回合——
+    // 推荐：仅清空 pending，并把 phase 设回 'discard'，由当前回合玩家再次点结束；
+    // 或在 pending 里始终带 endingSeat，失败时 finishTurn(g, endingSeat)。
+    if (String(g.phase || '').startsWith('jujian')) g.phase = 'discard';
   }
-  
-  // >>> 原有 dealDamage 逻辑继续 <<<
-  if (!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
-  if (!skipTianxiang && maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
-  // ... 后续逻辑
 }
 ```
 
----
+`startTurn` 重置（仅当前回合座位）：
+```javascript
+if (p) p.jujianUsed = false;
+```
 
-### 举荐实现
-
-**集成点**：在 `endTurn` 函数中添加举荐触发（类似曹仁【据守】的集成方式）
+### 6.2 挂点：endTurn（与据守并列）
 
 ```javascript
-// 结束阶段统一入口，纯函数，由 endTurn 包 tx
-function tryJujian(g) {
-  if (g.phase !== 'end' || g.turn !== mySeat) return g;
-  const me = g.players[mySeat];
-  if (!generalHasCap(me, 'jujian') || me.marks?.jujian_used) return g;
-  
-  // 统一使用 isTrickCardName 判断非基本牌
-  const nonBasic = (me.hand || []).map((c, i) => ({c, i})).filter(x => x.c && isTrickCardName(x.c.name));
-  if (nonBasic.length === 0) return g;
-  if (!g.players.some((p, i) => i !== mySeat && p?.alive)) return g;
-  
-  g.pending = {
-    type: 'jujianPickCard',
-    sourceSeat: mySeat,
-    handIndices: nonBasic.map(x => x.i),
-    cards: nonBasic.map(x => x.c),
-    cardIds: nonBasic.map(x => x.c.id ?? x.c.cid), // 用id校验漂移
-    createdAt: Date.now()
-  };
-  g.phase = 'jujianPickCard';
-  g.log = pushLog(g.log, `${me.name} 是否发动【举荐】？`);
-  return g;
+// 在 endTurn 里，据守检查之前或之后均可，但必须在 finishTurn 之前
+if (generalHasCap(me, 'jujian') && me.alive && !me.jujianUsed) {
+  const hasNonBasic = (me.hand || []).some(c => c && !BASIC_CARDS.includes(c.name));
+  const hasOther = g.players.some((p, i) => i !== mySeat && p && p.alive);
+  if (hasNonBasic && hasOther) {
+    g.pending = { type: 'jujianPickCard', sourceSeat: mySeat, endingSeat: mySeat };
+    g.phase = 'jujianPickCard';
+    g.log = pushLog(g.log, me.name + ' 是否发动【举荐】…');
+    return g;
+  }
+}
+// 其后才是据守 / finishTurn
+```
+
+> 说明：不要单独发明稳定 `phase==='end'`。本项目结束阶段技能都是 `discard` 收尾路径上的挂起。
+
+### 6.3 响应函数（skills.js）
+
+```javascript
+function isNonBasicCard(card) {
+  return !!(card && card.name && !BASIC_CARDS.includes(card.name));
 }
 
-// 选择要弃置的非基本牌
-function pickJujianCard(handIndex) {
+// 选弃置牌（暂不弃）
+function respondJujianPickCard(cardIdx) {
   tx(g => {
-    const d = g.pending;
-    if (d?.type !== 'jujianPickCard' || d.sourceSeat !== mySeat) return g;
-    const pos = d.handIndices.indexOf(handIndex);
-    if (pos === -1) return g;
-    
+    if (g.phase !== 'jujianPickCard' || !g.pending || g.pending.type !== 'jujianPickCard') return g;
+    if (g.pending.sourceSeat !== mySeat) return g;
     const me = g.players[mySeat];
-    const card = me.hand[handIndex];
-    
-    // 统一使用 isTrickCardName 判断
-    if (!card || !isTrickCardName(card.name)) return g;
-    
-    // 手牌索引漂移保护：通过id校验
-    if (d.cardIds[pos] && (card.id ?? card.cid) !== d.cardIds[pos]) return g;
-    
-    // 暂不弃牌，存起来等选完目标再真正弃置
+    const card = me.hand[cardIdx];
+    if (!isNonBasicCard(card)) return g;
+    const candidates = [];
+    for (let i = 0; i < g.players.length; i++) {
+      if (i !== mySeat && g.players[i] && g.players[i].alive) candidates.push(i);
+    }
+    if (!candidates.length) return g;
     g.pending = {
       type: 'jujianPickTarget',
       sourceSeat: mySeat,
-      discardHandIndex: handIndex,
-      discardCardId: card.id ?? card.cid,
-      discardCard: card,
-      candidates: g.players.map((_, i) => i).filter(i => i !== mySeat && g.players[i]?.alive)
+      endingSeat: g.pending.endingSeat,
+      cardIdx,
+      cardId: card.id,
+      candidates
     };
     g.phase = 'jujianPickTarget';
     return g;
   });
 }
 
-// 选择目标角色
-function pickJujianTarget(targetSeat) {
+// 选目标 → 真正弃牌 → 交给对方选效果
+function respondJujianPickTarget(targetSeat) {
   tx(g => {
-    const d = g.pending;
-    if (d?.type !== 'jujianPickTarget' || d.sourceSeat !== mySeat) return g;
-    if (!d.candidates.includes(targetSeat)) return g;
-    
+    if (g.phase !== 'jujianPickTarget' || !g.pending || g.pending.type !== 'jujianPickTarget') return g;
+    if (g.pending.sourceSeat !== mySeat) return g;
+    if (!(g.pending.candidates || []).includes(targetSeat)) return g;
     const me = g.players[mySeat];
-    // 二次校验，防止期间手牌变化
-    const cur = me.hand[d.discardHandIndex];
-    if (!cur || (cur.id || cur.cid) !== d.discardCardId) {
-      // 按id重新找
-      const realIdx = me.hand.findIndex(c => (c.id || c.cid) === d.discardCardId);
-      if (realIdx === -1) { 
-        g.pending = null; 
-        g.phase = 'end'; 
-        return g; 
+    let idx = g.pending.cardIdx;
+    let card = me.hand[idx];
+    if (!card || card.id !== g.pending.cardId) {
+      idx = (me.hand || []).findIndex(c => c && c.id === g.pending.cardId);
+      if (idx < 0) {
+        g.pending = null;
+        finishTurn(g, g.pending ? g.pending.endingSeat : mySeat); // 注意：先取 endingSeat 再清空
+        return g;
       }
-      d.discardHandIndex = realIdx;
+      card = me.hand[idx];
     }
-    
-    const [discarded] = me.hand.splice(d.discardHandIndex, 1);
-    g.discard.push(discarded);
-    
-    // 进入选择效果阶段
-    g.pending = { 
-      type: 'jujianChooseEffect', 
-      sourceSeat: mySeat, 
-      targetSeat: targetSeat, 
-      discardCard: discarded 
+    if (!isNonBasicCard(card)) return g;
+    me.hand.splice(idx, 1);
+    g.discard.push(card);
+    g.pending = {
+      type: 'jujianChooseEffect',
+      sourceSeat: mySeat,
+      endingSeat: g.pending.endingSeat,
+      targetSeat,
+      discardCard: card
     };
     g.phase = 'jujianChooseEffect';
-    g.log = pushLog(g.log, `${me.name} 举荐 ${g.players[targetSeat].name}`);
-    markSkillSound(g, mySeat, 'jujian');
+    g.log = pushLog(g.log, me.name + ' 发动【举荐】,弃置【' + card.name + '】,令 ' + g.players[targetSeat].name + ' 选择一项');
+    markSkillSound(g, '举荐');
     return g;
   });
 }
 
-// 目标选择效果
-function chooseJujianEffect(opt) {
+// 仅被举荐者选择
+function respondJujianEffect(opt) {
   tx(g => {
-    const d = g.pending;
-    if (d?.type !== 'jujianChooseEffect') return g;
-    
-    // 关键修正：仅允许被举荐者选择效果
-    if (d.targetSeat !== mySeat) return g;
-    
-    const tgt = g.players[d.targetSeat];
-    if (!tgt?.alive) {
+    if (g.phase !== 'jujianChooseEffect' || !g.pending || g.pending.type !== 'jujianChooseEffect') return g;
+    if (g.pending.targetSeat !== mySeat) return g; // 越权拒绝
+    const src = g.players[g.pending.sourceSeat];
+    const tgt = g.players[g.pending.targetSeat];
+    const endingSeat = g.pending.endingSeat;
+    if (!tgt || !tgt.alive) {
+      if (src) src.jujianUsed = true;
       g.pending = null;
-      g.phase = 'end';
+      finishTurn(g, endingSeat);
       return g;
     }
-    
     if (opt === 'draw') {
-      ensureDeck(g, 2);
-      drawN(g, d.targetSeat, 2);
+      drawN(g, g.pending.targetSeat, 2);
+      g.log = pushLog(g.log, tgt.name + ' 因【举荐】摸2张牌');
     } else if (opt === 'recover') {
-      if (typeof recoverHp === 'function') {
-        recoverHp(g, d.targetSeat, 1);
+      if (tgt.hp < tgt.maxHp) {
+        tgt.hp++;
+        g.log = pushLog(g.log, tgt.name + ' 因【举荐】回复1点体力');
       } else {
-        tgt.hp = Math.min(tgt.maxHp, (tgt.hp || 0) + 1);
+        g.log = pushLog(g.log, tgt.name + ' 体力已满,【举荐】回复无效果');
       }
     } else if (opt === 'reset') {
-      let changed = false;
-      if (tgt.chained) { tgt.chained = false; changed = true; }
-      if (tgt.turnedOver) { tgt.turnedOver = false; changed = true; }
-      if (Array.isArray(tgt.disabledSlots) && tgt.disabledSlots.length) { 
-        tgt.disabledSlots = []; 
-        changed = true; 
-      }
-      g.log = pushLog(g.log, changed ? `${tgt.name} 已复原` : `${tgt.name} 无需复原`);
-    }
-    
-    // 标记已使用
-    g.players[d.sourceSeat].marks.jujian_used = true;
-    g.log = pushLog(g.log, `${tgt.name} 选择 ${opt}`);
-    
-    // 清理状态
-    g.pending = null;
-    g.phase = 'end';
-    return g;
-  });
-}
-
-// 取消举荐
-function cancelJujian() {
-  tx(g => {
-    const d = g.pending;
-    if (!d?.type?.startsWith('jujian') || d.sourceSeat !== mySeat) return g;
-    
-    // 关键修正：已弃牌阶段不允许取消，防止丢牌
-    if (d.type === 'jujianChooseEffect') {
-      g.log = pushLog(g.log, `已弃牌，无法取消`);
+      const beforeFace = tgt.faceup !== false;
+      const beforeChain = !!tgt.chained;
+      tgt.faceup = true;
+      tgt.chained = false;
+      g.log = pushLog(g.log, (!beforeFace || beforeChain)
+        ? (tgt.name + ' 因【举荐】复原武将牌')
+        : (tgt.name + ' 无需复原'));
+    } else {
       return g;
     }
-    
+    if (src) src.jujianUsed = true;
     g.pending = null;
-    g.phase = 'end';
-    g.log = pushLog(g.log, `${g.players[mySeat].name} 取消举荐`);
+    finishTurn(g, endingSeat);
     return g;
   });
 }
-```
 
----
-
-## 五、集成方式
-
-### 在 game.js 中的集成
-
-**1. 无言集成**（直接修改 dealDamage 函数）：
-```javascript
-// 在 game.js 中，找到 dealDamage 函数，在开头部分添加无言检测
-function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, skipTianxiang, skipZhengyi, skipChain) {
-  const p = g.players[seat];
-  if (!p) return false;
-  
-  // >>> 无言：在真正扣减体力前拦截 <<<
-  const isTrickDamage = sourceCard && isTrickCardName(sourceCard.name);
-  
-  if (isTrickDamage && !skipChain) {
-    const src = g.players[sourceSeat];
-    const tgt = g.players[seat];
-    
-    if (src && src.alive && generalHasCap(src, 'wuyan')) {
-      g.log = pushLog(g.log, `${src.name} 发动【无言】,防止了其锦囊造成的伤害`);
-      markSkillSound(g, sourceSeat, 'wuyan');
-      return false;
-    }
-    
-    if (tgt && tgt.alive && generalHasCap(tgt, 'wuyan')) {
-      g.log = pushLog(g.log, `${tgt.name} 发动【无言】,防止了锦囊伤害`);
-      markSkillSound(g, seat, 'wuyan');
-      return false;
-    }
-  }
-  
-  // >>> 原有逻辑继续 <<<
-  if (!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
-  // ...
-}
-```
-
-**2. 举荐集成**（在 endTurn 函数中添加）：
-```javascript
-// 在 game.js 中的 endTurn 函数中，结束阶段技能检测区域添加
-function endTurn() {
+// 取消：仅允许在尚未弃牌的阶段
+function cancelJujian() {
   tx(g => {
-    if (g.phase !== 'discard' || g.turn !== mySeat) return g;
-    const me = g.players[mySeat];
-    if (me.hand.length > me.hp && !canSkipDiscard(g, mySeat)) return g;
-    if (maybeStartLiRangRecover(g, mySeat)) return g;
-    
-    // >>> 徐庶【举荐】：结束阶段 <<<
-    if (generalHasCap(me, 'jujian') && me.alive && !me.marks?.jujian_used) {
-      tryJujian(g);
-      if (g.pending?.type === 'jujianPickCard') return g;
-    }
-    
-    // >>> 原有 endTurn 逻辑继续 <<<
-    // 曹仁【据守】：结束阶段可选触发（仅未翻面时可发动）
-    if (generalHasCap(me, 'jushou') && me.alive && me.faceup !== false) {
-      // ...
-    }
-    finishTurn(g, mySeat);
+    if (!g.pending) return g;
+    if (g.pending.type === 'jujianChooseEffect') return g; // 已弃牌不可取消
+    if (g.pending.sourceSeat !== mySeat) return g;
+    if (g.pending.type !== 'jujianPickCard' && g.pending.type !== 'jujianPickTarget') return g;
+    const endingSeat = g.pending.endingSeat;
+    g.pending = null;
+    g.log = pushLog(g.log, g.players[mySeat].name + ' 取消【举荐】');
+    finishTurn(g, endingSeat);
     return g;
   });
 }
 ```
 
-**3. 状态规范化**（在 normalize 函数中添加）：
+> `respondJujianPickTarget` 里“找不到牌”分支的 `finishTurn` 写法示例中注意：**先保存 `endingSeat` 再 `g.pending=null`**。
+
+---
+
+## 七、UI（render-controls.js）
+
+- 阶段：`jujianPickCard` / `jujianPickTarget` / `jujianChooseEffect`
+- 旁观者：`setBanner` / `waitAskBanner` 风格，不剧透手牌
+- 选牌：只高亮 `!BASIC_CARDS.includes(name)` 的手牌
+- 选目标：其他存活座位
+- 选效果：仅 `pending.targetSeat===mySeat` 显示三按钮
+- 用 DOM API 或现有 `confirmAndPlay` 风格，避免把未转义玩家名塞进 `innerHTML` 拼接
+
+---
+
+## 八、音效
+
+`render.js`：
 ```javascript
-// 在 game.js 的 normalize 函数中添加徐庶状态规范化
-function normalize(g) {
-  // ... 现有规范化代码 ...
-  
-  // 徐庶状态规范化
-  g.players.forEach(p => {
-    if (!p.marks) p.marks = {};
-    if (typeof p.marks.jujian_used !== 'boolean') p.marks.jujian_used = false;
-  });
-  if (g.pending?.type?.startsWith('jujian')) {
-    const d = g.pending;
-    if (typeof d.sourceSeat !== 'number' || !g.players[d.sourceSeat]?.alive) {
-      g.pending = null;
-      if (g.phase?.startsWith('jujian')) g.phase = 'end';
-    }
-  }
-}
+// SKILL_PINYIN 增补
+'无言': 'wuyan',
+'举荐': 'jujian',
 ```
-
-**4. 回合重置**（在 startTurn 函数中添加）：
-```javascript
-// 在 game.js 的 startTurn 函数中添加举荐标记重置
-function startTurn(g, seat) {
-  // ... 现有代码 ...
-  
-  // 重置举荐使用标记
-  const p = g.players[seat];
-  if (p?.marks) p.marks.jujian_used = false;
-}
-```
+素材：`assets/audio/wuyan.mp3`、`assets/audio/jujian.mp3`（用户自备）。
 
 ---
 
-## 六、渲染集成（render-controls.js）
+## 九、边界与测试
 
-**关键修正**：使用 DOM API 创建元素，避免 XSS 注入风险
-
-```javascript
-function renderJujian(g, ui) {
-  const d = g.pending;
-  if (!d?.type?.startsWith('jujian')) return false;
-  if (d.sourceSeat !== mySeat && d.targetSeat !== mySeat) return false;
-  
-  ui.innerHTML = '';
-  const wrap = document.createElement('div');
-  wrap.className = 'skill-choose-panel';
-  
-  if (d.type === 'jujianPickCard') {
-    wrap.innerHTML = '<h4>举荐：弃置一张非基本牌</h4>';
-    d.cards.forEach((c, i) => {
-      const b = document.createElement('button');
-      b.textContent = c.name || c.id;
-      b.onclick = () => pickJujianCard(d.handIndices[i]);
-      wrap.appendChild(b);
-    });
-  } else if (d.type === 'jujianPickTarget') {
-    wrap.innerHTML = '<h4>举荐：选择一名其他角色</h4>';
-    d.candidates.forEach(seat => {
-      const b = document.createElement('button');
-      b.textContent = g.players[seat].name;
-      b.onclick = () => pickJujianTarget(seat);
-      wrap.appendChild(b);
-    });
-  } else if (d.type === 'jujianChooseEffect' && d.targetSeat === mySeat) {
-    wrap.innerHTML = `<h4>${g.players[d.sourceSeat].name} 举荐你</h4>`;
-    [['draw', '摸两张'], ['recover', '回1血'], ['reset', '复原']].forEach(([k, txt]) => {
-      const b = document.createElement('button');
-      b.textContent = txt;
-      b.onclick = () => chooseJujianEffect(k);
-      wrap.appendChild(b);
-    });
-  }
-  
-  const cancel = document.createElement('button');
-  cancel.textContent = '取消';
-  cancel.onclick = cancelJujian;
-  wrap.appendChild(cancel);
-  ui.appendChild(wrap);
-  return true;
-}
-
-// 在 renderControls 中集成
-function renderControls(g, me) {
-  // ... 现有代码 ...
-  
-  // 集成举荐 UI
-  if (renderJujian(g, ui)) return;
-  
-  // ... 其余代码 ...
-}
-```
+| 场景 | 预期 |
+|------|------|
+| 徐庶用火攻造成伤害 | 伤害被防止，目标不掉血 |
+| 徐庶被南蛮结算伤害 | 该次伤害被防止 |
+| 徐庶用南蛮 | **所有目标**对该南蛮的伤害均被防止 |
+| 连环传导的锦囊属性伤害打到徐庶 | **仍防止** |
+| 杀/决斗伤害 | 不触发无言 |
+| 结束阶段无非基本牌 | 不出现举荐入口 |
+| 选牌后取消 | 牌仍在手，正常 `finishTurn` |
+| 已弃牌后 | 不可取消；由目标选效果 |
+| 复原 | `faceup=true` 且 `chained=false` |
+| 满血选回复 | 不涨超上限 |
+| 两名徐庶 | 各自 `jujianUsed` 独立 |
 
 ---
 
-## 七、音效标识
+## 十、文件改动清单
 
-```javascript
-const SKILL_SOUNDS = {
-  // ... 现有技能 ...
-  '无言': 'wuyan',
-  '举荐': 'jujian',
-};
-```
-
----
-
-## 八、边界条件处理
-
-### 无言
-
-| 场景 | 处理方式 |
-|------|----------|
-| 非锦囊牌（基本牌/装备牌） | 不触发，正常结算 |
-| 延迟锦囊牌（delay 类型） | 触发，防止伤害 |
-| **连环传导伤害** | **不触发**，传导时 `skipChain=true` |
-| 多目标锦囊（南蛮入侵等） | 仅防止对徐庶的伤害，其他目标正常结算 |
-| 徐庶自己使用锦囊牌对自己 | 防止伤害 |
-| 非徐庶使用锦囊牌对徐庶 | 防止对徐庶的伤害 |
-| 徐庶使用非锦囊牌 | 不触发，正常结算 |
-
-### 举荐
-
-| 场景 | 处理方式 |
-|------|----------|
-| 无非基本牌 | 不显示按钮，直接进入结束阶段 |
-| 场上无其他存活角色 | 不显示按钮 |
-| 选择非基本牌后取消 | 牌不丢失，直接取消 |
-| 选择目标后取消 | **已弃牌，提示无法取消** |
-| 目标角色阵亡 | 自动取消，回到结束阶段 |
-| 武将牌已正置无横置 | 提示"无需复原" |
-| 武将牌翻面+横置 | 一次复原所有异常状态 |
-| 体力已满，选择回复 | 体力保持最大值 |
-| 牌堆不足2张 | 先摸现有的，再通过 ensureDeck 补足 |
-| 手牌索引漂移 | 通过 card.id 校验，重新寻找正确索引 |
-| 徐庶尝试替被举荐者选效果 | **权限拒绝，仅被举荐者可选** |
+1. `data.js`：注册 `GENERALS.xushu`
+2. `game.js`：`dealDamage` 无言；`normalize`/`startTurn` 举荐字段；`endTurn` 挂起
+3. `skills.js`：举荐响应函数
+4. `render-controls.js`：三阶段 UI
+5. `render.js`：`SKILL_PINYIN`
+6. 回归测试：`test_xushu.js`（无言防止/传导/南蛮；举荐弃牌时机与权限）
 
 ---
 
-## 九、测试要点
+## 十一、修正记录（相对旧稿）
 
-| 测试场景 | 预期结果 |
-|----------|----------|
-| **无言** | |
-| 徐庶使用锦囊牌（如火攻）攻击其他角色 | 防止伤害，目标不扣体力 |
-| 徐庶受到其他角色锦囊牌伤害 | 防止伤害，徐庶不扣体力 |
-| 徐庶使用南蛮入侵（多目标锦囊） | 所有目标都受到伤害（无言不影响锦囊结算，仅防止徐庶自身的伤害） |
-| 徐庶受到铁索连环传导的锦囊伤害 | **正常扣体力**（传导不算锦囊伤害） |
-| 徐庶使用基本牌攻击 | 正常造成伤害 |
-| 徐庶受到基本牌伤害 | 正常扣体力 |
-| **举荐** | |
-| 徐庶有非基本牌，结束阶段 | 可以发动举荐 |
-| 徐庶只有基本牌，结束阶段 | 不显示举荐按钮 |
-| 徐庶持有锦囊牌 | 识别为非基本牌，可正常发动举荐 |
-| 选择非基本牌后取消 | 牌不丢失，回到结束阶段 |
-| 选择目标后，取消 | 提示"已弃牌，无法取消" |
-| 选择目标后，目标选择摸两张牌 | 目标摸2张牌 |
-| 选择目标后，目标选择回复1点体力 | 目标回复1点体力 |
-| 选择目标后，目标选择复原（翻面+横置） | 所有异常状态清除 |
-| 选择目标后，目标选择复原（已正置） | 提示无需复原 |
-| A发动举荐后，B同一回合 | B可以正常发动（不串台） |
-| 多个徐庶同一局 | 各自独立计算举荐次数 |
-| 举荐过程中手牌被其他技能改动 | 通过id重新定位，正确弃置目标牌 |
-| 徐庶尝试在被举荐者选效果时操作 | 权限拒绝，仅被举荐者可选 |
+1. 删除不存在的 `beforeDamage` / `p.marks` / `recoverHp` / `disabledSlots` / `SKILL_SOUNDS` / `ensureDeck(g,n)`
+2. `markSkillSound` 改为中文单参数
+3. 非基本牌定义改为 `!BASIC_CARDS.includes`（含装备）
+4. 无言**不再**用 `!skipChain` 放行传导
+5. 徐庶用群体锦囊：防止对**所有目标**的锦囊伤害（旧测试表写反）
+6. 举荐挂点对齐据守：`endTurn` → pending → `finishTurn`
+7. 复原武将牌对齐 `faceup` + `chained`
+8. 限次标志改为 `p.jujianUsed`
 
----
-
-## 十、流程图
-
-### 无言流程
-```
-dealDamage 被调用
-    ↓
-检查 sourceCard 是否为锦囊牌（isTrickCardName）
-    ↓
-是：检查 skipChain（传导时 skipChain=true）
-    ↓
-skipChain=false 时：检查使用者或目标是否为徐庶
-    ↓
-是：日志记录 + 播放音效
-    ↓
-返回 false（防止伤害，不继续后续流程）
-    ↓
-否：继续原有 dealDamage 逻辑
-```
-
-### 举荐流程
-```
-endTurn() 函数执行
-    ↓
-检查是否为徐庶且未使用过举荐
-    ↓
-是：tryJujian(g) 检测是否可发动（纯函数，无tx）
-    ↓
-有锦囊牌且有其他存活角色？
-    ↓
-是：进入 jujianPickCard 阶段
-    ↓
-选择锦囊牌（存索引+cardId，暂不弃牌）
-    ↓
-进入 jujianPickTarget 阶段
-    ↓
-选择目标角色
-    ↓
-二次校验：通过 cardId 重新定位手牌（防漂移）
-    ↓
-真正弃置牌到弃牌堆
-    ↓
-进入 jujianChooseEffect 阶段
-    ↓
-仅被举荐者选择效果（权限检查）
-    ↓
-执行效果
-    ↓
-标记 p.marks.jujian_used = true
-    ↓
-回到 end 阶段
-```
-
----
-
-## 十一、特殊说明
-
-### 关键修正说明
-
-1. **全局标志问题**：原方案使用 `g.jujiuUsed` 会导致所有人共享同一个标志位。修正为 `p.marks.jujian_used`，每个玩家独立维护。
-
-2. **阶段回退问题**：原方案校验失败回退到 `'play'` 阶段，但举荐是结束阶段技能，会导致流程异常。修正为回退到 `'end'` 阶段。
-
-3. **无言实现位置**：原方案假设 `beforeDamage` 钩子，但项目中没有此钩子。修正为在 `dealDamage` 函数内部直接集成检测。
-
-4. **弃牌时机**：原方案在选择牌时就弃牌，取消时会丢失牌。修正为在选择目标后再真正弃牌。
-
-5. **复原武将牌**：原方案仅处理 `chained`，修正为同时处理 `flipped`（翻面）和 `chained`（横置），以及 `disabledSlots`（废除）。
-
-6. **锦囊判断方式**：原方案使用 `card.type`，修正为使用项目实际的 `isTrickCardName(card.name)`。
-
-7. **连环传导误拦**：原方案假设 `ev.isChain` 字段，修正为检测 `skipChain` 参数（传导时 `skipChain=true`）。
-
-8. **结束阶段集成**：原方案假设 `endPhase` 函数，修正为在 `endTurn` 函数中集成（类似曹仁【据守】）。
-
-9. **嵌套事务问题**：`tryJujian` 内部包 `tx`，而 `endTurn` 也包 `tx`，嵌套会丢状态。修正为 `tryJujian` 纯函数，由 `endTurn` 统一包事务。
-
-10. **越权选择问题**：`chooseJujianEffect` 允许徐庶替被举荐者选效果。修正为仅被举荐者（`targetSeat === mySeat`）可选。
-
-11. **取消不回滚+索引漂移**：已弃牌阶段取消会丢牌；手牌索引在阶段间可能变化。修正：已弃牌阶段拒绝取消；通过 card.id 校验并重新定位。
-
-### 武将定位
-- **无言**：体现徐庶的"不言"特性，在锦囊牌交锋中具有免疫力
-- **举荐**：体现徐庶的"荐贤"特性，通过牺牲锦囊牌为他人提供多种益处
-
----
-
-## 十二、修正记录
-
-*文档状态：设计完成（已修正所有问题，与项目实际代码完全匹配）*
-*创建时间：2026-07-13*
-*最终修正时间：2026-07-13*
-*负责人：Mistral Vibe*
-
-### 已修复的差异点
-- ✅ hooks 机制：从假设的全局钩子改为项目实际的武将 hooks + triggerHook
-- ✅ 伤害拦截：从假设的 beforeDamage 钩子改为直接在 dealDamage 内部集成
-- ✅ 锦囊判断：从 card.type 改为使用项目实际的 isTrickCardName(card.name)
-- ✅ 连环传导：从 ev.isChain 改为检测 skipChain 参数
-- ✅ 阶段机制：从 endPhase 改为在 endTurn 中集成
-
-### 待实装项
-- [ ] data.js: 添加徐庶武将定义
-- [ ] game.js: 在 dealDamage 中集成无言检测
-- [ ] game.js: 在 endTurn 中集成 tryJujian
-- [ ] game.js: 状态规范化和回合重置
-- [ ] skills.js: 无言和举荐技能函数
-- [ ] render-controls.js: 举荐 UI 界面
-- [ ] audio/: 添加 wuyan.mp3 和 jujian.mp3
-
-### 待优化项
-- 收集更多边界测试场景
-- 验证多徐庶局的正确性
-- 优化移动端 UI 体验
+*文档状态：已按当前代码审核修正，待实装*  
+*审核时间：2026-07-13*

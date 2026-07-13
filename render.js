@@ -72,7 +72,10 @@ const SKILL_PINYIN = {
   '短兵':'duanbing',
   '奋迅':'fenxun',
   '恩怨':'enyuan',
-  '眩惑':'huanhuo'
+  '眩惑':'huanhuo',
+  '无言':'wuyan', '举荐':'jujian',
+  '将驰':'jiangchi',
+  '落英':'luoying', '酒诗':'jiushi'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
