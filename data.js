@@ -211,7 +211,7 @@ const GENERALS = {
   pangde:        { id:'pangde',        name:'庞德',   gender:'male', maxHp:4, skill:'马术/猛进',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。猛进:当你使用的【杀】被目标角色的【闪】抵消时,你可以弃置其一张牌。',
     caps:{ extraMinus1:true, mengjin:true } },
-  mengHu:        { id:'mengHu',        name:'孟获',   gender:'male', maxHp:4, skill:'祸首/再起',
+  menghuo:       { id:'menghuo',       name:'孟获',   gender:'male', maxHp:4, skill:'祸首/再起',
     desc:'祸首：锁定技，南蛮入侵对你无效；其他角色使用南蛮入侵结算时，你成为伤害来源。再起：摸牌阶段，若你已受伤，可放弃摸牌，亮出牌堆顶X张牌，X为你已损失体力值，每有一张红桃回复1点体力，然后将这些牌置入弃牌堆。',
     caps:{ huoshou:true, zaiqi:true } },
   zhenji:        { id:'zhenji',        name:'甄姬',   gender:'female', maxHp:3, skill:'洛神/倾国',

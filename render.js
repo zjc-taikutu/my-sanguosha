@@ -33,7 +33,7 @@ function avatarError(imgEl){
 // 图片是通用美术图(按牌名配一张,不按具体花色点数),所以每张牌实例真实的花色点数信息
 // 靠 .corner 角标叠加显示,不受这张表影响。新增牌时在这里补一条映射即可。
 const CARD_PINYIN = {
-  '杀':'sha', '闪':'shan', '桃':'tao',
+  '杀':'sha', '火杀':'huosha', '雷杀':'leisha', '闪':'shan', '桃':'tao',
   '决斗':'juedou', '无中生有':'wuzhongshengyou', '顺手牵羊':'shunshouqianyang',
   '过河拆桥':'guohechaiqiao', '无懈可击':'wuxiekeji', '南蛮入侵':'nanmanruqin',
   '万箭齐发':'wanjianqifa', '火攻':'huogong', '闪电':'shandian', '乐不思蜀':'lebusishu',
