@@ -198,9 +198,22 @@ const GENERALS = {
   pangtong:      { id:'pangtong',      name:'庞统',   gender:'male', maxHp:3, skill:'连环/涅槃',
     desc:'连环:你可以将一张梅花手牌当【铁索连环】使用或重铸。涅槃:限定技,当你处于濒死状态时,你可以弃置所有牌,解除连环状态和翻面,摸3张牌并将体力回复至3点。',
     caps:{ lianhuan:true, niepan:true } },
+  masu:        { id:'masu',        name:'马谡',   gender:'male', maxHp:3, skill:'散谣/制蛮',
+    desc:'散谣:出牌阶段限一次,你可以弃置一张牌,对全场体力值最大的一名角色造成1点伤害。制蛮:当你对其他角色造成伤害时,你可以防止此伤害,然后获得其场上的一张牌。',
+    caps:{ sanyao:true, zhimeng:true } },
   machao:        { id:'machao',        name:'马超',   gender:'male', maxHp:4, skill:'马术/铁骑',
     desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。铁骑:当你使用【杀】指定一名角色为目标后,你可以进行判定,若结果为红色,此【杀】不可被【闪】抵消(含视为闪的效果,如八卦阵)。',
     caps:{ extraMinus1:true, tieqi:true } },
+  lidian:        { id:'lidian',        name:'李典',   gender:'male', maxHp:3, skill:'恂恂/忘隙',
+    desc:'恂恂:摸牌阶段,你可以放弃摸牌,改为亮出牌堆顶至多4张牌,获得其中2张,其余按任意顺序置于牌堆底。忘隙:每当一名其他角色对你造成1点伤害后,或你对其他角色造成1点伤害后,你与其各摸1张牌(每点伤害触发一次,可选发动)。',
+    // 忘隙不在 hooks.onDamaged 挂:与 dealDamage 造成侧统一入口,避免双路径互盖 pending
+    caps:{ xunxun:true, wangxi:true } },
+  pangde:        { id:'pangde',        name:'庞德',   gender:'male', maxHp:4, skill:'马术/猛进',
+    desc:'马术(锁定技):你计算与其他角色的距离时始终-1(可与装备的-1马叠加)。猛进:当你使用的【杀】被目标角色的【闪】抵消时,你可以弃置其一张牌。',
+    caps:{ extraMinus1:true, mengjin:true } },
+  mengHu:        { id:'mengHu',        name:'孟获',   gender:'male', maxHp:4, skill:'祸首/再起',
+    desc:'祸首：锁定技，南蛮入侵对你无效；其他角色使用南蛮入侵结算时，你成为伤害来源。再起：摸牌阶段，若你已受伤，可放弃摸牌，亮出牌堆顶X张牌，X为你已损失体力值，每有一张红桃回复1点体力，然后将这些牌置入弃牌堆。',
+    caps:{ huoshou:true, zaiqi:true } },
   zhenji:        { id:'zhenji',        name:'甄姬',   gender:'female', maxHp:3, skill:'洛神/倾国',
     desc:'洛神:回合开始时,你可以进行判定,若结果为黑色,你获得这张判定牌(计入手牌),并可以再次发动(直到红色或你选择停止)。倾国:你可以将黑色手牌当【闪】使用或打出。',
     caps:{ luoshen:true, qingguo:true } },
@@ -213,6 +226,9 @@ const GENERALS = {
   huanggai:      { id:'huanggai',      name:'黄盖',   gender:'male', maxHp:4, skill:'苦肉',
     desc:'出牌阶段,你可以失去1点体力,然后摸两张牌。',
     caps:{ kurou:true } },
+  huaxiong:      { id:'huaxiong',      name:'华雄',   gender:'male', maxHp:6, skill:'耀武',
+    desc:'耀武(锁定技):当你受到红色【杀】造成的伤害时，伤害来源选择一项：1.回复1点体力；2.摸一张牌。',
+    caps:{ yaowu:true } },
   huangyueying:  { id:'huangyueying',  name:'黄月英', gender:'female', maxHp:3, skill:'集智',
     desc:'当你使用一张锦囊牌时,你可以摸一张牌。',
     caps:{ jizhi:true } },
@@ -276,16 +292,122 @@ const GENERALS = {
   zhuge:         { id:'zhuge',         name:'诸葛亮', gender:'male', maxHp:3, skill:'观星/空城',
     desc:'观星:准备阶段,你可以观看牌堆顶的X张牌(X为存活角色数且最多为5),以任意顺序分配至牌堆顶或牌堆底。空城:锁定技,若你没有手牌,你不能成为【杀】或【决斗】的目标。',
     caps:{ guanxing:true, kongcheng:true } },
+  jiangwei:      { id:'jiangwei',      name:'姜维',   gender:'male', maxHp:4, skill:'挑衅/志继',
+    desc:'挑衅:出牌阶段限一次,你可指定一名其他角色,令其选择一项:1.对你使用一张杀;2.令你弃置其一张牌。志继:觉醒技,准备阶段,若你没有手牌,你减1点体力上限,回复1点体力或摸两张牌,然后获得技能观星。',
+    caps:{ tiaoxin:true, zhiji:true },
+    hooks:{ } },
+  zhoutai:        { id:'zhoutai',        name:'周泰',   gender:'male', maxHp:4, skill:'不屈',
+    desc:'当你的体力降到0或以下时,可以选择放置一张不屈牌。所有回复体力的场景都会触发移除一张不屈牌,最后一张被移除时恢复1点体力。',
+    caps:{ buqu:true },
+    hooks:{ } },
+  weiyan:        { id:'weiyan',        name:'魏延',   gender:'male', maxHp:4, skill:'狂骨',
+    desc:'锁定技，当你对一名角色造成伤害后，若其扣减体力前你计算与其的距离不大于1，你回复等同于伤害点数的体力。',
+    caps:{ kuanggu:true } },
+  lusu:          { id:'lusu',          name:'鲁肃',   gender:'male', maxHp:3, skill:'好施/缔盟',
+    desc:'好施:摸牌阶段,你可以多摸两张牌,然后若你的手牌数大于5,你将一半的手牌(向下取整)交给除你以外全场手牌数最少的一名其他角色。缔盟:出牌阶段限一次,你可以选择两名其他角色并弃置X张牌(X为这两名角色的手牌数之差),令他们交换手牌。',
+    caps:{ haoshi:true, extraDrawPhase:2, dimeng:true } },
+  xiahouyuan:    { id:'xiahouyuan',    name:'夏侯渊', gender:'male', maxHp:4, skill:'神速',
+    desc:'神速:出牌阶段限一次,你可以选择:1.准备阶段结束后,可以跳过判定和摸牌阶段,视为使用一张无距离限制的【杀】,然后进入出牌阶段;2.摸牌阶段结束后,可以跳过出牌阶段并弃置一张装备牌,视为使用一张无距离限制的【杀】,然后进入弃牌阶段。',
+    caps:{ shensu:true } },
+  taishici:      { id:'taishici',      name:'太史慈',   gender:'male', maxHp:4, skill:'天义',
+    desc:'天义:出牌阶段限一次,你可以与一名角色拼点,然后本阶段:若你赢,则你使用【杀】的次数上限+1、使用【杀】无距离限制、使用【杀】的目标数上限+1;否则你不能使用【杀】。',
+    caps:{ tianyi:true } },
+  dianwei:       { id:'dianwei',       name:'典韦',   gender:'male', maxHp:4, skill:'强袭',
+    desc:'强袭:出牌阶段限一次,你可以失去1点体力或弃置一张武器牌(装备区或手牌),对你攻击范围内的一名其他角色造成1点伤害。',
+    caps:{ qiangxi:true } },
+  gongsunzan:    { id:'gongsunzan',    name:'公孙瓒', gender:'male', maxHp:4, skill:'趫猛/义从',
+    desc:'趫猛:当你使用黑色【杀】对一名角色造成伤害后,你可以选择其装备区里的一张牌,若此牌:为坐骑牌,你获得之;不为坐骑牌,你弃置之。义从:锁定技,①若你的体力值大于2,你计算与其他角色的距离-1;②若你的体力值不大于2,其他角色计算与你的距离+1。',
+    caps:{ qiaomeng:true, yicong:true } },
+  jiaxu:         { id:'jiaxu',         name:'贾诩',   gender:'male', maxHp:3, skill:'完杀/乱武/帷幕',
+    desc:'完杀:锁定技,你的回合内,当一名角色进入濒死状态时,除你和其以外的角色不能对其使用【桃】直到此次濒死结算结束。乱武:限定技,出牌阶段,你可以令所有其他角色依次选择一项:1.对距离最近的另一名角色使用一张【杀】;2.失去1点体力。帷幕:锁定技,你不能成为黑色锦囊牌的目标。',
+    caps:{ wansha:true, luanwu:true, weimu:true } },
+  yuanshao:      { id:'yuanshao',      name:'袁绍',   gender:'male', maxHp:4, skill:'乱击',
+    desc:'乱击:出牌阶段,你可以将两张花色相同的手牌当【万箭齐发】使用。',
+    caps:{ luanji:true } },
+  yuanshu:       { id:'yuanshu',       name:'袁术',   gender:'male', maxHp:4, skill:'妄尊/同疾',
+    desc:'妄尊:主公的准备阶段,你可以摸一张牌,然后其本回合的手牌上限-1。同疾:锁定技,若你的手牌数大于体力值,攻击范围内包含你的其他角色使用【杀】不能指定除你以外的角色为目标。',
+    caps:{ tongji:true } },
+  zhangjiao:     { id:'zhangjiao',     name:'张角',   gender:'male', maxHp:3, skill:'雷击/鬼道',
+    desc:'雷击:当你使用或打出【闪】时,你可以令一名角色进行一次判定,若结果为♠,你对其造成2点雷电伤害。鬼道:当一名角色的判定牌生效前,你可以打出一张黑色牌替换之。',
+    caps:{ leiji:true, guidu:true } },
+  caiwenji:      { id:'caiwenji',      name:'蔡文姬', gender:'female', maxHp:3, skill:'悲歌/断肠',
+    desc:'悲歌:当一名角色受到【杀】造成的伤害后,你可以弃置一张牌,令其判定,若结果为:红桃,其回复1点体力;方块,其摸两张牌;梅花,伤害来源弃置两张牌;黑桃,伤害来源翻面。断肠:锁定技,当你死亡时,杀死你的角色失去所有武将技能。',
+    caps:{ beige:true, duanchang:true } },
+  caoren:       { id:'caoren',       name:'曹仁',   gender:'male', maxHp:4, skill:'据守',
+    desc:'据守:结束阶段,你可以摸三张牌,然后将你的武将牌翻面。',
+    caps:{ jushou:true } },
+  chengong:      { id:'chengong',      name:'陈宫',   gender:'male', maxHp:3, skill:'明策/智迟',
+    desc:'明策:出牌阶段限一次,你可以交给一名其他角色一张装备牌或【杀】,并选择其攻击范围内的另一名角色(若无则不选择),令其选择一项:1.视为对你选择的角色使用一张普通【杀】;2.摸一张牌。智迟:锁定技,当你于回合外受到伤害后,【杀】和普通锦囊牌对你无效直至本回合结束。',
+    caps:{ mingce:true, zhichi:true } },
+  zhurong:       { id:'zhurong',       name:'祝融',   gender:'female', maxHp:4, skill:'巨象/烈刃',
+    desc:'巨象:锁定技,①【南蛮入侵】对你无效;②当其他角色使用的【南蛮入侵】结算结束后置入弃牌堆时,你获得之。烈刃:当你使用【杀】对目标角色造成伤害后,你可以与其拼点,若你赢,你获得该角色的一张牌。',
+    caps:{ juxiang:true, lieRen:true } },
+  lingtong:       { id:'lingtong',       name:'凌统',   gender:'male', maxHp:4, skill:'旋风',
+    desc:'旋风:当你于弃牌阶段弃置过至少两张牌,或当你失去装备区里的牌后,你可以依次弃置任意名其他角色的共计至多两张牌。',
+    caps:{ xuanfeng:true },
+    hooks:{
+      onLoseEquip:(g, seat, ctx)=>{
+        const me = g.players[seat];
+        // 旋风：失去装备区的牌后触发（回合内外都可以触发）
+        // 注意：seat 是失去装备的玩家，当该玩家是凌统且存活时触发
+        if (generalHasCap(me, 'xuanfeng') && me.alive) {
+          // 记录触发时的phase用于状态回滚
+          const previousPhase = g.phase;
+          
+          // 进入旋风选择阶段
+          g.pending = {
+            type: 'xuanfengPick',
+            from: seat,
+            trigger: 'equip',
+            targets: [],
+            discardedCounts: [],
+            maxRemaining: 2,
+            stage: 'selecting',
+            previousPhase: previousPhase
+          };
+          g.phase = 'xuanfengPick';
+          g.log=pushLog(g.log, me.name + ' 失去装备,可以发动【旋风】,弃置其他角色的共计至多两张牌');
+          markSkillSound(g, '旋风');
+        }
+      }
+    } },
+  fazheng:       { id:'fazheng',       name:'法正',   gender:'male', maxHp:3, skill:'恩怨/眩惑',
+    desc:'恩怨:锁定技,①当其他角色令你回复1点体力后,其摸一张牌;②当你受到其他角色对你造成的伤害后,其选择一项:1.交给你一张♥手牌;2.失去1点体力。眩惑:出牌阶段限一次,你可以交给一名其他角色一张♥手牌,然后你获得该角色的一张牌,并将此牌交给另一名其他角色。',
+    caps:{ enyuan:true, huanhuo:true } },
+  dingfeng:       { id:'dingfeng',       name:'丁奉',   gender:'male', maxHp:4, skill:'短兵/奋迅',
+    desc:'短兵:你使用【杀】时可以多选择一名距离为1的角色为目标。奋迅:出牌阶段限一次,你可以弃置一张牌,令你本回合计算与一名其他角色的距离视为1。',
+    caps:{ duanbing:true, fenxun:true } },
+  caochong:       { id:'caochong',       name:'曹冲',   gender:'male', maxHp:3, skill:'称象/仁心',
+    desc:'称象:当你受到伤害后,你可以亮出牌堆顶的四张牌,获得其中任意张点数之和不大于13的牌。仁心:当其他角色受到伤害时,若其体力值为1,你可以翻面并弃置一张装备牌,防止此伤害。',
+    caps:{ chengxiang:true, renxin:true } },
+  xushu:          { id:'xushu',          name:'徐庶',   gender:'male', maxHp:3, skill:'无言/举荐',
+    desc:'无言:锁定技,你使用锦囊牌造成伤害时防止之;你受到锦囊牌伤害时防止之。举荐:结束阶段,你可以弃置一张非基本牌,令一名其他角色选择:摸两张牌/回复1点体力/复原武将牌。',
+    caps:{ wuyan:true, jujian:true } },
+  caozhang:       { id:'caozhang',       name:'曹彰',   gender:'male', maxHp:4, skill:'将驰',
+    desc:'将驰:摸牌阶段,你可以选择一项:1.多摸1张,本回合不能使用或打出杀;2.少摸1张,本回合使用杀无距离限制且可多使用1张杀;3.不发动。',
+    caps:{ jiangchi:true } },
+  caozhi:         { id:'caozhi',         name:'曹植',   gender:'male', maxHp:3, skill:'落英/酒诗',
+    desc:'落英:当其他角色的梅花牌因判定或弃置进入弃牌堆时,你可以获得之。酒诗:当你受到伤害后,若你的武将牌背面朝上且受伤时也背面朝上,你可以翻回正面。',
+    caps:{ luoying:true, jiushi:true } },
+  yuji:           { id:'yuji',           name:'于吉',   gender:'male', maxHp:3, skill:'蛊惑/缠怨',
+    desc:'蛊惑:每回合限一次,你可以扣置一张手牌,将此牌当任意一张基本牌或普通锦囊牌使用或打出,其他角色可质疑。若为假,此牌作废;若为真,质疑角色获得【缠怨】。缠怨:锁定技,你不能质疑【蛊惑】;当你的体力值为1时,你的所有其他技能失效。',
+    caps:{ guhuo:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
+function chanyuanLocksSkills(player){
+  return !!(player && player.chanyuan && player.hp<=1);
+}
 // 查询某玩家的武将是否拥有某项被动能力(能力声明在 GENERALS.caps,业务层不写武将名)
 function generalHasCap(player, cap){
+  // 蔡文姬【断肠】等:武将技能整体失效后,不再从 GENERALS.caps 读取
+  if(player && (player.skillsLost || chanyuanLocksSkills(player))) return false;
   const gen = player && getGeneral(player.general);
   return !!(gen && gen.caps && gen.caps[cap]);
 }
 // 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;通用数值 seam,当前暂无武将/装备使用)
 function generalCapValue(player, cap, fallback){
+  if(player && (player.skillsLost || chanyuanLocksSkills(player))) return fallback;
   const gen = player && getGeneral(player.general);
   const v = gen && gen.caps && gen.caps[cap];
   return (typeof v === 'number') ? v : fallback;
@@ -305,7 +427,12 @@ function equipHasCap(player, cap){
   });
 }
 // 统一能力入口:武将 caps 或 装备 cap 任一提供即算拥有。实时查询无缓存 —— 卸下/替换装备后自然失效。
-function hasCap(player, cap){ return generalHasCap(player, cap) || equipHasCap(player, cap); }
+// player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
+function hasCap(player, cap){
+  if(equipHasCap(player, cap)) return true;
+  if(player && (player.skillsLost || chanyuanLocksSkills(player))) return false;
+  return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]);
+}
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
 function cardSuitForPlayer(player, card){
@@ -377,6 +504,7 @@ function findUsableAs(hand, player, role){
 // 触发型技能分发:查 seat 玩家武将的 hooks[hookName] 并执行(在调用方的 tx 内,直接改 g)。
 function triggerHook(g, seat, hookName, ctx){
   const p = g.players[seat];
+  if(p && (p.skillsLost || chanyuanLocksSkills(p))) return; // 断肠/缠怨等:武将 hooks 一并失效
   const gen = p && getGeneral(p.general);
   const fn = gen && gen.hooks && gen.hooks[hookName];
   if(typeof fn === 'function') fn(g, seat, ctx);
@@ -394,7 +522,7 @@ const CARD_DESC = {
   '桃':       '让自己回复1点体力,只能在自己体力没满时使用。',
   '决斗':     '指定一名其他角色决斗:双方轮流打出【杀】,先打不出【杀】的一方受到1点伤害。',
   '无中生有': '直接从牌堆摸两张牌。',
-  '桃园结义': '所有存活角色各回复1点体力(已满血则不受影响),可被无懈可击整体抵消。',
+  '桃园结义': '所有存活角色各回复1点体力(已满血则不受影响)。每名角色的回复效果分别可被无懈可击抵消。',
   '顺手牵羊': '拿取一名其他角色的一张牌归为己有(可拿手牌或一件装备),每次只能拿一张。',
   '过河拆桥': '弃掉一名其他角色的一张牌(手牌或一件装备),每次只能弃一张。',
   '无懈可击': '抵消一张功能牌(“锦囊”,如决斗、南蛮入侵等)对一名角色的效果;也能抵消别人的【无懈可击】。',
@@ -404,9 +532,9 @@ const CARD_DESC = {
   '闪电': '延时锦囊,只能放在你自己的判定区。轮到你回合开始时判定:黑桃2~9,你受到3点伤害,然后此牌作废;否则无事发生,将此牌移到下一名角色的判定区。',
   '乐不思蜀': '延时锦囊,只能放在其他角色的判定区。轮到该角色回合开始时判定:若判定牌不为♥(红桃),跳过本回合的出牌阶段;为♥则无效果。判定完此牌作废。',
   '兵粮寸断': '延时锦囊,只能放在其他角色的判定区。轮到该角色回合开始时判定:若判定牌不为♣(梅花),跳过本回合的摸牌阶段;为♣则无效果。判定完此牌作废。',
-  '铁索连环': '指定一至两名角色,分别令其进入或解除连环状态。连环状态用于日后的属性伤害传导;也可以被庞统【连环】重铸。',
+  '铁索连环': '指定一至两名角色,分别令其进入或解除连环状态。连环状态用于属性伤害传导;也可以直接重铸,弃置后摸一张牌。',
   '借刀杀人': '选择一名装备着武器牌的角色(A),再选择A攻击范围内的另一名角色(B)。A可以选择对B使用一张【杀】(不受A本回合出杀次数限制),否则弃置A装备的武器牌。可被无懈可击整体抵消。',
-  '五谷丰登': '亮出等同于存活角色数量的牌堆顶的牌,从你开始按座位顺序,每人依次挑选一张收入手中。可被无懈可击整体抵消(亮出的牌全部作废)。',
+  '五谷丰登': '亮出等同于存活角色数量的牌堆顶的牌,从你开始按座位顺序,每人依次挑选一张收入手中。每名角色的挑选效果分别可被无懈可击抵消。',
 };
 function getCardDesc(name){ return CARD_DESC[name] || ''; } // 基础牌/锦囊说明
 // 任意牌的说明统一入口:装备牌走 EQUIPS.desc,基础牌/锦囊走 CARD_DESC。任何位置(手牌/装备区/帮助面板)都用它。
@@ -462,4 +590,17 @@ function buildDeck(){
   const d = LIST.map((c,i)=>({id:i, name:c[0], suit:c[1], rank:c[2]}));
   for(let i=d.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [d[i],d[j]]=[d[j],d[i]]; }
   return d;
+};
+
+// 导出给Node.js使用
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    GENERALS, GENERAL_IDS, getGeneral, generalMaxHp, hasCap,
+    EQUIPS, EQUIP_SLOTS, emptyEquips, getEquip,
+    SEATS, MIN_PLAYERS, MAX_HP, START_HAND, BASIC_CARDS,
+    DELAY_TRICKS,
+    buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
+    isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
+    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap
+  };
 }

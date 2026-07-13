@@ -119,7 +119,7 @@ function finishGeneralAssign(g){
   g.deck = buildDeck(); g.discard=[];
   g.players.forEach((p,i)=>{
     p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
-    p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.delays=[];
+    p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.delays=[];
     p.equips = emptyEquips();                // 装备区:开局四槽全空
     drawN(g,i,START_HAND);
   });
@@ -178,7 +178,7 @@ function newGame(){
     g.players.forEach(p=>{
       p.general = randomGeneralId();     // 每局重新随机换将
       p.maxHp = generalMaxHp(p.general); // 异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.delays=[];
+      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.delays=[];
       p.equips = emptyEquips();          // 装备区:每局重置为四槽全空
     });
     g.log=pushLog(g.log,'重置房间,可再次开始');

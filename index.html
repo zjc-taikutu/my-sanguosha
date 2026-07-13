@@ -241,6 +241,9 @@
   }
   .seat.active{border-color:var(--jade);box-shadow:0 0 0 2px var(--jade) inset;} /* 当前行动者:绿色高亮 */
   .seat.dead{opacity:.45;filter:grayscale(.6);}
+  /* 曹植【酒诗】等翻面:faceup===false 时 render.js 加 .flipped */
+  .seat.flipped{filter:brightness(.72) saturate(.75);box-shadow:0 0 0 2px #6b5b4d inset;}
+  .seat.flipped::after{content:'翻面';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;font-size:12px;font-weight:700;color:#f2efe6;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:4px;pointer-events:none;}
   /* 出牌方/目标座位的短暂高亮(中央出牌区同一节奏淡出),这两条沿用不变,不受这次
      卡片结构改动影响——outline 是独立的盒模型外层视觉层,和 border/box-shadow 不冲突。 */
   .seat.table-actor{outline:2px solid var(--cinnabar-bright);outline-offset:2px;transition:outline-color .3s;}

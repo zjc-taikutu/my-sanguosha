@@ -56,7 +56,26 @@ const SKILL_PINYIN = {
   '国色':'guose', '流离':'liuli', '天香':'tianxiang', '红颜':'hongyan',
   '连环':'lianhuan', '涅槃':'niepan', '离间':'lijian', '闭月':'biyue',
   '双雄':'shuangxiong',
-  '礼让':'lirang', '争义':'zhengyi'
+  '礼让':'lirang', '争义':'zhengyi',
+  '恂恂':'xunxun', '忘隙':'wangxi', '狂骨':'kuanggu',
+  '神速':'shensu',
+  '天义':'tianyi',
+  '完杀':'wansha', '乱武':'luanwu', '帷幕':'weimu',
+  '雷击':'leiji', '鬼道':'guidu',
+  '乱击':'luanji',
+  '同疾':'tongji',
+  '妄尊':'wangzun',
+  '悲歌':'beige', '断肠':'duanchang',
+  '巨象':'juxiang', '烈刃':'lieRen',
+  '明策':'mingce', '智迟':'zhichi',
+  '旋风':'xuanfeng',
+  '短兵':'duanbing',
+  '奋迅':'fenxun',
+  '恩怨':'enyuan',
+  '眩惑':'huanhuo',
+  '无言':'wuyan', '举荐':'jujian',
+  '将驰':'jiangchi',
+  '落英':'luoying', '酒诗':'jiushi'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
@@ -247,7 +266,7 @@ function showConfirm(message, onOk, onCancel){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); };
+  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
@@ -448,6 +467,7 @@ function renderSeatCard(g, seat, isSelf){
   const tags =
     (g.turn===seat&&g.started?'<span class="tag turn">回合</span>':'')+
     (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, seat))+'</span>':'')+
+    (p.chanyuan?'<span class="tag">缠怨</span>':'')+
     (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'');
   // 标题栏不再包含"?"说明入口(第4次微调把它挪到右上角、身份方块的正下方,见下面的
   // infoBadge)。**玩家名这次改成居中(原来靠左)**——标签(tags)不参与居中的flex流,
@@ -549,6 +569,8 @@ function render(g){
   if(!(g.started && g.phase==='discard' && g.turn===mySeat)) resetDiscardSelected();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
+  // 同款兜底:只要不在「自己的恂恂选择阶段」,就退出恂恂选牌模式。
+  if(!(g.phase==='xunxunPick' && g.pending && g.pending.type==='xunxunPick' && g.pending.seat===mySeat)) resetXunxun();
   // 同款兜底:只要不在「自己的摸牌阶段」,就退出突袭选目标模式。
   if(!(g.started && g.phase==='draw' && g.turn===mySeat)) resetTuxi();
   // 同款兜底:只要不在「自己的出牌阶段」,就退出断粮选牌+选目标模式。
@@ -558,6 +580,7 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLianhuan();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetTiesuo();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhiheng();
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetTiaoxin();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQingnang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQuhu();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLijian();
@@ -602,7 +625,8 @@ function render(g){
     const p=g.players[i];
     if(!p) return null;
     const d=document.createElement('div');
-    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'');
+    // 骨架级重建后不再用 seatSlot/slot-*；酒诗等翻面状态用 .flipped 标记
+    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+(p.faceup===false?' flipped':'');
     d.dataset.seat = i; // 供中央出牌区(renderTableCard)按座位号选中,高亮出牌方/目标座位用
     d.innerHTML = renderSeatCard(g, i, i===mySeat);
     // targeting: clickable opponents when choosing a target card
@@ -672,6 +696,21 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">已有同名</span>';
       }
     }
+    if(g.phase==='guhuoTarget' && g.pending && g.pending.type==='guhuoTarget' && g.pending.sourceSeat===mySeat){
+      const claimed=g.pending.claimedCard;
+      const guhuoSpec=claimed ? CARD_PLAYS[guhuoActionId(claimed.name)] : null;
+      const selfAllowed=i!==mySeat || !!(guhuoSpec && guhuoSpec.allowSelf);
+      const guhuoTargetable=!!(guhuoSpec && guhuoSpec.target) && selfAllowed && p.alive && (!guhuoSpec.canTarget || guhuoSpec.canTarget(g, meP, claimed, i));
+      if(guhuoTargetable){
+        d.style.cursor='pointer';
+        d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.title='选择为【蛊惑】声明牌的目标';
+        d.onclick=()=>{ confirmAndPlay('将【蛊惑】声明的【'+claimed.name+'】对 '+g.players[i].name+' 使用？', ()=>guhuoChooseTarget(i)); };
+      } else if(guhuoSpec && guhuoSpec.target && p.alive){
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='不是这张声明牌的合法目标';
+      }
+    }
     // 丈八蛇矛:已选满两张牌后,对手作为杀的目标(距离规则同普通杀,与 selectedCardIdx 路径互斥)
     if(zhangbaMode && zhangbaPicks.length===2 && g.phase==='play' && g.turn===mySeat){
       const reach = canReachSha(g, mySeat, i);
@@ -691,6 +730,12 @@ function render(g){
         d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
+    }
+    // 姜维【挑衅】:出牌阶段,选择一个其他角色作为目标
+    if(tiaoxinMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive && !tiaoxinTarget){
+      d.style.cursor='pointer';
+      d.style.outline='2px dashed var(--cinnabar-bright)';
+      d.onclick=()=>{ confirmAndPlay('对 '+g.players[i].name+' 发动【挑衅】？', ()=>respondTiaoxin(i)); };
     }
     // 方天画戟选目标模式:点存活的、在攻击距离内的其他玩家 = 切换选中/取消,上限 min(3,范围内合法目标数)。
     // 不强制选满(选够1个即可点"确认发动");距离限制是推断而非确证的官方规则(见 EQUIPS['方天画戟'].desc)。
@@ -901,6 +946,14 @@ function render(g){
         };
       }
     }
+    // 凌统【旋风】:旋风选择阶段高亮可选目标
+    if(g.pending && g.pending.type === 'xuanfengPick' && g.pending.from === mySeat && g.pending.stage === 'selecting') {
+      if(i !== mySeat && p.alive) {
+        d.style.cursor = 'pointer';
+        d.style.outline = '2px dashed #4a90d9';
+        d.onclick = () => pickXuanfengTarget(i);
+      }
+    }
     return d;
   }
   if(mySeat!==null && g.players[mySeat]){
@@ -921,7 +974,7 @@ function render(g){
   renderTableCard(g);
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',shaOffsetChoice:'杀被抵消后的效果选择',mengjin:'猛进选择',zhijiChoice:'志继选择',tiaoxinChoice:'挑衅选择',xunxunPick:'恂恂选择',wangxiAsk:'忘隙询问',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 
