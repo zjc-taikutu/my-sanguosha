@@ -18,3 +18,10 @@
 
 ### 未做（按你要求）
 - 袁术【妄尊】忽略
+
+## Phase 4 — 文档归类（2026-07-13）
+- [x] 22 份 `*_design.md` → `docs/design/`
+- [x] 建 `docs/README.md` 说明
+- [x] 建空 `bak/` 备废弃材料
+- [x] 根目录保留 `CLAUDE.md` / `TASKS.md`（协作必读）
+- [x] 测试脚本仍在根目录（相对路径 `./game.js`，勿挪）
