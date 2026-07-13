@@ -725,7 +725,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       d.shaColor !== '♠' && d.shaColor !== '♣'){
+       d.shaColor !== 'black'){
       g.pending = null; g.phase = 'play';
     }
   }
@@ -1584,7 +1584,7 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     return finishDelayCard(g, judgedSeat, DELAY_TRICKS[resume.trickName], replaceCard, resume.card);
   } else if(resume.kind === 'tieqiJudge'){
     // 铁骑判定
-    return finishTieqiJudge(g, resume.from, resume.to, replaceCard, resume.sourceCard, undefined);
+    return finishTieqiJudge(g, resume.from, resume.to, replaceCard, resume.sourceCard, resume.shaColor, undefined);
   } else if(resume.kind === 'luoshenJudge'){
     // 洛神判定
     return finishLuoshenJudge(g, resume.seat, replaceCard);
@@ -1699,7 +1699,7 @@ function finishGuicai(g, finalCard){
     return;
   }
   if(resume.kind==='tieqiJudge'){
-    finishTieqiJudge(g, resume.from, resume.to, finalCard, resume.sourceCard, undefined);
+    finishTieqiJudge(g, resume.from, resume.to, finalCard, resume.sourceCard, resume.shaColor, undefined);
     return;
   }
   if(resume.kind==='luoshenJudge'){
@@ -2594,7 +2594,7 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
   }
   g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' '+usedAs });
   if(hasCap(me,'tieqi')){
-    g.pending={type:'tieqi', from:fromSeat, to:targetSeat};
+    g.pending={type:'tieqi', from:fromSeat, to:targetSeat, shaColor};
     if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
     g.phase='tieqi';
     g.log=pushLog(g.log, '是否发动【铁骑】进行判定…');
@@ -2604,14 +2604,14 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
   if(hasCap(me,'liegong')){
     const targetHandCount=(g.players[targetSeat].hand||[]).length;
     if(targetHandCount>=me.hp || targetHandCount<=attackRange(g,fromSeat)){
-      g.pending={type:'liegong', from:fromSeat, to:targetSeat};
+      g.pending={type:'liegong', from:fromSeat, to:targetSeat, shaColor};
       if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
       g.phase='liegong';
       g.log=pushLog(g.log, '是否发动【烈弓】,令此【杀】不可被【闪】抵消…');
       return;
     }
   }
-  continueShaAfterTieqi(g, fromSeat, targetSeat, false, sourceCard, shaInfo);
+  continueShaAfterTieqi(g, fromSeat, targetSeat, false, sourceCard, shaColor, shaInfo);
 }
 // respondLiegong: 仅攻击者(pending.from)可响应。不需要判定,玩家的选择直接就是 noShan 的值——
 // 复用 continueShaAfterTieqi 同一条尾巴(和铁骑判红共用"不可被闪抵消"这一效果)。
@@ -2622,7 +2622,7 @@ function respondLiegong(activate){
     g.log=pushLog(g.log, activate
       ? g.players[from].name+' 发动【烈弓】,此【杀】不可被【闪】抵消'
       : g.players[from].name+'：不发动【烈弓】');
-    continueShaAfterTieqi(g, from, to, activate, g.pending.sourceCard);
+    continueShaAfterTieqi(g, from, to, activate, g.pending.sourceCard, g.pending.shaColor);
     return g;
   });
 }
@@ -2670,9 +2670,9 @@ function respondJiedao(useSha){
 // tryBagua(根本不给判定机会),进响应阶段但 pending.noShan 标记会挡掉出闪。是谁、为什么触发
 // noShan(铁骑判红、还是烈弓数值条件)由调用方(finishTieqiJudge/respondLiegong)自己记日志,
 // 这里只管接回流程,不重复归因到某个具体技能。
-function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaInfo){
+function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInfo){
   const me=g.players[from];
-  g.pending={from, to, noShan};
+  g.pending={from, to, noShan, shaColor};
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   if(noShan){
     g.log=pushLog(g.log, '此【杀】不可被【闪】抵消(含视为闪的效果)');
@@ -2859,25 +2859,25 @@ function respondTieqi(activate){
     const from=g.pending.from, to=g.pending.to;
     if(!activate){
       g.log=pushLog(g.log, g.players[from].name+'：不发动【铁骑】');
-      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, undefined);
+      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, undefined);
       return g;
     }
     const card=judge(g);
-    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, undefined); return g; } // 无牌可判,视为未发动
-    if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard})==='pending') return g;
-    finishTieqiJudge(g, from, to, card, g.pending.sourceCard, undefined);
+    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, undefined); return g; } // 无牌可判,视为未发动
+    if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard, shaColor:g.pending.shaColor})==='pending') return g;
+    finishTieqiJudge(g, from, to, card, g.pending.sourceCard, g.pending.shaColor, undefined);
     return g;
   });
 }
 // finishTieqiJudge: 铁骑判定结算(不管是否被鬼才改判过)。红=不可被闪抵消,黑=无事发生。
-function finishTieqiJudge(g, from, to, card, sourceCard, shaInfo){
+function finishTieqiJudge(g, from, to, card, sourceCard, shaColor, shaInfo){
   const red=isRedForPlayer(g.players[from], card);
   g.log=pushLog(g.log, g.players[from].name+' 发动【铁骑】,判定为'+(red?'红':'黑'));
   // 天妒:铁骑判定归属者是 from(发动铁骑的攻击者)自己的判定,若 from 恰好是郭嘉可以收下判定牌
   // (现实中不会发生——铁骑是马超专属 cap,一人不能同时是马超又是郭嘉——但函数写法上不应该
   // 硬编码排除这种情况,和 maybeTiandu 本身"只查 hasCap,不硬编码武将名"的原则一致)。
   maybeTiandu(g, from, card);
-  continueShaAfterTieqi(g, from, to, red, sourceCard, shaInfo);
+  continueShaAfterTieqi(g, from, to, red, sourceCard, shaColor, shaInfo);
 }
 // playZhangbaSha: 丈八蛇矛特效——任意两张手牌当一个【杀】。与 playCard 平级(playCard 只吃单张)。
 // 次数/距离/目标响应与普通杀完全一致(共用 resolveShaUse);仅"凑杀"方式不同。
@@ -3032,8 +3032,8 @@ function maybeStartQiaomeng(g, from, to, shaColor) {
   const target = g.players[to];
   // 检查条件:攻击者是公孙瓒,有趫猛技能,使用的是黑色杀,目标存活
   if(!source || !source.alive || !target || !target.alive || from === to || !hasCap(source,'qiaomeng')) return false;
-  // 必须是黑色杀(♠黑桃或♣梅花)
-  if(shaColor !== '♠' && shaColor !== '♣') return false;
+  // 必须是黑色杀；resolveShaUse 传入的 shaColor 已统一为 'red'/'black'/'none'。
+  if(shaColor !== 'black') return false;
   // 检查目标是否有装备
   const equips = target.equips || {};
   const equipSlots = Object.keys(equips).filter(slot => equips[slot] !== null);
@@ -4568,7 +4568,7 @@ function respondShan(useShan){
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
       if(maybeStartQilin(g, g.pending.from, mySeat)) return g;
       // 公孙瓒【趫猛】:使用黑色【杀】造成伤害后,可以选择目标装备区的一张牌
-      if(maybeStartQiaomeng(g, g.pending.from, mySeat, shaColor)) return g;
+      if(maybeStartQiaomeng(g, g.pending.from, mySeat, g.pending.shaColor)) return g;
       // 祝融【烈刃】:使用【杀】造成伤害后,可以与目标拼点
       if(maybeStartLieRen(g, g.pending.from, mySeat)) return g;
     }
