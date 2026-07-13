@@ -360,9 +360,53 @@ const GENERALS = {
   caiwenji:      { id:'caiwenji',      name:'蔡文姬', gender:'female', maxHp:3, skill:'悲歌/断肠',
     desc:'悲歌:当一名角色受到【杀】造成的伤害后,你可以弃置一张牌,令其判定,若结果为:红桃,其回复1点体力;方块,其摸两张牌;梅花,伤害来源弃置两张牌;黑桃,伤害来源翻面。断肠:锁定技,当你死亡时,杀死你的角色失去所有武将技能。',
     caps:{ beige:true, duanchang:true } },
+  caoren:       { id:'caoren',       name:'曹仁',   gender:'male', maxHp:4, skill:'据守',
+    desc:'据守:结束阶段,你可以摸三张牌,然后将你的武将牌翻面。',
+    caps:{ jushou:true } },
+  chengong:      { id:'chengong',      name:'陈宫',   gender:'male', maxHp:3, skill:'明策/智迟',
+    desc:'明策:出牌阶段限一次,你可以交给一名其他角色一张装备牌或【杀】,并选择其攻击范围内的另一名角色(若无则不选择),令其选择一项:1.视为对你选择的角色使用一张普通【杀】;2.摸一张牌。智迟:锁定技,当你于回合外受到伤害后,【杀】和普通锦囊牌对你无效直至本回合结束。',
+    caps:{ mingce:true, zhichi:true } },
   zhurong:       { id:'zhurong',       name:'祝融',   gender:'female', maxHp:4, skill:'巨象/烈刃',
     desc:'巨象:锁定技,①【南蛮入侵】对你无效;②当其他角色使用的【南蛮入侵】结算结束后置入弃牌堆时,你获得之。烈刃:当你使用【杀】对目标角色造成伤害后,你可以与其拼点,若你赢,你获得该角色的一张牌。',
     caps:{ juxiang:true, lieRen:true } },
+  lingtong:       { id:'lingtong',       name:'凌统',   gender:'male', maxHp:4, skill:'旋风',
+    desc:'旋风:当你于弃牌阶段弃置过至少两张牌,或当你失去装备区里的牌后,你可以依次弃置任意名其他角色的共计至多两张牌。',
+    caps:{ xuanfeng:true },
+    hooks:{
+      onLoseEquip:(g, seat, ctx)=>{
+        const me = g.players[seat];
+        // 旋风：失去装备区的牌后触发（回合内外都可以触发）
+        // 注意：seat 是失去装备的玩家，当该玩家是凌统且存活时触发
+        if (generalHasCap(me, 'xuanfeng') && me.alive) {
+          // 记录触发时的phase用于状态回滚
+          const previousPhase = g.phase;
+          
+          // 进入旋风选择阶段
+          g.pending = {
+            type: 'xuanfengPick',
+            from: seat,
+            trigger: 'equip',
+            targets: [],
+            discardedCounts: [],
+            maxRemaining: 2,
+            stage: 'selecting',
+            previousPhase: previousPhase
+          };
+          g.phase = 'xuanfengPick';
+          g.log=pushLog(g.log, me.name + ' 失去装备,可以发动【旋风】,弃置其他角色的共计至多两张牌');
+          markSkillSound(g, '旋风');
+        }
+      }
+    } },
+  fazheng:       { id:'fazheng',       name:'法正',   gender:'male', maxHp:3, skill:'恩怨/眩惑',
+    desc:'恩怨:锁定技,①当其他角色令你回复1点体力后,其摸一张牌;②当你受到其他角色对你造成的伤害后,其选择一项:1.交给你一张♥手牌;2.失去1点体力。眩惑:出牌阶段限一次,你可以交给一名其他角色一张♥手牌,然后你获得该角色的一张牌,并将此牌交给另一名其他角色。',
+    caps:{ enyuan:true, huanhuo:true } },
+  dingfeng:       { id:'dingfeng',       name:'丁奉',   gender:'male', maxHp:4, skill:'短兵/奋迅',
+    desc:'短兵:你使用【杀】时可以多选择一名距离为1的角色为目标。奋迅:出牌阶段限一次,你可以弃置一张牌,令你本回合计算与一名其他角色的距离视为1。',
+    caps:{ duanbing:true, fenxun:true } },
+  caochong:       { id:'caochong',       name:'曹冲',   gender:'male', maxHp:3, skill:'称象/仁心',
+    desc:'称象:当你受到伤害后,你可以亮出牌堆顶的四张牌,获得其中任意张点数之和不大于13的牌。仁心:当其他角色受到伤害时,若其体力值为1,你可以翻面并弃置一张装备牌,防止此伤害。',
+    caps:{ chengxiang:true, renxin:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

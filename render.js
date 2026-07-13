@@ -66,7 +66,13 @@ const SKILL_PINYIN = {
   '同疾':'tongji',
   '妄尊':'wangzun',
   '悲歌':'beige', '断肠':'duanchang',
-  '巨象':'juxiang', '烈刃':'lieRen'
+  '巨象':'juxiang', '烈刃':'lieRen',
+  '明策':'mingce', '智迟':'zhichi',
+  '旋风':'xuanfeng',
+  '短兵':'duanbing',
+  '奋迅':'fenxun',
+  '恩怨':'enyuan',
+  '眩惑':'huanhuo'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
@@ -784,6 +790,14 @@ function render(g){
           else if(tuxiPicks.length<maxPick) tuxiPicks.push(i);
           render(g);
         };
+      }
+    }
+    // 凌统【旋风】:旋风选择阶段高亮可选目标
+    if(g.pending && g.pending.type === 'xuanfengPick' && g.pending.from === mySeat && g.pending.stage === 'selecting') {
+      if(i !== mySeat && p.alive) {
+        d.style.cursor = 'pointer';
+        d.style.outline = '2px dashed #4a90d9';
+        d.onclick = () => pickXuanfengTarget(i);
       }
     }
     seatsEl.appendChild(d);

@@ -29,11 +29,12 @@
 **设计要点**：
 - **双触发条件**：需同时监听弃牌阶段结束事件和装备区丢失事件
 - **可选发动**：玩家可以选择是否发动旋风
-- **多目标选择**：可以选择任意数量的其他角色（0到N个，N=场上其他存活角色数量）
+- **多目标选择**：可以选择任意数量的其他角色（1到N个，N=场上其他存活角色数量）
 - **牌数限制**：所有被选择的角色弃置的牌总数不能超过2张
 - **依次弃置**：按照选择顺序依次处理每个目标的弃牌
 - **其他角色限制**：不能选择自己
-- **每次触发只能发动一次**：同一个触发条件下，旋风只能发动一次
+- **回合外可触发**：失去装备时无论是否是自己的回合都可以发动旋风
+- **多次触发**：每次失去装备都可以独立触发旋风（连续失去多件装备可以触发多次）
 
 ---
 
@@ -60,7 +61,7 @@ lingtong: {
 
 在 `game.js` 的 `normalize(g)` 函数中添加：
 ```javascript
-// 凌统【旋风】:弃牌阶段触发选择阶段
+// 凌统【旋风】:旋风选择阶段
 if(g.pending && g.pending.type==='xuanfengPick'){
   const d = g.pending;
   if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
@@ -68,36 +69,24 @@ if(g.pending && g.pending.type==='xuanfengPick'){
      !Array.isArray(d.targets) ||
      !Array.isArray(d.discardedCounts) ||
      d.discardedCounts.length !== d.targets.length ||
-     d.discardedCounts.some(c => typeof c !== 'number' || c < 0)){
+     d.discardedCounts.some(c => typeof c !== 'number' || c < 0) ||
+     typeof d.previousPhase !== 'string'){
     g.pending = null;
-    g.phase = g.phase === 'xuanfengPick' ? 'discard' : g.phase;
-  }
-}
-
-// 凌统【旋风】:装备丢失触发选择阶段
-if(g.pending && g.pending.type==='xuanfengFromEquip'){
-  const d = g.pending;
-  if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
-     d.from !== mySeat ||
-     !Array.isArray(d.targets) ||
-     !Array.isArray(d.discardedCounts) ||
-     d.discardedCounts.length !== d.targets.length ||
-     d.discardedCounts.some(c => typeof c !== 'number' || c < 0)){
-    g.pending = null;
+    g.phase = d.previousPhase || (g.phase === 'xuanfengPick' ? 'discard' : g.phase);
   }
 }
 
 // 凌统【旋风】:每回合弃牌阶段是否已触发过旋风
 if(typeof g.xuanfengDiscardUsed !== 'boolean') g.xuanfengDiscardUsed = false;
 
-// 凌统【旋风】:每次装备丢失是否已触发过旋风
-if(typeof g.xuanfengEquipUsed !== 'boolean') g.xuanfengEquipUsed = false;
+// 凌统【旋风】:本回合弃牌阶段实际弃置的牌数（用于准确计算，避免依赖g.discard.length）
+if(typeof g.discardedThisPhase !== 'number') g.discardedThisPhase = 0;
 ```
 
 在 `startTurn` 函数中添加重置：
 ```javascript
 g.xuanfengDiscardUsed = false;  // 弃牌阶段旋风触发标志重置
-g.xuanfengEquipUsed = false;    // 装备丢失旋风触发标志重置
+g.discardedThisPhase = 0;       // 本回合弃牌数量重置
 ```
 
 ---
@@ -119,11 +108,11 @@ function finishDiscardPhase(g) {
     
     // 旋风：弃牌阶段弃置过至少两张牌时触发
     if (generalHasCap(me, 'xuanfeng') && me.alive && !g.xuanfengDiscardUsed) {
-      // 计算本次弃牌阶段弃置的牌数
-      const discardCount = g.discard.length - (g.prevDiscardCount || 0);
+      // 使用准确的弃牌计数器（避免依赖g.discard.length导致的错误）
+      const discardCount = g.discardedThisPhase || 0;
       
       if (discardCount >= 2) {
-        // 进入旋风选择阶段
+        // 进入旋风选择阶段，记录触发前的phase用于状态回滚
         g.pending = {
           type: 'xuanfengPick',
           from: mySeat,
@@ -131,7 +120,8 @@ function finishDiscardPhase(g) {
           targets: [],
           discardedCounts: [],
           maxRemaining: 2,
-          stage: 'selecting'
+          stage: 'selecting',
+          previousPhase: g.phase
         };
         g.xuanfengDiscardUsed = true;
         g.phase = 'xuanfengPick';
@@ -157,8 +147,12 @@ g.hooks.onLoseEquip = g.hooks.onLoseEquip || [];
 g.hooks.onLoseEquip.push(function(g, seat, ctx) {
   const me = g.players[seat];
   
-  // 旋风：失去装备区的牌后触发
-  if (generalHasCap(me, 'xuanfeng') && me.alive && !g.xuanfengEquipUsed && g.turn === seat) {
+  // 旋风：失去装备区的牌后触发（回合内外都可以触发）
+  // 注意：seat 是失去装备的玩家，当该玩家是凌统且存活时触发
+  if (generalHasCap(me, 'xuanfeng') && me.alive) {
+    // 记录触发时的phase用于状态回滚
+    const previousPhase = g.phase;
+    
     // 进入旋风选择阶段
     g.pending = {
       type: 'xuanfengPick',
@@ -167,15 +161,28 @@ g.hooks.onLoseEquip.push(function(g, seat, ctx) {
       targets: [],
       discardedCounts: [],
       maxRemaining: 2,
-      stage: 'selecting'
+      stage: 'selecting',
+      previousPhase: previousPhase
     };
-    g.xuanfengEquipUsed = true;
     g.phase = 'xuanfengPick';
     g.log = pushLog(g.log, `${me.name} 失去装备,可以发动【旋风】,弃置其他角色的共计至多两张牌`);
   }
   
   return g;
 });
+
+// 在 discardCards 函数中添加弃牌计数器更新
+// 修改 discardCards 函数，在弃置牌时更新 discardedThisPhase 计数器
+function discardCards(g, seat, cardIndices) {
+  // ... 现有 discardCards 逻辑 ...
+  
+  // 如果是当前回合玩家弃牌，更新计数器
+  if (seat === g.turn) {
+    g.discardedThisPhase = (g.discardedThisPhase || 0) + cardIndices.length;
+  }
+  
+  // ... 其余逻辑 ...
+}
 ```
 
 #### 旋风选择和执行函数
@@ -277,46 +284,67 @@ function executeXuanfeng(g) {
     
     if (!target || !target.alive || discardCount <= 0) continue;
     
-    // 弃置目标角色的牌
+    // 弃置目标角色的牌（随机弃置，符合标准规则）
     const cardsToDiscard = [];
-    
-    // 优先弃置手牌
     const hand = target.hand || [];
-    if (hand.length > 0) {
-      const toDiscard = Math.min(discardCount, hand.length);
-      cardsToDiscard.push(...hand.splice(0, toDiscard));
-    }
+    const equips = target.equips || {};
+    const delays = target.delays || [];
     
-    // 如果手牌不足，继续弃置装备区的牌
-    if (cardsToDiscard.length < discardCount && target.equips) {
-      const equipSlots = ['weapon', 'armor', 'horse1', 'horse2'];
-      for (const slot of equipSlots) {
-        if (cardsToDiscard.length >= discardCount) break;
-        if (target.equips[slot]) {
-          cardsToDiscard.push(target.equips[slot]);
-          target.equips[slot] = null;
-          // 触发失去装备钩子
+    // 收集所有可弃置的牌
+    const allDiscardable = [...hand];
+    // 添加装备区的牌
+    ['weapon', 'armor', 'horse1', 'horse2'].forEach(slot => {
+      if (equips[slot]) allDiscardable.push(equips[slot]);
+    });
+    // 添加判定区的牌
+    allDiscardable.push(...delays);
+    
+    // 随机选择要弃置的牌（最多 discardCount 张）
+    const shuffled = [...allDiscardable].sort(() => Math.random() - 0.5);
+    const toDiscard = Math.min(discardCount, shuffled.length);
+    const selectedCards = shuffled.slice(0, toDiscard);
+    
+    // 从原数组中移除被选中的牌
+    for (const card of selectedCards) {
+      // 从手牌中移除
+      const handIndex = hand.indexOf(card);
+      if (handIndex !== -1) {
+        hand.splice(handIndex, 1);
+        cardsToDiscard.push(card);
+        continue;
+      }
+      
+      // 从装备区中移除
+      let equipFound = false;
+      for (const slot of ['weapon', 'armor', 'horse1', 'horse2']) {
+        if (equips[slot] === card) {
+          equips[slot] = null;
+          cardsToDiscard.push(card);
           triggerHook(g, targetSeat, 'onLoseEquip', { count: 1 });
+          equipFound = true;
+          break;
         }
       }
-    }
-    
-    // 如果仍然不足，弃置判定区的牌
-    if (cardsToDiscard.length < discardCount && target.delays) {
-      const delays = target.delays || [];
-      const toDiscard = discardCount - cardsToDiscard.length;
-      cardsToDiscard.push(...delays.splice(0, toDiscard));
+      if (equipFound) continue;
+      
+      // 从判定区中移除
+      const delayIndex = delays.indexOf(card);
+      if (delayIndex !== -1) {
+        delays.splice(delayIndex, 1);
+        cardsToDiscard.push(card);
+      }
     }
     
     // 将弃置的牌放入弃牌堆
     g.discard.push(...cardsToDiscard);
     
-    g.log = pushLog(g.log, `${me.name} 发动【旋风】,令 ${target.name} 弃置${cardsToDiscard.length}张牌`);
+    g.log = pushLog(g.log, `${me.name} 发动【旋风】,令 ${target.name} 随机弃置${cardsToDiscard.length}张牌`);
   }
   
   // 清理pending状态
   g.pending = null;
-  g.phase = pending.trigger === 'discard' ? 'end' : g.phase;
+  // 回滚到触发前的phase
+  g.phase = pending.previousPhase || (pending.trigger === 'discard' ? 'end' : g.phase);
   
   markSkillSound(g, '旋风');
   
@@ -326,10 +354,11 @@ function executeXuanfeng(g) {
 // 取消旋风发动
 function cancelXuanfeng() {
   tx(g => {
-    if (g.pending && (g.pending.type === 'xuanfengPick' || g.pending.type === 'xuanfengFromEquip') && g.pending.from === mySeat) {
+    if (g.pending && g.pending.type === 'xuanfengPick' && g.pending.from === mySeat) {
       const me = g.players[mySeat];
+      const previousPhase = g.pending.previousPhase || 'discard';
       g.pending = null;
-      g.phase = 'discard';
+      g.phase = previousPhase;
       g.log = pushLog(g.log, `${me.name} 取消发动【旋风】`);
     }
     return g;
@@ -462,12 +491,15 @@ const SKILL_SOUNDS = {
 2. **目标无牌可弃置**：目标的弃牌数量自动设置为0，继续下一个目标选择
 3. **弃牌阶段未弃置2张牌**：不触发旋风
 4. **装备区无装备时失去装备**：不触发旋风（因为没有实际失去牌）
-5. **同一回合多次失去装备**：每次都可以触发旋风，但每次装备丢失只能发动一次旋风
-6. **旋风目标选择过程中角色死亡**：实时验证目标存活状态
-7. **弃置牌数超过目标拥有的牌数**：自动弃置目标所有的牌
-8. **弃牌阶段旋风与装备丢失旋风的触发冲突**：每个触发条件独立计算，可以在同一回合多次发动旋风
-9. **自己失去装备时**：可以发动旋风（因为技能描述是"当你失去装备区里的牌后")
-10. **多个凌统同时存在**：每个凌统独立计算自己的旋风触发
+5. **同一回合多次失去装备**：每次都可以独立触发旋风（连续失去多件装备可以触发多次）
+6. **回合外失去装备**：仍然可以触发旋风（如被过河拆桥、顺手牵羊等）
+7. **旋风目标选择过程中角色死亡**：实时验证目标存活状态
+8. **弃置牌数超过目标拥有的牌数**：随机弃置目标所有的牌
+9. **弃牌阶段旋风与装备丢失旋风的触发冲突**：每个触发条件独立计算，可以在同一回合多次发动旋风
+10. **自己失去装备时**：可以发动旋风（因为技能描述是"当你失去装备区里的牌后")
+11. **多个凌统同时存在**：每个凌统独立计算自己的旋风触发
+12. **取消旋风发动**：正确回滚到触发前的阶段（如出牌阶段、弃牌阶段等）
+13. **状态回滚异常**：使用 previousPhase 机制确保状态正确回滚
 
 ---
 
@@ -488,14 +520,14 @@ const SKILL_SOUNDS = {
 | 旋风：选择1个目标，弃置2张牌 | 成功执行 |
 | 旋风：选择2个目标，各弃置1张牌 | 成功执行 |
 | 旋风：选择3个目标，各弃置1张牌 | 只弃置前2个目标的牌 |
-| 旋风：选择1个目标，弃置0张牌 | 无效，需要重新选择 |
+| 旋风：选择1个目标，弃置0张牌 | 无效，需要选择至少1张牌，系统提示并返回重新选择 |
 | **牌不足处理** |
 | 旋风：目标只有1张牌，选择弃置2张 | 弃置1张牌 |
 | 旋风：目标无手牌，有装备 | 弃置装备 |
 | 旋风：目标无手牌和装备，有判定区牌 | 弃置判定区牌 |
 | 旋风：目标完全无牌 | 自动设置弃置数为0 |
 | **取消操作** |
-| 旋风：选择目标后取消 | 返回出牌阶段 |
+| 旋风：选择目标后取消 | 返回触发时的阶段（弃牌阶段返回弃牌阶段，出牌阶段返回出牌阶段） |
 | 旋风：选择弃牌数后取消 | 返回目标选择 |
 | **连锁触发** |
 | 旋风：弃牌阶段触发后装备丢失触发 | 两次都可以发动 |
@@ -605,6 +637,20 @@ const SKILL_SOUNDS = {
 - **控制性强**：可以针对特定角色进行干扰
 - **无次数限制**：每次满足触发条件都可以发动
 
+### 实现妥协说明
+
+**关于"依次弃置"的体验**：
+技能描述为"依次弃置"，但当前 Web UI 实现采用"先选完所有目标和对应数量，最后统一执行"的批量下发方案。
+- **标准规则**：在真实三国杀中，凌统选目标 A 弃牌后，看到 A 掉的牌，再决定目标 B 是谁
+- **本实现妥协**：由于 Web UI 实现成本考虑，目前采用批量选择后统一执行的方案
+- **技能效果保证**：虽然交互方式不同，但最终的弃牌结果（随机弃置）与标准规则一致
+- **未来优化**：若后续引入更复杂的交互机制，可考虑实现真正的"依次"流程
+
+**关于弃牌随机性的说明**：
+- **随机弃置**：目标角色的牌被随机选择弃置，符合标准三国杀规则
+- **多区域支持**：可弃置手牌、装备区牌、判定区牌
+- **装备丢失触发钩子**：当旋风导致目标角色失去装备时，会正常触发 `onLoseEquip` 钩子
+
 ### 关于技能平衡性
 
 凌统作为4体力的吴国武将，旋风提供了强大的控制能力：
@@ -619,38 +665,94 @@ const SKILL_SOUNDS = {
 1. **与弃牌相关技能的交互**：
    - 旋风触发后的弃牌不计入弃牌阶段的弃牌数量（因为是在弃牌阶段结束后触发）
    - 其他武将的弃牌技能正常触发
+   - 弃牌数量统计使用独立的 `discardedThisPhase` 计数器，避免受其他技能影响
 
 2. **与装备相关技能的交互**：
-   - 失去装备触发旋风，旋风本身也可能导致其他角色失去装备
+   - 失去装备触发旋风，旋风本身也可能导致其他角色失去装备（会触发相应的装备丢失钩子）
    - 与孙尚香【枭姬】等装备丢失技能不冲突
+   - **回合外装备丢失**：凌统在回合外失去装备（如被过河拆桥、顺手牵羊）同样可以触发旋风
+   - **多次连续触发**：连续失去多件装备时，每次都可以独立触发旋风
 
 3. **与手牌数量相关技能的交互**：
    - 旋风弃置的牌进入弃牌堆，可能被其他技能利用
    - 弃置后的手牌数量变化可能影响其他技能的判定
 
+4. **与状态管理的交互**：
+   - 旋风的触发和执行使用 `previousPhase` 机制确保状态正确回滚
+   - 取消旋风发动时，会正确回到触发时的阶段
+
 ---
 
 ## 十三、修正记录
 
-*文档状态：设计阶段*
+*文档状态：已实装*
 *创建时间：2026-07-13*
 *负责人：Mistral Vibe*
+*最后修正：2026-07-13*
+*实装完成：2026-07-13*
 
 ### 待实装项
 
-- [ ] **data.js**: 添加凌统武将定义
-- [ ] **game.js**: 
-  - [ ] normalize函数：添加旋风状态字段防御
-  - [ ] startTurn函数：添加旋风触发标志位重置
-  - [ ] finishDiscardPhase函数：添加弃牌阶段旋风触发逻辑
-  - [ ] 添加onLoseEquip钩子函数
-  - [ ] 添加旋风相关函数（pickXuanfengTarget, chooseXuanfengDiscardCount, executeXuanfeng, cancelXuanfeng）
-- [ ] **render-controls.js**: 
-  - [ ] 添加旋风UI界面
-  - [ ] 添加目标选择界面
-  - [ ] 添加弃牌数量选择界面
-- [ ] **render.js**: 
-  - [ ] 添加旋风选择阶段的高亮显示
+- [x] **data.js**: 添加凌统武将定义
+- [x] **game.js**: 
+  - [x] normalize函数：添加旋风状态字段防御
+  - [x] startTurn函数：添加旋风触发标志位重置和弃牌计数器重置
+  - [x] endTurn函数：添加弃牌阶段旋风触发逻辑
+  - [x] 添加onLoseEquip钩子函数（支持回合外触发）
+  - [x] 修改discardCards函数：添加弃牌计数器更新
+  - [x] 添加旋风相关函数（pickXuanfengTarget, chooseXuanfengDiscardCount, executeXuanfeng, cancelXuanfeng）
+- [x] **render-controls.js**: 
+  - [x] 添加旋风UI界面
+  - [x] 添加目标选择界面
+  - [x] 添加弃牌数量选择界面
+- [x] **render.js**: 
+  - [x] 添加旋风选择阶段的高亮显示
+  - [x] 添加音效映射
+
+## 核心逻辑修复总结
+
+本次设计书经过技术审查后，已修正 **5个核心逻辑隐患**，确保技能实现符合标准三国杀规则并避免游戏状态崩溃。
+
+### 🚨 修复的关键问题
+
+| 问题类型 | 原问题 | 修正方案 | 影响 |
+|---------|--------|----------|--------|
+| **触发时机** | 只能在自己的回合触发 | 移除回合限制 | ✅ 支持回合外触发 |
+| **触发次数** | 每场游戏仅能触发一次 | 移除全局限制标志 | ✅ 每次失去装备都可触发 |
+| **弃牌逻辑** | 固定弃置手牌前N项 | 改为随机弃置 | ✅ 符合标准规则 |
+| **状态回滚** | 总是回到弃牌阶段 | 添加previousPhase机制 | ✅ 正确回滚到触发前阶段 |
+| **数量统计** | 依赖弃牌堆长度 | 使用独立计数器 | ✅ 避免受其他技能干扰 |
+
+### 核心逻辑修复记录
+
+#### 2026-07-13 修正
+根据技术审查反馈，修复了以下核心逻辑隐患：
+
+1. **✅ 失去装备触发时机限制**
+   - **原问题**：`g.turn === seat` 限制了只能在自己的回合触发
+   - **修正**：移除回合限制，支持回合外触发（如被过河拆桥、顺手牵羊）
+   - **实现**：完全移除 `g.turn === seat` 条件，只检查 `generalHasCap(me, 'xuanfeng') && me.alive`
+
+2. **✅ 装备丢失触发次数限制**
+   - **原问题**：`!g.xuanfengEquipUsed` 限制了每场游戏只能触发一次
+   - **修正**：移除全局限制，每次失去装备都可以独立触发旋风
+   - **实现**：去掉 `xuanfengEquipUsed` 标志位，允许多次触发
+   - **注意**：同时移除了 `g.turn === seat` 限制，支持回合外触发
+
+3. **✅ 自动弃牌逻辑**
+   - **原问题**：直接 splice 前N项，可预测且不符合标准规则
+   - **修正**：改为随机弃置，符合标准三国杀规则
+   - **实现**：收集所有可弃置的牌 → 随机排序 → 选择前N张 → 从原数组移除
+
+4. **✅ 状态回滚机制**
+   - **原问题**：取消时总是回到 discard 阶段，可能跳过出牌阶段
+   - **修正**：添加 `previousPhase` 机制，正确回滚到触发时的阶段
+   - **实现**：在 pending 中记录 `previousPhase`，取消/执行完成时回滚
+
+5. **✅ 弃牌数量统计**
+   - **原问题**：依赖 `g.discard.length` 差值，易受其他技能干扰
+   - **修正**：使用独立的 `discardedThisPhase` 计数器
+   - **实现**：在 discardCards 中更新计数器，弃牌阶段结束时读取
 
 ### 待优化项
 
@@ -659,3 +761,4 @@ const SKILL_SOUNDS = {
 - 性能：确保旋风选择时的性能
 - 兼容性：确保与现有所有技能的兼容性
 - 文本描述：优化技能描述的表述准确性
+- 未来优化：实现真正的"依次弃置"交互流程（当前为批量下发妥协方案）

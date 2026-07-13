@@ -61,6 +61,8 @@ function normalize(g){
   if(typeof g.luoyiActive!=='boolean') g.luoyiActive=false;
   // 鲁肃【缔盟】:回合内使用标记
   if(typeof g.dimengUsed!=='boolean') g.dimengUsed=false;
+  // 法正【眩惑】:回合内使用标记
+  if(typeof g.huanhuoUsed!=='boolean') g.huanhuoUsed=false;
   // 典韦【强袭】:回合内使用标记
   if(typeof g.qiangxiUsed!=='boolean') g.qiangxiUsed=false;
   // 典韦【强袭】目标选择阶段:pending 应包含 type、seat 等字段
@@ -90,8 +92,66 @@ function normalize(g){
       g.phase = 'play';
     }
   }
-  // 贾诩【乱武】:游戏内使用标记（限定技，全局只能使用一次）
+  // 辅诩【乱武】:游戏内使用标记（限定技，全局只能使用一次）
   if(typeof g.luanwuUsed!=='boolean') g.luanwuUsed=false;
+
+  // 陈宫【明策】:回合内使用标记
+  if(typeof g.mingceUsed!=='boolean') g.mingceUsed=false;
+
+  // 陈宫【明策】:选择阶段
+  // pending 应包含 type、sourceSeat（陈宫座位）、targetSeat（接收牌的角色）、target2Seat（被攻击的目标，可选）
+  // 注意：明策结算必须完整进行，即使陈宫死亡，也继续结算
+  if(g.pending && g.pending.type==='mingcePickCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
+       !Array.isArray(d.cardToGive) || d.cardToGive.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 陈宫【明策】:选择接收牌的目标阶段
+  if(g.pending && g.pending.type==='mingcePickTarget'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
+       typeof d.cardName !== 'string' || d.cardName === ''){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 陈宫【明策】:第二个目标选择阶段
+  if(g.pending && g.pending.type==='mingcePickTarget2'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
+       typeof d.cardName !== 'string' || d.cardName === ''){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 陈宫【明策】:接收牌的角色选择阶段
+  // 注意：此阶段不检查sourceSeat（陈宫）是否存活，因为明策必须结算完毕
+  if(g.pending && g.pending.type==='mingceChoice'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       (d.target2Seat!==null && (typeof d.target2Seat!=='number' || !g.players[d.target2Seat]))||
+       typeof d.cardName !== 'string' || d.cardName === ''){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 陈宫【智迟】:免疫状态标记
+  // 记录智迟的免疫状态：{ seat: 陈宫座位, turn: 当前回合的角色座位 }
+  // 免疫状态持续至该回合结束
+  if(typeof g.zhichiImmunity!=='object' || g.zhichiImmunity===null) g.zhichiImmunity=null;
 
   // 辅诩【乱武】:乱武选择阶段
   if(g.pending && g.pending.type==='luanwuChoose'){
@@ -679,6 +739,15 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 曹仁【据守】:选择阶段
+  if(g.pending && g.pending.type==='jushouChoose'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       d.seat !== mySeat){
+      g.pending = null;
+      g.phase = 'end';
+    }
+  }
   // 蔡文姬【悲歌】:伤害后选择是否发动
   if(g.pending && g.pending.type==='beigeChoose'){
     const d = g.pending;
@@ -752,6 +821,177 @@ function normalize(g){
       g.players[i].faceup = true; // 默认正面朝上
     }
   }
+  // 凌统【旋风】:旋风选择阶段
+  if(g.pending && g.pending.type==='xuanfengPick'){
+    const d = g.pending;
+    if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
+       d.from !== mySeat ||
+       !Array.isArray(d.targets) ||
+       !Array.isArray(d.discardedCounts) ||
+       d.discardedCounts.length !== d.targets.length ||
+       d.discardedCounts.some(c => typeof c !== 'number' || c < 0) ||
+       typeof d.previousPhase !== 'string'){
+      g.pending = null;
+      g.phase = d.previousPhase || (g.phase === 'xuanfengPick' ? 'discard' : g.phase);
+    }
+  }
+  // 凌统【旋风】:每回合弃牌阶段是否已触发过旋风
+  if(typeof g.xuanfengDiscardUsed !== 'boolean') g.xuanfengDiscardUsed = false;
+  // 凌统【旋风】:本回合弃牌阶段实际弃置的牌数（用于准确计算，避免依赖g.discard.length）
+  if(typeof g.discardedThisPhase !== 'number') g.discardedThisPhase = 0;
+
+  // 丁奉【奋迅】:为每个玩家初始化专属状态（避免多丁奉冲突）
+  // 状态绑定到玩家对象而非全局对象
+  for (let i = 0; i < g.players.length; i++) {
+    const p = g.players[i];
+    if (p) {
+      if(typeof p.fenxunUsed !== 'boolean') p.fenxunUsed = false;
+      if(typeof p.fenxunTarget !== 'number') p.fenxunTarget = null;
+    }
+  }
+
+  // 丁奉【短兵】:使用杀时的额外目标选择阶段
+  if(g.pending && g.pending.type==='duanbingChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.baseTarget!=='number' || !g.players[d.baseTarget] || !g.players[d.baseTarget].alive ||
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0 ||
+       d.sourceSeat !== mySeat){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【恩怨】:伤害后选择阶段
+  if(g.pending && g.pending.type==='enyuanChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【恩怨】:选择交♥手牌或失去体力阶段
+  if(g.pending && g.pending.type==='enyuanChooseOption'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
+       !Array.isArray(d.heartCards)){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【恩怨】:选择要交的♥手牌阶段
+  if(g.pending && g.pending.type==='enyuanGiveCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
+       !Array.isArray(d.heartCards) || d.heartCards.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【眩惑】:选择目标阶段
+  if(g.pending && g.pending.type==='huanhuoPick'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.heartCards) || d.heartCards.length===0 ||
+       !Array.isArray(d.candidates) || d.candidates.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【眩惑】:选择♥手牌阶段
+  if(g.pending && g.pending.type==='huanhuoPickCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.heartCards) || d.heartCards.length===0 ||
+       !Array.isArray(d.candidates) || d.candidates.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【眩惑】:选择要获得的牌阶段
+  if(g.pending && g.pending.type==='huanhuoPickGotCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.targetHand) || d.targetHand.length===0 ||
+       !Array.isArray(d.candidates) || d.candidates.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 法正【眩惑】:选择第二个目标阶段
+  if(g.pending && g.pending.type==='huanhuoPickSecond'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.transferCard!=='object' || !d.transferCard ||
+       !Array.isArray(d.candidates) || d.candidates.length===0){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 丁奉【奋迅】:弃牌选择阶段
+  if(g.pending && g.pending.type==='fenxunDiscard'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       d.seat !== mySeat){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 丁奉【奋迅】:目标选择阶段
+  if(g.pending && g.pending.type==='fenxunTarget'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0 ||
+       d.seat !== mySeat){
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+
+  // 曹冲【称象】: 询问是否发动阶段
+  if(g.pending && g.pending.type==='chengxiangAsk'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.damageInfo!=='object' || d.damageInfo === null){
+      g.pending = null;
+    }
+  }
+
+  // 曹冲【称象】: 选择牌阶段
+  if(g.pending && g.pending.type==='chengxiangChoose'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.revealedCards) || d.revealedCards.length === 0 ||
+       !Array.isArray(d.selectable) || !Number.isInteger(d.sumLimit) || d.sumLimit <= 0){
+      g.pending = null;
+    }
+  }
+
+  // 曹冲【仁心】: 选择装备牌阶段
+  if(g.pending && g.pending.type==='renxinChoose'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.target!=='number' || !g.players[d.target] || !g.players[d.target].alive ||
+       g.players[d.target].hp > 1 ||
+       !Array.isArray(d.equipIndices) || d.equipIndices.length === 0 ||
+       typeof d.originalDamageInfo!=='object'){
+      g.pending = null;
+    }
+  }
+
   return g;
 }
 // logEvent: 追加一条结构化日志事件。ev = {text, kind?, actor?, targets?}:
@@ -1790,6 +2030,8 @@ const CARD_PLAYS = {
     },
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【杀】的目标——距离校验之外额外叠加的
       // 一层限制,和距离一样都是"canTarget"这个 seam 的用途(见架构约定:只有杀挂了canTarget)。
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
@@ -1825,6 +2067,38 @@ const CARD_PLAYS = {
         g.shaUsed=true; // 本回合出杀次数限制:这里(当前回合玩家在自己出牌阶段出杀)才该计入
       }
       triggerJiangOnTarget(g, mySeat, targetSeat, 'sha', isRed(card));
+      
+      // 丁奉【短兵】:检查是否有短兵技能，并筛选距离为1的额外目标
+      if (generalHasCap(me, 'duanbing') && g.phase === 'play' && g.turn === mySeat) {
+        // 筛选距离为1的其他角色（排除自己和当前目标）
+        const aliveSeats = [];
+        for (let i = 0; i < g.players.length; i++) {
+          // 必须同时排除自己和基础目标，避免重复选择
+          if (g.players[i] && g.players[i].alive && i !== mySeat && i !== targetSeat) {
+            const dist = distance(g, mySeat, i);
+            if (dist === 1) {
+              aliveSeats.push(i);
+            }
+          }
+        }
+        
+        if (aliveSeats.length > 0) {
+          // 存储原始目标和卡牌信息，等待选择额外目标
+          g.pending = {
+            type: 'duanbingChoose',
+            sourceSeat: mySeat,
+            baseTarget: targetSeat,
+            card: card,
+            availableTargets: aliveSeats
+          };
+          g.phase = 'duanbingChoose';
+          g.log = pushLog(g.log, `${me.name} 可以发动【短兵】,多选择一名距离为1的角色为目标`);
+          markSkillSound(g, '短兵');
+          return;
+        }
+      }
+      
+      // 正常结算杀
       resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, undefined);
     }
   },
@@ -1836,6 +2110,9 @@ const CARD_PLAYS = {
       g.log=pushLog(g.log, me.name+' 使用【桃】回复1点体力'); 
       const seat = g.players.findIndex(p => p === me);
       if(seat !== -1) removeBuquCard(g, seat);
+      // 法正【恩怨】：当其他角色令你回复1点体力后，其摸一张牌
+      // 这里me是使用桃的角色，自己给自己回复体力，不触发恩怨
+      // 恩怨仅在其他角色令法正回复体力时触发
     }
   },
   '决斗': {
@@ -1846,6 +2123,8 @@ const CARD_PLAYS = {
     // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
       // 帷幕检查：如果目标是贾诩且牌是黑色锦囊，不能成为目标
       if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
@@ -1894,6 +2173,8 @@ const CARD_PLAYS = {
       // 所以这个canTarget可能不会被调用，但为了安全起见还是添加帷幕检查
       const target = g.players[targetSeat];
       if(!target || !target.alive) return false;
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
       if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
       return true;
@@ -1916,6 +2197,8 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
       if(!target || (target.hand||[]).length===0) return false;
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
       if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
       return true;
@@ -1932,6 +2215,8 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=>{
       const target = g.players[targetSeat];
       if(!target || !target.alive) return false;
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
       if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
       return true;
@@ -1952,6 +2237,8 @@ const CARD_PLAYS = {
       const target = g.players[targetSeat];
       if(!target || !target.alive) return false;
       if(distance(g, mySeat, targetSeat) > 1) return false;
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       // 陆逊【谦逊】:不能成为顺手牵羊的目标
       if(hasCap(target,'qianxun')) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
@@ -1969,6 +2256,8 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=>{
       const target = g.players[targetSeat];
       if(!target || !target.alive) return false;
+      // 陈宫【智迟】：检查免疫状态
+      if(isZhichiImmune(g, targetSeat, card)) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
       if(target && hasCap(target,'weimu') && isBlackTactics(card)) return false;
       return true;
@@ -2063,6 +2352,20 @@ function distance(g, from, to){
   const yicongToModifier = (hasCap(g.players[to],'yicong') && 
                             g.players[to] && g.players[to].alive && 
                             (g.players[to].hp <= 2)) ? 1 : 0;
+  
+  // 丁奉【奋迅】:使用玩家专属状态
+  // 奋迅效果：当前是丁奉回合，且目标是对的
+  const pFrom = g.players[from];
+  const pTo = g.players[to];
+  if (g.turn === from && pFrom && pFrom.alive && pFrom.fenxunTarget === to && hasCap(pFrom, 'fenxun')) {
+    return 1;
+  }
+  
+  // 奋迅效果：其他角色计算与丁奉的距离（互相视为1）
+  if (g.turn === to && pTo && pTo.alive && pTo.fenxunTarget === from && hasCap(pTo, 'fenxun')) {
+    return 1;
+  }
+  
   const d = base + equipDist(g.players[to],'plus1') + fromMinus1 + yicongFromModifier + yicongToModifier;
   return Math.max(1, d);
 }
@@ -2551,6 +2854,36 @@ function qiaobianDeclare(cardIdx, phaseChoice){
     return g;
   });
 }
+
+// heal: 通用体力回复函数，支持恩怨等触发
+function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
+  tx(g => {
+    const target = g.players[targetSeat];
+    if(!target || !target.alive) return g;
+    
+    const source = sourceSeat !== null && sourceSeat !== undefined ? g.players[sourceSeat] : null;
+    const originalHp = target.hp || 0;
+    target.hp = Math.min(target.maxHp || target.hp || 0, (target.hp || 0) + amount);
+    const actualRecovered = (target.hp || 0) - originalHp;
+    
+    if(actualRecovered > 0) {
+      const natureText = reason ? '(' + reason + ')' : '';
+      g.log = pushLog(g.log, target.name + ' 回复' + actualRecovered + '点体力' + natureText + '（体力' + target.hp + '）');
+      
+      // 法正【恩怨】：当其他角色令你回复1点体力后，其摸一张牌
+      // 每回复1点体力触发一次
+      if (source && sourceSeat !== targetSeat && generalHasCap(target, 'enyuan')) {
+        for (let i = 0; i < actualRecovered; i++) {
+          ensureDeck(g);
+          drawN(g, sourceSeat, 1);
+          g.log = pushLog(g.log, target.name + ' 回复1点体力,' + source.name + ' 发动【恩怨】效果,摸一张牌');
+        }
+      }
+    }
+    return g;
+  });
+}
+
 function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, skipTianxiang, skipZhengyi, skipChain){
   const p=g.players[seat];
   if(!p) return false;
@@ -2577,9 +2910,65 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
   }
 
+  // 曹冲【仁心】:在伤害扣减前检查是否可以发动
+  if(amount > 0 && p && p.alive && p.hp === 1 && amount > 0) {
+    for (let i = 0; i < g.players.length; i++) {
+      const candidate = g.players[i];
+      if (i !== seat && candidate && candidate.alive && generalHasCap(candidate, 'renxin')) {
+        const equipIndices = candidate.equip ?
+          candidate.equip.map((e, idx) => e ? idx : -1).filter(idx => idx !== -1) : [];
+        
+        if (equipIndices.length > 0) {
+          g.pending = {
+            type: 'renxinChoose',
+            seat: i,
+            target: seat,
+            damage: amount,
+            sourceSeat: sourceSeat,
+            equipIndices: equipIndices,
+            originalDamageInfo: { amount, sourceSeat, reason, srcType, sourceCard }
+          };
+          g.phase = 'renxinChoose';
+          g.log = pushLog(g.log, candidate.name + ' 可以发动【仁心】,保护 ' + p.name);
+          return true; // 挂起，等待选择
+        }
+      }
+    }
+  }
+
   p.hp = Math.max(0, p.hp - amount);
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
+
+  // 法正【恩怨】：当法正受到其他角色对其造成的伤害后触发
+  if (amount > 0 && p && p.alive && generalHasCap(p, 'enyuan') && 
+      typeof sourceSeat === 'number' && sourceSeat !== seat) {
+    const damager = g.players[sourceSeat];
+    if(damager && damager.alive) {
+      // 进入恩怨选择阶段
+      g.pending = {
+        type: 'enyuanChoose',
+        sourceSeat: seat,    // 法正
+        damagerSeat: sourceSeat
+      };
+      g.phase = 'enyuanChoose';
+      g.log = pushLog(g.log, damager.name + ' 对 ' + p.name + ' 造成了伤害,' + damager.name + ' 需要选择【恩怨】效果');
+      markSkillSound(g, '恩怨');
+      return true; // 挂起，等待选择
+    }
+  }
+
+  // 陈宫【智迟】：当陈宫于回合外受到伤害后触发
+  if (amount > 0 && p && p.alive && generalHasCap(p, 'zhichi') && g.turn !== seat) {
+    // 触发条件：唯一核心判定条件是"回合外"。只要在陈宫的回合外受到伤害，都会触发智迟
+    // 无论伤害来源是别人、没有来源（如闪电）、还是自己对自己造成伤害
+    g.zhichiImmunity = {
+      seat: seat,
+      turn: g.turn  // 记录当前回合的角色
+    };
+    g.log = pushLog(g.log, p.name + ' 发动【智迟】,【杀】和普通锦囊牌对其无效直至本回合结束');
+    markSkillSound(g, '智迟');
+  }
 
   // >>> 华雄【耀武】检测（红色【杀】伤害时触发伤害来源选择）
   if (amount > 0 && Number.isInteger(sourceSeat) && sourceSeat !== seat && sourceCard) {
@@ -2628,6 +3017,17 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(sourceCard!==undefined) ctx.sourceCard=sourceCard;
     triggerHook(g, seat, 'onDamaged', ctx);
     if(g.pending !== pendingBefore) return true; // 钩子挂起了新 pending,调用方应立即 return,和濒死同一个约定
+    
+    // 曹冲【称象】:检查受伤者是否可以发动称象
+    if(amount > 0 && p && p.alive && generalHasCap(p, 'chengxiang')) {
+      g.pending = {
+        type: 'chengxiangAsk',
+        seat: seat,
+        damageInfo: { amount, sourceSeat, reason, srcType, sourceCard }
+      };
+      g.log = pushLog(g.log, p.name + ' 受到伤害，可发动【称象】');
+      return true; // 挂起，等待玩家选择
+    }
     
     // 蔡文姬【悲歌】:检查是否可以触发悲歌（仅对【杀】伤害生效）
     if (amount > 0 && reason && reason.includes('【杀】') && g.players[seat] && g.players[seat].alive) {
@@ -2771,6 +3171,13 @@ function respondDying(useTao, jijiuChoice){
       g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' 打出【'+card.name+'】'+asTao+',回复1点体力（体力'+dyingP.hp+'）');
       // 周泰【不屈】:回复体力时移除一张不屈牌
       removeBuquCard(g, g.pending.seat);
+      // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
+      if(generalHasCap(dyingP, 'enyuan') && mySeat !== g.pending.seat) {
+        // me 是使用桃的角色，dyingP 是法正
+        ensureDeck(g);
+        drawN(g, mySeat, 1);
+        g.log = pushLog(g.log, dyingP.name + ' 回复1点体力,' + me.name + ' 发动【恩怨】效果,摸一张牌');
+      }
       if(jijiuChoice) markSkillSound(g, '急救');
       markCardSound(g, '桃', mySeat, card, g.pending.seat);
       if(dyingP.hp>0){ finishDying(g, false); }
@@ -3377,6 +3784,7 @@ function resolveTrick(g, info){
   }
   if(info.trick==='桃园结义'){
     // 对所有存活角色生效(含使用者自己);已满血的人跳过,不溢出、不报错。
+    const source = g.players[info.from];
     g.players.forEach(p=>{ if(p && p.alive && p.hp<p.maxHp) p.hp++; });
     // 为每个存活且实际回复体力的玩家移除不屈牌
     // 只需要为周泰自己处理，因为只有周泰有不屈牌
@@ -3385,6 +3793,18 @@ function resolveTrick(g, info){
         removeBuquCard(g, seat);
       }
     });
+    // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
+    // 找到法正
+    const fazheng = g.players.find(p => p && p.alive && generalHasCap(p, 'enyuan'));
+    if(fazheng && generalHasCap(fazheng, 'enyuan')) {
+      const fazhengSeat = g.players.findIndex(p => p === fazheng);
+      // 如果法正回复了体力（即法正体力<maxHp），且使用者不是法正自己
+      if(fazhengSeat !== info.from && fazheng.hp > 0 && fazheng.hp <= fazheng.maxHp) {
+        ensureDeck(g);
+        drawN(g, info.from, 1);
+        g.log = pushLog(g.log, fazheng.name + ' 回复1点体力,' + source.name + ' 发动【恩怨】效果,摸一张牌');
+      }
+    }
     g.pending=null; g.phase='play';
     g.log=pushLog(g.log, g.players[info.from].name+' 【桃园结义】生效,所有存活角色回复1点体力');
     return;
@@ -3805,6 +4225,8 @@ function discardCards(cardIdxList){
     const sorted = [...uniqueIdx].sort((a,b)=>b-a);
     const discarded = sorted.map(i=>me.hand.splice(i,1)[0]);
     g.discard.push(...discarded);
+    // 凌统【旋风】:更新弃牌计数器
+    g.discardedThisPhase = (g.discardedThisPhase || 0) + discarded.length;
     // 陆逊【连营】:检查是否触发连营（一次性检查整个操作后的手牌数）
     if(discarded.length > 0) maybeStartLianying(g, mySeat, discarded.length);
     // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
@@ -3825,9 +4247,48 @@ function endTurn(){
     if(maybeStartLiRangRecover(g, mySeat)) return g;
     // 贾诩完杀：回合结束时清理状态
     g.wanshaActive = false; g.wanshaDyingSeat = null;
+    // 陈宫【智迟】：在回合结束时清理免疫状态
+    if(g.zhichiImmunity && g.zhichiImmunity.turn === g.turn){
+      g.zhichiImmunity = null;
+    }
     // 乐进【骁果】只在"正常走完弃牌阶段、即将结束回合"这里触发,不影响其它切回合路径
     // (决斗/濒死里回合玩家中途阵亡换人——那个人根本没走到结束阶段,规则本身就不该触发骁果)。
     advanceXiaoguo(g, mySeat, mySeat);
+    // 凌统【旋风】：弃牌阶段弃置过至少两张牌时触发
+    if (generalHasCap(me, 'xuanfeng') && me.alive && !g.xuanfengDiscardUsed) {
+      // 使用准确的弃牌计数器（避免依赖g.discard.length导致的错误）
+      const discardCount = g.discardedThisPhase || 0;
+      
+      if (discardCount >= 2) {
+        // 进入旋风选择阶段，记录触发前的phase用于状态回滚
+        g.pending = {
+          type: 'xuanfengPick',
+          from: mySeat,
+          trigger: 'discard',
+          targets: [],
+          discardedCounts: [],
+          maxRemaining: 2,
+          stage: 'selecting',
+          previousPhase: g.phase
+        };
+        g.xuanfengDiscardUsed = true;
+        g.phase = 'xuanfengPick';
+        g.log = pushLog(g.log, `${me.name} 可以发动【旋风】,弃置其他角色的共计至多两张牌`);
+        return g;
+      }
+    }
+    // 曹仁【据守】：结束阶段可选触发（仅未翻面时可发动）
+    if (generalHasCap(me, 'jushou') && me.alive && me.faceup !== false) {
+      // 进入据守选择阶段
+      g.pending = {
+        type: 'jushouChoose',
+        seat: mySeat
+      };
+      g.phase = 'jushouChoose';
+      g.log = pushLog(g.log, `${me.name} 可以发动【据守】,是否摸三张牌并翻面?`);
+      return g;
+    }
+    finishTurn(g, mySeat);
     return g;
   });
 }
@@ -3841,6 +4302,179 @@ function finishTurn(g, endingSeat){
     startTurn(g, nextAlive(g, endingSeat));
   }
 }
+
+// 凌统【旋风】相关函数
+// 选择旋风目标
+function pickXuanfengTarget(seat) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'xuanfengPick' || pending.from !== mySeat) return g;
+    
+    const me = g.players[mySeat];
+    const target = g.players[seat];
+    
+    // 不能选择自己
+    if (seat === mySeat) {
+      g.log = pushLog(g.log, `${me.name} 不能选择自己作为【旋风】目标`);
+      return g;
+    }
+    
+    // 目标必须存活
+    if (!target || !target.alive) {
+      g.log = pushLog(g.log, `${me.name} 选择的目标 ${target ? target.name : '未知角色'} 已死亡`);
+      return g;
+    }
+    
+    // 添加目标
+    if (!pending.targets.includes(seat)) {
+      pending.targets.push(seat);
+      pending.discardedCounts.push(0);
+    }
+    
+    // 进入选择弃牌数量阶段
+    pending.stage = 'chooseCount';
+    pending.currentTargetIndex = pending.targets.indexOf(seat);
+    
+    g.log = pushLog(g.log, `${me.name} 选择 ${target.name} 作为【旋风】目标,请选择弃置牌数`);
+    
+    return g;
+  });
+}
+
+// 选择弃置的牌数
+function chooseXuanfengDiscardCount(count) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'xuanfengPick' || pending.from !== mySeat) return g;
+    
+    if (pending.stage !== 'chooseCount') return g;
+    
+    const me = g.players[mySeat];
+    const targetSeat = pending.targets[pending.currentTargetIndex];
+    const target = g.players[targetSeat];
+    
+    // 检查数量是否合法
+    if (count < 0 || count > pending.maxRemaining) {
+      g.log = pushLog(g.log, `${me.name} 选择的弃牌数无效`);
+      return g;
+    }
+    
+    // 更新弃牌数量
+    pending.discardedCounts[pending.currentTargetIndex] = count;
+    pending.maxRemaining -= count;
+    
+    // 如果还有剩余可弃置牌数且还有其他目标可以选择
+    if (pending.maxRemaining > 0) {
+      // 回到目标选择阶段
+      pending.stage = 'selecting';
+      g.log = pushLog(g.log, `${me.name} 还可以弃置${pending.maxRemaining}张牌,请继续选择目标`);
+    } else {
+      // 开始执行旋风
+      executeXuanfeng(g);
+    }
+    
+    return g;
+  });
+}
+
+// 执行旋风效果
+function executeXuanfeng(g) {
+  const pending = g.pending;
+  if (!pending || pending.type !== 'xuanfengPick') return g;
+  
+  const me = g.players[pending.from];
+  const targets = pending.targets;
+  const counts = pending.discardedCounts;
+  
+  // 按照目标顺序依次弃置牌
+  for (let i = 0; i < targets.length; i++) {
+    const targetSeat = targets[i];
+    const target = g.players[targetSeat];
+    const discardCount = counts[i];
+    
+    if (!target || !target.alive || discardCount <= 0) continue;
+    
+    // 弃置目标角色的牌（随机弃置，符合标准规则）
+    const cardsToDiscard = [];
+    const hand = target.hand || [];
+    const equips = target.equips || {};
+    const delays = target.delays || [];
+    
+    // 收集所有可弃置的牌
+    const allDiscardable = [...hand];
+    // 添加装备区的牌
+    ['weapon', 'armor', 'plus1', 'minus1'].forEach(slot => {
+      if (equips[slot]) allDiscardable.push(equips[slot]);
+    });
+    // 添加判定区的牌
+    allDiscardable.push(...delays);
+    
+    // 随机选择要弃置的牌（最多 discardCount 张）
+    const shuffled = [...allDiscardable].sort(() => Math.random() - 0.5);
+    const toDiscard = Math.min(discardCount, shuffled.length);
+    const selectedCards = shuffled.slice(0, toDiscard);
+    
+    // 从原数组中移除被选中的牌
+    for (const card of selectedCards) {
+      // 从手牌中移除
+      const handIndex = hand.indexOf(card);
+      if (handIndex !== -1) {
+        hand.splice(handIndex, 1);
+        cardsToDiscard.push(card);
+        continue;
+      }
+      
+      // 从装备区中移除
+      let equipFound = false;
+      for (const slot of ['weapon', 'armor', 'plus1', 'minus1']) {
+        if (equips[slot] === card) {
+          equips[slot] = null;
+          cardsToDiscard.push(card);
+          triggerHook(g, targetSeat, 'onLoseEquip', { count: 1 });
+          equipFound = true;
+          break;
+        }
+      }
+      if (equipFound) continue;
+      
+      // 从判定区中移除
+      const delayIndex = delays.indexOf(card);
+      if (delayIndex !== -1) {
+        delays.splice(delayIndex, 1);
+        cardsToDiscard.push(card);
+      }
+    }
+    
+    // 将弃置的牌放入弃牌堆
+    g.discard.push(...cardsToDiscard);
+    
+    g.log = pushLog(g.log, `${me.name} 发动【旋风】,令 ${target.name} 随机弃置${cardsToDiscard.length}张牌`);
+  }
+  
+  // 清理pending状态
+  g.pending = null;
+  // 回滚到触发前的phase
+  g.phase = pending.previousPhase || (pending.trigger === 'discard' ? 'end' : g.phase);
+  
+  markSkillSound(g, '旋风');
+  
+  return g;
+}
+
+// 取消旋风发动
+function cancelXuanfeng() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'xuanfengPick' && g.pending.from === mySeat) {
+      const me = g.players[mySeat];
+      const previousPhase = g.pending.previousPhase || 'discard';
+      g.pending = null;
+      g.phase = previousPhase;
+      g.log = pushLog(g.log, `${me.name} 取消发动【旋风】`);
+    }
+    return g;
+  });
+}
+
 // advanceXiaoguo: (重新)找下一个有资格的候选人问;问完(或从一开始就没人有资格)则真正切换回合。
 // 每个候选人发动或不发动之后都会调这个函数继续找下一个,直到问完一圈——理论上支持多个乐进都发动。
 function advanceXiaoguo(g, endingSeat, current){
@@ -3871,14 +4505,20 @@ function startTurn(g, seat){
     return endTurn(g);
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0;
+  
+  // 丁奉【奋迅】:重置当前回合玩家的专属状态
+  const currentPlayer = g.players[seat];
+  if(currentPlayer) {
+    currentPlayer.fenxunUsed = false;
+    currentPlayer.fenxunTarget = null;
+  }
   // 贾诩完杀：回合开始时重置状态
   g.wanshaActive = false; g.wanshaDyingSeat = null;
   // 夏侯渊【神速】
   g.shensuUsed = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌
-  const p = g.players[seat];
   if(p && p.alive && p.general==='jiangwei' && (p.hand||[]).length===0 && !p.zhijiAwakened){
     p.zhijiAwakened = true;
     p.maxHp--; // 减1点体力上限
@@ -4230,6 +4870,47 @@ function isBlackTactics(card) {
   return isBlack && isTactics;
 }
 
+// 陈宫【智迟】:检查目标是否受到智迟免疫
+// 如果targetSeat受到智迟免疫，且card是【杀】或普通锦囊牌，则不能成为目标
+function isZhichiImmune(g, targetSeat, card) {
+  if (g.zhichiImmunity && g.zhichiImmunity.seat === targetSeat) {
+    // 当前免疫是否仍然有效（即当前回合是否为触发时的回合）
+    if (g.zhichiImmunity.turn === g.turn) {
+      // 检查是否为【杀】
+      const isSha = isShaName(card.name);
+      // 检查是否为普通锦囊牌（非延时）
+      const isNormalTactics = isNormalTacticsCard(card);
+      
+      if (isSha || isNormalTactics) {
+        return true; // 免疫生效，不能成为目标
+      }
+    }
+  }
+  return false; // 无免疫或免疫不适用
+}
+
+// 辅助函数：判断是否为普通锦囊牌（非延时）
+// 延时锦囊牌仅有：乐不思蜀、兵粮寸断、闪电
+// 五谷丰登是普通锦囊牌，不是延时锦囊
+function isNormalTacticsCard(card) {
+  if (!card || !card.name) return false;
+  
+  // 延时锦囊牌列表
+  const delayedTactics = ['乐不思蜀', '兵粮寸断', '闪电'];
+  
+  // 判断是否为锦囊牌
+  const tacticsCards = [
+    '过河拆桥', '顺手牵羊', '无中生有', '决斗', '借刀杀人',
+    '无懈可击', '五谷丰登', '桃园结义', '南蛮入侵', '万箭齐发',
+    '调虎离山', '兵粮寸断', '乐不思蜀', '火攻', '闪电'
+  ];
+  
+  const isTactics = tacticsCards.includes(card.name);
+  
+  // 如果是锦囊牌且不在延时列表中，则为普通锦囊牌
+  return isTactics && !delayedTactics.includes(card.name);
+}
+
 // ===================== 蔡文姬技能实现 =====================
 
 // 悲歌选择是否发动
@@ -4462,3 +5143,708 @@ function cancelBeige() {
   });
 }
 
+// 曹仁【据守】确认发动
+function confirmJushou() {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'jushouChoose' || pending.seat !== mySeat) return g;
+    
+    const me = g.players[mySeat];
+    if (!me || !me.alive) return g;
+    
+    // 执行据守效果：摸三张牌
+    drawN(g, mySeat, 3);
+    
+    // 翻面
+    me.faceup = false;
+    g.log = pushLog(g.log, `${me.name} 发动【据守】,摸了三张牌并翻面`);
+    markSkillSound(g, '据守');
+    
+    // 清理状态
+    g.pending = null;
+    finishTurn(g, mySeat);
+    
+    return g;
+  });
+}
+
+// 曹仁【据守】取消发动
+function cancelJushou() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'jushouChoose' && g.pending.seat === mySeat) {
+      const me = g.players[mySeat];
+      g.pending = null;
+      g.phase = 'end';
+      g.log = pushLog(g.log, `${me.name} 取消发动【据守】`);
+      finishTurn(g, mySeat);
+    }
+    return g;
+  });
+}
+
+
+
+// ===== 丁奉【短兵】和【奋迅】技能实现 =====
+
+// 丁奉【奋迅】:开始发动奋迅
+function startFenxun() {
+  tx(g => {
+    const me = g.players[mySeat];
+    if (!me || !me.alive) return g;
+    
+    if (!generalHasCap(me, "fenxun") || me.fenxunUsed) return g;
+    
+    const hand = me.hand || [];
+    if (hand.length === 0) {
+      g.log = pushLog(g.log, `${me.name} 手牌为空,无法发动【奋迅】`);
+      return g;
+    }
+    
+    // 进入弃牌选择阶段
+    g.pending = {
+      type: "fenxunDiscard",
+      seat: mySeat
+    };
+    g.phase = "fenxunDiscard";
+    g.log = pushLog(g.log, `${me.name} 发动【奋迅】,请选择要弃置的一张牌`);
+    markSkillSound(g, "奋迅");
+    
+    return g;
+  });
+}
+
+// 丁奉【奋迅】:选择弃置的牌
+function pickFenxunDiscard(cardIndex) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== "fenxunDiscard" || pending.seat !== mySeat) return g;
+    
+    const me = g.players[mySeat];
+    if (!me || !me.alive || !me.hand || cardIndex >= me.hand.length) return g;
+    
+    // 弃置选中的牌
+    const card = me.hand[cardIndex];
+    me.hand.splice(cardIndex, 1);
+    g.discard.push(card);
+    
+    // 进入目标选择阶段
+    const availableTargets = [];
+    for (let i = 0; i < g.players.length; i++) {
+      if (g.players[i] && g.players[i].alive && i !== mySeat) {
+        availableTargets.push(i);
+      }
+    }
+    
+    g.pending = {
+      type: "fenxunTarget",
+      seat: mySeat,
+      availableTargets: availableTargets
+    };
+    g.phase = "fenxunTarget";
+    g.log = pushLog(g.log, `${me.name} 弃置了【${card.name}】,请选择一名其他角色`);
+    
+    return g;
+  });
+}
+
+// 丁奉【奋迅】:选择目标角色
+function pickFenxunTarget(targetSeat) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== "fenxunTarget" || pending.seat !== mySeat) return g;
+    
+    if (!pending.availableTargets.includes(targetSeat)) return g;
+    
+    const me = g.players[mySeat];
+    const target = g.players[targetSeat];
+    
+    if (!me || !me.alive || !target || !target.alive) return g;
+    
+    // 设置玩家专属状态
+    me.fenxunTarget = targetSeat;
+    me.fenxunUsed = true;
+    
+    g.log = pushLog(g.log, `${me.name} 发动【奋迅】,本回合内与 ${target.name} 的距离视为1`);
+    markSkillSound(g, "奋迅");
+    
+    // 清理pending状态
+    g.pending = null;
+    g.phase = "play";
+    
+    return g;
+  });
+}
+
+// 丁奉【奋迅】:取消发动
+function cancelFenxun() {
+  tx(g => {
+    if (g.pending && (g.pending.type === "fenxunDiscard" || g.pending.type === "fenxunTarget") &&
+        g.pending.seat === mySeat) {
+      g.pending = null;
+      g.phase = "play";
+      g.log = pushLog(g.log, `${g.players[mySeat].name} 取消发动【奋迅】`);
+    }
+    return g;
+  });
+}
+
+
+// 丁奉【短兵】:选择额外目标
+function triggerDuanbing(extraTarget) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'duanbingChoose' || pending.sourceSeat !== mySeat) return g;
+    
+    if (!pending.availableTargets.includes(extraTarget)) return g;
+    
+    const me = g.players[mySeat];
+    const extra = g.players[extraTarget];
+    
+    if (!me || !me.alive || !extra || !extra.alive) return g;
+    
+    // 使用杀，目标为基础目标和额外目标
+    const baseTarget = pending.baseTarget;
+    const card = pending.card || {};
+    const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
+    
+    // 首先处理基础目标（会消耗kill次数）
+    resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, undefined);
+    
+    // 然后立即处理额外目标（skipShaLimit: true 避免重复计数）
+    // 由于resolveShaUse内部会检查shaUsed，但我们希望第二个目标不受限制
+    // 所以传递skipShaLimit: true
+    resolveShaUse(g, me, extraTarget, usedAs + '（短兵）', singleCardShaColor(card), card, {skipShaLimit: true});
+    
+    g.log = pushLog(g.log, `${me.name} 发动【短兵】,对 ${g.players[baseTarget].name} 和 ${extra.name} 使用【杀】`);
+    markSkillSound(g, '短兵');
+    
+    // 清理状态
+    g.pending = null;
+    g.phase = 'play';
+    
+    return g;
+  });
+}
+
+// 丁奉【短兵】:取消发动
+function cancelDuanbing() {
+  tx(g => {
+    if (g.pending && g.pending.type === 'duanbingChoose' && g.pending.sourceSeat === mySeat) {
+      const me = g.players[mySeat];
+      const baseTarget = g.pending.baseTarget;
+      const card = g.pending.card;
+      
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, `${me.name} 取消发动【短兵】,使用【杀】对 ${g.players[baseTarget].name} 生效`);
+      
+      // 直接结算单目标的杀
+      const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
+      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, undefined);
+    }
+    return g;
+  });
+}
+
+// ===================== 法正技能实现 =====================
+
+// 法正【恩怨】：处理选择触发
+function triggerEnyuan() {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'enyuanChoose') return g;
+    
+    const damager = g.players[pending.damagerSeat];
+    const source = g.players[pending.sourceSeat]; // 法正
+    
+    if (!damager || !damager.alive || !source || !source.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 检查damager是否有♥手牌
+    const heartCards = (damager.hand || []).filter(card => card.suit === '♥');
+    
+    if (heartCards.length > 0) {
+      // 进入选择阶段：交♥手牌或失去1点体力
+      g.pending = {
+        type: 'enyuanChooseOption',
+        sourceSeat: pending.sourceSeat,
+        damagerSeat: pending.damagerSeat,
+        heartCards: heartCards
+      };
+      g.phase = 'enyuanChooseOption';
+      g.log = pushLog(g.log, damager.name + ' 需要选择：交一张♥手牌给' + source.name + '，或失去1点体力');
+    } else {
+      // 没有♥手牌，只能选择失去1点体力
+      // 必须调用 dealDamage 而不是直接修改 hp，以确保触发濒死结算
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, damager.name + ' 没有♥手牌，发动【恩怨】效果');
+      dealDamage(g, pending.damagerSeat, 1, null, '恩怨', 'skill');
+    }
+    
+    return g;
+  });
+}
+
+// 法正【恩怨】：选择选项处理
+function chooseEnyuanOption(option) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'enyuanChooseOption') return g;
+    
+    const damager = g.players[pending.damagerSeat];
+    const source = g.players[pending.sourceSeat]; // 法正
+    
+    if (!damager || !damager.alive || !source || !source.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    if (option === 'giveCard') {
+      // 选择交一张♥手牌
+      g.pending = {
+        type: 'enyuanGiveCard',
+        sourceSeat: pending.sourceSeat,
+        damagerSeat: pending.damagerSeat,
+        heartCards: pending.heartCards
+      };
+      g.phase = 'enyuanGiveCard';
+      g.log = pushLog(g.log, damager.name + ' 选择交一张♥手牌给' + source.name);
+    } else if (option === 'loseHp') {
+      // 选择失去1点体力
+      // 必须调用 dealDamage 而不是直接修改 hp，以确保触发濒死结算
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, damager.name + ' 选择失去1点体力');
+      dealDamage(g, pending.damagerSeat, 1, null, '恩怨', 'skill');
+    }
+    
+    return g;
+  });
+}
+
+// 法正【恩怨】：选择要交的♥手牌处理
+function giveEnyuanCard(cardIndex) {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'enyuanGiveCard') return g;
+    
+    const damager = g.players[pending.damagerSeat];
+    const source = g.players[pending.sourceSeat]; // 法正
+    
+    if (!damager || !damager.alive || !source || !source.alive) {
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    if (cardIndex < 0 || cardIndex >= pending.heartCards.length) {
+      return g;
+    }
+    
+    // 获取要交给的牌
+    const card = pending.heartCards[cardIndex];
+    
+    // 从damager手牌中移除这张牌
+    const hand = damager.hand || [];
+    const idx = hand.findIndex(c => c.id === card.id);
+    if (idx !== -1) {
+      hand.splice(idx, 1);
+    }
+    
+    // 添加到source手牌
+    if (!source.hand) source.hand = [];
+    source.hand.push(card);
+    
+    g.log = pushLog(g.log, damager.name + ' 交给 ' + source.name + ' 一张♥手牌【' + card.name + '】');
+    g.pending = null;
+    g.phase = 'play';
+    
+    return g;
+  });
+}
+
+// 法正【眩惑】：启动眩惑
+function startHuanhuo() {
+  const mySeat = window.mySeat;
+  const g = window.g;
+  
+  // 获取当前玩家的♥手牌
+  const me = g.players[mySeat];
+  const heartCards = (me.hand || []).filter(card => card.suit === '♥');
+  
+  // 进入选择目标角色阶段
+  g.pending = { 
+    type: 'huanhuoPick', 
+    sourceSeat: mySeat,
+    heartCards: heartCards,
+    candidates: []
+  };
+  
+  // 计算可选目标（其他存活角色）
+  for (let i = 0; i < g.players.length; i++) {
+    if (i !== mySeat && g.players[i] && g.players[i].alive) {
+      g.pending.candidates.push(i);
+    }
+  }
+  
+  g.log = pushLog(g.log, me.name + ' 发动【眩惑】,选择目标角色…');
+  render();
+}
+
+// 法正【眩惑】：选择目标角色
+function pickHuanhuoTarget(seat) {
+  if (seat === window.mySeat) return;
+  
+  tx(g => {
+    if (g.pending.type !== 'huanhuoPick') return g;
+    
+    const me = g.players[window.mySeat];
+    const target = g.players[seat];
+    
+    if (!target || !target.alive) return g;
+    if (!g.pending.candidates.includes(seat)) return g;
+    
+    // 进入选择♥手牌阶段
+    g.pending = {
+      type: 'huanhuoPickCard',
+      sourceSeat: window.mySeat,
+      targetSeat: seat,
+      heartCards: g.pending.heartCards,
+      candidates: g.pending.heartCards.map((_, idx) => idx)
+    };
+    
+    g.log = pushLog(g.log, me.name + ' 选择 ' + target.name + ' 作为目标,请选择一张♥手牌');
+    
+    return g;
+  });
+}
+
+// 法正【眩惑】：选择要交出的♥手牌
+function pickHuanhuoHeartCard(cardIndex) {
+  tx(g => {
+    if (g.pending.type !== 'huanhuoPickCard') return g;
+    
+    if (cardIndex < 0 || cardIndex >= g.pending.heartCards.length) return g;
+    if (!g.pending.candidates.includes(cardIndex)) return g;
+    
+    const me = g.players[window.mySeat];
+    const target = g.players[g.pending.targetSeat];
+    
+    // 获取选择的♥手牌
+    const card = g.pending.heartCards[cardIndex];
+    
+    // 从自己手牌中移除这张牌
+    const hand = me.hand || [];
+    const idx = hand.findIndex(c => c.id === card.id);
+    if (idx !== -1) {
+      hand.splice(idx, 1);
+    }
+    
+    // 将这张牌交给目标角色
+    if (!target.hand) target.hand = [];
+    target.hand.push(card);
+    
+    // 检查目标角色是否有手牌可获得
+    const targetHand = target.hand || [];
+    if (targetHand.length === 0) {
+      // 目标没有手牌，直接清理状态
+      g.log = pushLog(g.log, target.name + ' 没有手牌，【眩惑】无法继续');
+      g.pending = null;
+      g.phase = 'play';
+      return g;
+    }
+    
+    // 进入选择要获得的牌阶段
+    g.pending = {
+      type: 'huanhuoPickGotCard',
+      sourceSeat: window.mySeat,
+      targetSeat: g.pending.targetSeat,
+      targetHand: targetHand,
+      candidates: targetHand.map((_, idx) => idx)
+    };
+    
+    g.log = pushLog(g.log, me.name + ' 交给 ' + target.name + ' 一张♥手牌,请选择要获得的牌');
+    
+    return g;
+  });
+}
+
+// 法正【眩惑】：选择要获得的牌
+function pickHuanhuoGotCard(cardIndex) {
+  tx(g => {
+    if (g.pending.type !== 'huanhuoPickGotCard') return g;
+    
+    if (cardIndex < 0 || cardIndex >= g.pending.targetHand.length) return g;
+    if (!g.pending.candidates.includes(cardIndex)) return g;
+    
+    const me = g.players[window.mySeat];
+    const target = g.players[g.pending.targetSeat];
+    
+    // 获取选择的牌
+    const gotCard = g.pending.targetHand[cardIndex];
+    
+    // 从目标手牌中移除这张牌
+    const targetHand = target.hand || [];
+    const idx = targetHand.findIndex(c => c.id === gotCard.id);
+    if (idx !== -1) {
+      targetHand.splice(idx, 1);
+    }
+    
+    // 添加到自己手牌
+    if (!me.hand) me.hand = [];
+    me.hand.push(gotCard);
+    
+    // 进入选择第二个目标阶段（交给另一名其他角色）
+    g.pending = {
+      type: 'huanhuoPickSecond',
+      sourceSeat: window.mySeat,
+      transferCard: gotCard,
+      candidates: []
+    };
+    
+    // 计算第二个目标候选（不能是自己，也不能是第一个目标）
+    for (let i = 0; i < g.players.length; i++) {
+      if (i !== window.mySeat && i !== g.pending.targetSeat && g.players[i] && g.players[i].alive) {
+        g.pending.candidates.push(i);
+      }
+    }
+    
+    g.log = pushLog(g.log, me.name + ' 获得了 ' + target.name + ' 的一张牌,请选择要交给的角色');
+    
+    return g;
+  });
+}
+
+// 法正【眩惑】：选择第二个目标角色（交给牌）
+function pickHuanhuoSecondTarget(seat) {
+  tx(g => {
+    if (g.pending.type !== 'huanhuoPickSecond') return g;
+    
+    if (!g.pending.candidates.includes(seat)) return g;
+    
+    const me = g.players[window.mySeat];
+    const secondTarget = g.players[seat];
+    
+    if (!secondTarget || !secondTarget.alive) return g;
+    
+    // 从自己手牌中移除获得的牌
+    const hand = me.hand || [];
+    const idx = hand.findIndex(c => c.id === g.pending.transferCard.id);
+    if (idx !== -1) {
+      hand.splice(idx, 1);
+    }
+    
+    // 将牌交给第二个目标
+    if (!secondTarget.hand) secondTarget.hand = [];
+    secondTarget.hand.push(g.pending.transferCard);
+    
+    // 标记已使用眩惑
+    g.huanhuoUsed = true;
+    
+    g.log = pushLog(g.log, me.name + ' 发动【眩惑】,交给 ' + g.players[g.pending.targetSeat].name + ' 一张♥手牌,获得其一张牌后交给 ' + secondTarget.name);
+    markSkillSound(g, '眩惑');
+    
+    // 清理状态
+    g.pending = null;
+    g.phase = 'play';
+    
+    return g;
+  });
+}
+
+// 法正【眩惑】：取消眩惑
+// 仅允许在选择目标和选择自己的♥手牌阶段取消
+function cancelHuanhuo() {
+  tx(g => {
+    if (g.pending && 
+        (g.pending.type === 'huanhuoPick' || g.pending.type === 'huanhuoPickCard') &&
+        g.pending.sourceSeat === window.mySeat) {
+      g.pending = null;
+      g.phase = 'play';
+      g.log = pushLog(g.log, g.players[window.mySeat].name + ' 取消发动【眩惑】');
+    }
+    return g;
+  });
+}
+
+// ========== 曹冲技能实现 ==========
+
+// 曹冲【称象】：获取牌的点数
+function getCardValue(card) {
+  const rank = card.rank;
+  if (rank === 'A' || rank === 'a') return 1;
+  if (rank === 'J' || rank === 'j') return 11;
+  if (rank === 'Q' || rank === 'q') return 12;
+  if (rank === 'K' || rank === 'k') return 13;
+  const num = parseInt(rank);
+  return isNaN(num) ? 0 : num;
+}
+
+// 曹冲【称象】：计算可选组合，包含空集
+function calculateChengxiangOptions(cardValues, sumLimit) {
+  const n = cardValues.length;
+  const selectable = [];
+  
+  for (let mask = 0; mask < (1 << n); mask++) {
+    let sum = 0;
+    const indices = [];
+    for (let i = 0; i < n; i++) {
+      if (mask & (1 << i)) {
+        sum += cardValues[i].value;
+        indices.push(i);
+      }
+    }
+    if (sum <= sumLimit) {
+      selectable.push({ indices, sum });
+    }
+  }
+  
+  if (selectable.length === 0) {
+    selectable.push({ indices: [], sum: 0 });
+  }
+  
+  return selectable;
+}
+
+// 曹冲【称象】：确认发动称象（从询问阶段进入选择阶段）
+function confirmChengxiangAsk() {
+  tx(g => {
+    if (g.pending.type !== 'chengxiangAsk') return g;
+    
+    const seat = g.pending.seat;
+    const me = g.players[seat];
+    
+    // 确保牌堆有至少4张牌
+    ensureDeck(g, 4);
+    
+    // 亮出牌堆顶的 min(4, remaining) 张牌
+    const drawCount = Math.min(4, g.deck.length);
+    const revealed = g.deck.splice(0, drawCount);
+    
+    // 如果牌堆为空，直接取消
+    if (revealed.length === 0) {
+      g.pending = null;
+      g.log = pushLog(g.log, me.name + ' 牌堆为空，无法发动【称象】');
+      return g;
+    }
+    
+    // 计算每张牌的点数
+    const cardValues = revealed.map(card => ({ 
+      card, 
+      value: getCardValue(card) 
+    }));
+    
+    // 预计算所有可能的选择组合
+    const selectable = calculateChengxiangOptions(cardValues, 13);
+    
+    // 进入选择阶段
+    g.pending = {
+      type: 'chengxiangChoose',
+      seat: seat,
+      revealedCards: revealed,
+      cardValues: cardValues,
+      sumLimit: 13,
+      selectable: selectable
+    };
+    
+    g.log = pushLog(g.log, me.name + ' 发动【称象】,亮出了 ' + drawCount + ' 张牌');
+    markSkillSound(g, '称象');
+    return g;
+  });
+}
+
+// 曹冲【称象】：取消发动称象
+function cancelChengxiangAsk() {
+  tx(g => {
+    if (g.pending.type !== 'chengxiangAsk') return g;
+    g.pending = null;
+    return g;
+  });
+}
+
+// 曹冲【称象】：选择完成
+function confirmChengxiang(selection) {
+  tx(g => {
+    if (g.pending.type !== 'chengxiangChoose') return g;
+    const seat = g.pending.seat;
+    const me = g.players[seat];
+    const pending = g.pending;
+    
+    const selectedIndices = selection.indices || [];
+    const selectedCards = selectedIndices.map(idx => pending.revealedCards[idx]);
+    
+    if (selectedCards.length > 0) {
+      me.hand = me.hand || [];
+      me.hand.push(...selectedCards);
+    }
+    
+    const unselectedCards = pending.revealedCards.filter(
+      (_, idx) => !selectedIndices.includes(idx)
+    );
+    g.discard = g.discard || [];
+    g.discard.push(...unselectedCards);
+    
+    g.log = pushLog(g.log, me.name + ' 获得了' + (selectedIndices.length > 0 ? selectedCards.map(c => c.name).join(',') : '0张牌'));
+    g.pending = null;
+    return g;
+  });
+}
+
+// 曹冲【称象】：选择0张牌
+function cancelChengxiang() {
+  tx(g => {
+    if (g.pending.type !== 'chengxiangChoose') return g;
+    const seat = g.pending.seat;
+    const me = g.players[seat];
+    g.discard = g.discard || [];
+    g.discard.push(...g.pending.revealedCards);
+    g.log = pushLog(g.log, me.name + ' 选择了0张牌，所有牌置入弃牌堆');
+    g.pending = null;
+    return g;
+  });
+}
+
+// 曹冲【仁心】：选择装备牌弃置
+function chooseRenxinEquip(equipIndex) {
+  tx(g => {
+    if (g.pending.type !== 'renxinChoose') return g;
+    const seat = g.pending.seat;
+    const me = g.players[seat];
+    const target = g.players[g.pending.target];
+    const pending = g.pending;
+    
+    if (!pending.equipIndices.includes(equipIndex) || !me.equip || !me.equip[equipIndex]) {
+      return g;
+    }
+    
+    const equipCard = me.equip[equipIndex];
+    me.equip[equipIndex] = null;
+    g.discard = g.discard || [];
+    g.discard.push(equipCard);
+    
+    // 状态反转
+    me.faceUp = !me.faceUp;
+    
+    // 防止此伤害
+    pending.originalDamageInfo.amount = 0;
+    
+    g.log = pushLog(g.log, me.name + ' 发动【仁心】,弃置装备 ' + equipCard.name + ',' + (me.faceUp ? '正面朝上' : '背面朝上') + ',防止了对 ' + target.name + ' 的伤害');
+    markSkillSound(g, '仁心');
+    g.pending = null;
+    return g;
+  });
+}
+
+// 曹冲【仁心】：取消仁心
+function cancelRenxin() {
+  tx(g => {
+    if (g.pending.type !== 'renxinChoose') return g;
+    g.pending = null;
+    return g;
+  });
+}
