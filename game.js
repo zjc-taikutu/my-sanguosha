@@ -249,6 +249,7 @@ function normalize(g){
     if(typeof p.turnedOver!=='boolean') p.turnedOver=false;
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
     if(typeof p.jujianUsed!=='boolean') p.jujianUsed=false;
+    if(typeof p.chanyuan!=='boolean') p.chanyuan=false;
     // 曹彰【将驰】本回合效果
     if(typeof p.jiangchiNoSlash!=='boolean') p.jiangchiNoSlash=false;
     if(typeof p.jiangchiNoDistance!=='boolean') p.jiangchiNoDistance=false;
@@ -421,6 +422,26 @@ function normalize(g){
   // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
     g.pending=null; g.phase='play';
+  }
+  // 于吉【蛊惑】质疑阶段:sourceSeat/asking 应是合法座位,实际牌和声明牌应存在;回答列表缺失时回退空数组
+  if(g.pending && g.pending.type==='guhuoQuestion'){
+    const d=g.pending;
+    if(!Array.isArray(d.questioners)) d.questioners=[];
+    if(!Array.isArray(d.answered)) d.answered=[];
+    if(typeof d.sourceSeat!=='number' || typeof d.asking!=='number' ||
+       !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !g.players[d.asking] || !g.players[d.asking].alive ||
+       !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
+      g.pending=null; g.phase='play';
+    }
+  }
+  // 于吉【蛊惑】目标选择阶段:声明牌已通过质疑后,由于吉为这张牌选择目标
+  if(g.pending && g.pending.type==='guhuoTarget'){
+    const d=g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
+      g.pending=null; g.phase='play';
+    }
   }
   // 五谷丰登挑选阶段:pool/order 是数组(Firebase 吞空数组),from/idx 应是数字;不对就整体判无效
   if(g.pending && g.pending.type==='wugu'){
@@ -606,6 +627,8 @@ function normalize(g){
   if(typeof g.liJianUsed!=='boolean') g.liJianUsed=false;
   // 周瑜【反间】:出牌阶段限一次
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
+  // 于吉【蛊惑】:每回合限一次
+  if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
   // 马谡【散谣】:出牌阶段限一次
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 曹彰【将驰】:本回合额外出杀次数剩余
@@ -4859,7 +4882,7 @@ function startTurn(g, seat){
     return;
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];

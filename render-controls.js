@@ -2888,6 +2888,35 @@ function renderControls(g){
       setBanner(source ? source.name + ' 正在确认【乱击】…' : '有人正在确认【乱击】…');
       return;
     }
+    if(g.pending && g.pending.type==='guhuoQuestion'){
+      const d=g.pending;
+      const source=g.players[d.sourceSeat];
+      if(d.asking===mySeat && !(me && me.chanyuan)){
+        setBanner((source?source.name:'于吉')+' 发动【蛊惑】声明为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】,是否质疑?');
+        const qb=document.createElement('button'); qb.className='primary';
+        qb.textContent='质疑';
+        qb.onclick=()=>respondGuhuoQuestion(true);
+        c.appendChild(qb);
+        const nb=document.createElement('button'); nb.className='ghost';
+        nb.textContent='不质疑';
+        nb.onclick=()=>respondGuhuoQuestion(false);
+        c.appendChild(nb);
+      } else {
+        const asker=g.players[d.asking];
+        setBanner((asker?asker.name:'其他玩家')+' 正在决定是否质疑【蛊惑】…');
+      }
+      return;
+    }
+    if(g.pending && g.pending.type==='guhuoTarget'){
+      const d=g.pending;
+      const source=g.players[d.sourceSeat];
+      if(d.sourceSeat===mySeat){
+        setBanner('【蛊惑】已生效,点上方一名合法角色作为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】目标。');
+      } else {
+        setBanner((source?source.name:'于吉')+' 正在为【蛊惑】选择目标…');
+      }
+      return;
+    }
     
     // 鲁肃【缔盟】:选择两名其他角色
     if(dimengMode && g.dimengUsed) resetDimeng();
@@ -3097,13 +3126,31 @@ function renderControls(g){
       const rendeNote = hasCap(me,'rende') ? '；也可点目标座位上的“仁德”按钮交给别人' : '';
       const shuangxiongNote = canShuangxiongDuelCard(me, selCard) ? '；也可点目标座位上的“双雄:决斗”按钮' : '';
       const recastNote = hasCap(me,'lianhuan') && selCard.suit==='♣' ? '；也可重铸发动【连环】' : '';
-      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+shuangxiongNote+recastNote+'(或点牌取消)。');
+      const guhuoNote = hasCap(me,'guhuo') && !g.guhuoUsed ? '；也可发动【蛊惑】声明为其他牌' : '';
+      setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+shuangxiongNote+recastNote+guhuoNote+'(或点牌取消)。');
       if(spec && !spec.target && spec.canPlay(g,me,selCard)){
         const ub=document.createElement('button'); ub.className='primary';
         ub.textContent='使用'+label;
         const idx=selectedCardIdx;
         ub.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, selCard), ()=>playCard(idx, actionId)); };
         c.appendChild(ub);
+      }
+      if(hasCap(me,'guhuo') && !g.guhuoUsed){
+        const claimable=guhuoClaimableNames().filter(name=>{
+          const action=guhuoActionId(name);
+          const s=CARD_PLAYS[action];
+          if(!s) return false;
+          const claimed={ id:selCard.id, name, suit:selCard.suit, rank:selCard.rank, originalName:selCard.name };
+          if(s.canPlay && !s.canPlay(g, me, claimed)) return false;
+          return guhuoHasLegalTarget(g, mySeat, claimed, s);
+        });
+        claimable.forEach(name=>{
+          const gb=document.createElement('button'); gb.className='ghost';
+          const idx=selectedCardIdx;
+          gb.textContent='蛊惑:【'+name+'】';
+          gb.onclick=()=>{ confirmAndPlay('扣置这张手牌发动【蛊惑】,声明为【'+name+'】？', ()=>startGuhuo(idx, name)); };
+          c.appendChild(gb);
+        });
       }
       if(hasCap(me,'lianhuan') && selCard.suit==='♣'){
         const rb=document.createElement('button'); rb.className='ghost';

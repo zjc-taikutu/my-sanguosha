@@ -389,19 +389,25 @@ const GENERALS = {
   caozhi:         { id:'caozhi',         name:'曹植',   gender:'male', maxHp:3, skill:'落英/酒诗',
     desc:'落英:当其他角色的梅花牌因判定或弃置进入弃牌堆时,你可以获得之。酒诗:当你受到伤害后,若你的武将牌背面朝上且受伤时也背面朝上,你可以翻回正面。',
     caps:{ luoying:true, jiushi:true } },
+  yuji:           { id:'yuji',           name:'于吉',   gender:'male', maxHp:3, skill:'蛊惑/缠怨',
+    desc:'蛊惑:每回合限一次,你可以扣置一张手牌,将此牌当任意一张基本牌或普通锦囊牌使用或打出,其他角色可质疑。若为假,此牌作废;若为真,质疑角色获得【缠怨】。缠怨:锁定技,你不能质疑【蛊惑】;当你的体力值为1时,你的所有其他技能失效。本项目当前先实现出牌阶段使用,暂不实现响应时打出。',
+    caps:{ guhuo:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
+function chanyuanLocksSkills(player){
+  return !!(player && player.chanyuan && player.hp<=1);
+}
 // 查询某玩家的武将是否拥有某项被动能力(能力声明在 GENERALS.caps,业务层不写武将名)
 function generalHasCap(player, cap){
   // 蔡文姬【断肠】等:武将技能整体失效后,不再从 GENERALS.caps 读取
-  if(player && player.skillsLost) return false;
+  if(player && (player.skillsLost || chanyuanLocksSkills(player))) return false;
   const gen = player && getGeneral(player.general);
   return !!(gen && gen.caps && gen.caps[cap]);
 }
 // 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;通用数值 seam,当前暂无武将/装备使用)
 function generalCapValue(player, cap, fallback){
-  if(player && player.skillsLost) return fallback;
+  if(player && (player.skillsLost || chanyuanLocksSkills(player))) return fallback;
   const gen = player && getGeneral(player.general);
   const v = gen && gen.caps && gen.caps[cap];
   return (typeof v === 'number') ? v : fallback;
@@ -424,7 +430,7 @@ function equipHasCap(player, cap){
 // player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
 function hasCap(player, cap){
   if(equipHasCap(player, cap)) return true;
-  if(player && player.skillsLost) return false;
+  if(player && (player.skillsLost || chanyuanLocksSkills(player))) return false;
   return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]);
 }
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
@@ -498,7 +504,7 @@ function findUsableAs(hand, player, role){
 // 触发型技能分发:查 seat 玩家武将的 hooks[hookName] 并执行(在调用方的 tx 内,直接改 g)。
 function triggerHook(g, seat, hookName, ctx){
   const p = g.players[seat];
-  if(p && p.skillsLost) return; // 断肠等:武将 hooks 一并失效
+  if(p && (p.skillsLost || chanyuanLocksSkills(p))) return; // 断肠/缠怨等:武将 hooks 一并失效
   const gen = p && getGeneral(p.general);
   const fn = gen && gen.hooks && gen.hooks[hookName];
   if(typeof fn === 'function') fn(g, seat, ctx);

@@ -467,6 +467,7 @@ function renderSeatCard(g, seat, isSelf){
   const tags =
     (g.turn===seat&&g.started?'<span class="tag turn">回合</span>':'')+
     (p.chained?'<span class="tag">'+escapeHtml(chainedTagText(g, seat))+'</span>':'')+
+    (p.chanyuan?'<span class="tag">缠怨</span>':'')+
     (p.dying?'<span class="tag" style="background:var(--cinnabar)">濒死</span>':'');
   // 标题栏不再包含"?"说明入口(第4次微调把它挪到右上角、身份方块的正下方,见下面的
   // infoBadge)。**玩家名这次改成居中(原来靠左)**——标签(tags)不参与居中的flex流,
@@ -693,6 +694,21 @@ function render(g){
         d.style.outline='2px dotted #6b5b4d';
         d.title='判定区已有【'+selCard.name+'】,不能重复放置';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">已有同名</span>';
+      }
+    }
+    if(g.phase==='guhuoTarget' && g.pending && g.pending.type==='guhuoTarget' && g.pending.sourceSeat===mySeat){
+      const claimed=g.pending.claimedCard;
+      const guhuoSpec=claimed ? CARD_PLAYS[guhuoActionId(claimed.name)] : null;
+      const selfAllowed=i!==mySeat || !!(guhuoSpec && guhuoSpec.allowSelf);
+      const guhuoTargetable=!!(guhuoSpec && guhuoSpec.target) && selfAllowed && p.alive && (!guhuoSpec.canTarget || guhuoSpec.canTarget(g, meP, claimed, i));
+      if(guhuoTargetable){
+        d.style.cursor='pointer';
+        d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.title='选择为【蛊惑】声明牌的目标';
+        d.onclick=()=>{ confirmAndPlay('将【蛊惑】声明的【'+claimed.name+'】对 '+g.players[i].name+' 使用？', ()=>guhuoChooseTarget(i)); };
+      } else if(guhuoSpec && guhuoSpec.target && p.alive){
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='不是这张声明牌的合法目标';
       }
     }
     // 丈八蛇矛:已选满两张牌后,对手作为杀的目标(距离规则同普通杀,与 selectedCardIdx 路径互斥)

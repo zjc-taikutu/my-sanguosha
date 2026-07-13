@@ -264,6 +264,201 @@ function recastLianHuan(cardIdx){
   });
 }
 
+function guhuoClaimableNames(){
+  const excluded = new Set(Object.keys(EQUIPS).concat(Object.keys(DELAY_TRICKS), ['借刀杀人']));
+  const names = [...BASIC_CARDS.filter(name=>name!=='闪'), ...Object.keys(CARD_PLAYS).filter(name=>!excluded.has(name))];
+  return [...new Set(names)];
+}
+
+function guhuoActionId(name){
+  return isShaName(name) ? '杀' : name;
+}
+
+function runGuhuoAsSource(sourceSeat, fn){
+  const oldSeat = mySeat;
+  mySeat = sourceSeat;
+  try {
+    return fn();
+  } finally {
+    mySeat = oldSeat;
+  }
+}
+
+function guhuoHasLegalTarget(g, sourceSeat, claimedCard, spec){
+  if(!spec || !spec.target) return true;
+  const me=g.players[sourceSeat];
+  if(!me || !me.alive) return false;
+  return g.players.some((p, seat)=>{
+    if(!p || !p.alive) return false;
+    if(seat===sourceSeat && !spec.allowSelf) return false;
+    return !spec.canTarget || spec.canTarget(g, me, claimedCard, seat);
+  });
+}
+
+function nextGuhuoAsker(g, fromSeat){
+  const d=g.pending;
+  if(!d || d.type!=='guhuoQuestion') return null;
+  const answered = new Set(d.answered || []);
+  for(let k=1;k<=g.players.length;k++){
+    const seat=(fromSeat+k)%g.players.length;
+    const p=g.players[seat];
+    if(seat!==d.sourceSeat && p && p.alive && !p.chanyuan && !answered.has(seat)) return seat;
+  }
+  return null;
+}
+
+function grantChanyuan(g, seat){
+  const p=g.players[seat];
+  if(!p || !p.alive || p.chanyuan) return;
+  p.chanyuan = true;
+  g.log = pushLog(g.log, p.name+' 因质疑真实【蛊惑】获得【缠怨】');
+}
+
+function finishGuhuo(g, shouldResolve){
+  const d=g.pending;
+  if(!d || d.type!=='guhuoQuestion') return;
+  const me=g.players[d.sourceSeat];
+  const actual=d.actualCard;
+  const claimed=d.claimedCard;
+  g.pending=null;
+  g.phase='play';
+  if(!me || !me.alive || !actual || !claimed){
+    if(actual) g.discard.push(actual);
+    return;
+  }
+  if(!shouldResolve){
+    g.discard.push(actual);
+    return;
+  }
+  const spec=CARD_PLAYS[guhuoActionId(claimed.name)];
+  if(!spec){
+    g.discard.push(actual);
+    return;
+  }
+  if(spec.target){
+    g.pending={ type:'guhuoTarget', sourceSeat:d.sourceSeat, actualCard:actual, claimedCard:claimed };
+    g.phase='guhuoTarget';
+    g.log=pushLog(g.log, me.name+' 【蛊惑】生效,请选择【'+claimed.name+'】的目标');
+    return;
+  }
+  g.discard.push(actual);
+  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+claimed.name+'】使用');
+  markCardSound(g, claimed.name, d.sourceSeat, actual);
+  runGuhuoAsSource(d.sourceSeat, ()=>spec.effect(g, me, claimed, d.sourceSeat));
+}
+
+function resolveGuhuoAfterQuestion(g){
+  const d=g.pending;
+  if(!d || d.type!=='guhuoQuestion') return;
+  const actual=d.actualCard;
+  const claimed=d.claimedCard;
+  const me=g.players[d.sourceSeat];
+  const questioners=d.questioners||[];
+  const actualName=actual && actual.name;
+  const claimedName=claimed && claimed.name;
+  const isTrue = actualName===claimedName;
+  g.log=pushLog(g.log, (me?me.name:'于吉')+' 翻开【蛊惑】牌:实际为【'+actualName+'】,声明为【'+claimedName+'】');
+  if(questioners.length>0 && isTrue){
+    questioners.forEach(seat=>grantChanyuan(g, seat));
+    finishGuhuo(g, true);
+  } else if(questioners.length>0 && !isTrue){
+    g.log=pushLog(g.log, '【蛊惑】为假,此牌作废');
+    finishGuhuo(g, false);
+  } else {
+    finishGuhuo(g, true);
+  }
+}
+
+function startGuhuo(cardIdx, claimedName){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'guhuo') || g.guhuoUsed) return g;
+    const actual=me.hand[cardIdx];
+    if(!actual || !guhuoClaimableNames().includes(claimedName)) return g;
+    const spec=CARD_PLAYS[guhuoActionId(claimedName)];
+    if(!spec) return g;
+    const claimed={ id:actual.id, name:claimedName, suit:actual.suit, rank:actual.rank, originalName:actual.name };
+    if(spec.canPlay && !spec.canPlay(g, me, claimed)) return g;
+    if(!guhuoHasLegalTarget(g, mySeat, claimed, spec)) return g;
+    me.hand.splice(cardIdx,1);
+    g.guhuoUsed=true;
+    g.pending={ type:'guhuoQuestion', sourceSeat:mySeat, actualCard:actual, claimedCard:claimed, questioners:[], answered:[] };
+    g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
+    markSkillSound(g, '蛊惑');
+    const asker=nextGuhuoAsker(g, mySeat);
+    if(asker===null){
+      g.log=pushLog(g.log, '无人可质疑【蛊惑】');
+      resolveGuhuoAfterQuestion(g);
+    } else {
+      g.pending.asking=asker;
+      g.phase='guhuoQuestion';
+      g.log=pushLog(g.log, g.players[asker].name+' 是否质疑【蛊惑】?');
+    }
+    return g;
+  });
+}
+
+function respondGuhuoQuestion(question){
+  tx(g=>{
+    if(g.phase!=='guhuoQuestion'||!g.pending||g.pending.type!=='guhuoQuestion'||g.pending.asking!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || me.chanyuan) return g;
+    g.pending.answered = g.pending.answered || [];
+    if(!g.pending.answered.includes(mySeat)) g.pending.answered.push(mySeat);
+    if(question){
+      g.pending.questioners = g.pending.questioners || [];
+      if(!g.pending.questioners.includes(mySeat)) g.pending.questioners.push(mySeat);
+      g.log=pushLog(g.log, me.name+' 质疑【蛊惑】');
+      resolveGuhuoAfterQuestion(g);
+      return g;
+    }
+    g.log=pushLog(g.log, me.name+' 不质疑【蛊惑】');
+    const asker=nextGuhuoAsker(g, mySeat);
+    if(asker===null){
+      g.log=pushLog(g.log, '无人质疑【蛊惑】');
+      resolveGuhuoAfterQuestion(g);
+    } else {
+      g.pending.asking=asker;
+      g.log=pushLog(g.log, g.players[asker].name+' 是否质疑【蛊惑】?');
+    }
+    return g;
+  });
+}
+
+function guhuoChooseTarget(targetSeat){
+  tx(g=>{
+    if(g.phase!=='guhuoTarget'||!g.pending||g.pending.type!=='guhuoTarget'||g.pending.sourceSeat!==mySeat) return g;
+    const d=g.pending;
+    const me=g.players[mySeat];
+    const spec=CARD_PLAYS[guhuoActionId(d.claimedCard && d.claimedCard.name)];
+    if(!me || !me.alive || !spec || !spec.target) return g;
+    if(targetSeat===mySeat && !spec.allowSelf) return g;
+    const target=g.players[targetSeat];
+    if(!target || !target.alive) return g;
+    if(spec.canTarget && !spec.canTarget(g, me, d.claimedCard, targetSeat)) return g;
+    g.pending=null;
+    g.phase='play';
+    g.discard.push(d.actualCard);
+    g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+d.claimedCard.name+'】对 '+target.name+' 使用');
+    markCardSound(g, d.claimedCard.name, mySeat, d.actualCard, targetSeat);
+    spec.effect(g, me, d.claimedCard, targetSeat);
+    return g;
+  });
+}
+
+function cancelGuhuoTarget(){
+  tx(g=>{
+    if(g.phase!=='guhuoTarget'||!g.pending||g.pending.type!=='guhuoTarget'||g.pending.sourceSeat!==mySeat) return g;
+    const d=g.pending;
+    if(d.actualCard) g.discard.push(d.actualCard);
+    g.log=pushLog(g.log, g.players[mySeat].name+' 取消【蛊惑】目标选择,扣置牌作废');
+    g.pending=null;
+    g.phase='play';
+    return g;
+  });
+}
+
 // ===== 张郃【巧变】完整版:回合开始时一次性决策"是否发动"+"跳过判定/摸牌/出牌/弃牌
 // 阶段之一"(一回合限一次),仅选"出牌阶段"才附带"移动一张装备/判定牌"这个后续效果
 // (官方原文:"你可以弃置一张手牌并跳过一个阶段(准备阶段和结束阶段除外),若为:摸牌阶段,
