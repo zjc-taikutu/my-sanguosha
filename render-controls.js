@@ -2452,6 +2452,7 @@ function renderControls(g){
     // 此分支只在"被询问者本人"的客户端渲染(旁观者走下面 asking!==mySeat 分支,只看到等待提示、
     // 完全不渲染这两个按钮),所以按钮是否 disable 只影响本人自己的界面,不会向其他人泄露谁有无懈。
     const hasWuxie = me.hand.some(card=>card.name==='无懈可击');
+    const guhuoWuxieCount = addGuhuoResponseButtons(c, g, me, '无懈可击');
     const b1=document.createElement('button'); b1.className='primary';
     b1.textContent='打出【无懈可击】';
     b1.disabled = !hasWuxie;
@@ -2466,7 +2467,7 @@ function renderControls(g){
     const askText = g.pending.depth>0
       ? '是否用【无懈可击】反制 '+(g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】?'
       : '是否对 '+tgtDesc+' 打出【无懈可击】?';
-    setBanner(hasWuxie ? escapeHtml(askText) : '你没有【无懈可击】,只能点「不出」。');
+    setBanner((hasWuxie || guhuoWuxieCount>0) ? escapeHtml(askText) : '你没有【无懈可击】,只能点「不出」。');
     return;
   }
   if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie'){

@@ -284,12 +284,14 @@ function guhuoResponseRole(name){
   if(isShaName(name)) return '杀';
   if(name==='闪') return '闪';
   if(name==='桃') return '桃';
+  if(name==='无懈可击') return '无懈可击';
   return null;
 }
 function guhuoResponseNamesForRole(role){
   if(role==='杀') return ['杀','火杀','雷杀'];
   if(role==='闪') return ['闪'];
   if(role==='桃') return ['桃'];
+  if(role==='无懈可击') return ['无懈可击'];
   return [];
 }
 function canStartGuhuoResponse(g, seat, role){
@@ -311,6 +313,9 @@ function canStartGuhuoResponse(g, seat, role){
       if(jiaxuSeat!==null && jiaxuSeat===g.turn && seat!==jiaxuSeat && seat!==g.pending.seat) return false;
     }
     return true;
+  }
+  if(role==='无懈可击'){
+    return g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===seat;
   }
   return false;
 }
@@ -383,6 +388,20 @@ function resolveGuhuoResponseTao(g, seat, actual, claimed){
   markCardSound(g, '桃', seat, actual, g.pending.seat);
   if(dyingP.hp>0) finishDying(g, false);
 }
+function resolveGuhuoResponseWuxie(g, seat, actual, claimed){
+  if(!(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===seat)) return;
+  const me=g.players[seat];
+  if(!me || !me.alive) return;
+  g.discard.push(actual);
+  const target = g.pending.depth>0
+    ? g.players[g.pending.exclude].name+' 的【无懈可击】'
+    : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
+  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,打出【'+claimed.name+'】,抵消了'+target);
+  markCardSound(g, '无懈可击', seat, actual);
+  g.pending.depth++;
+  g.pending.exclude=seat;
+  openWuxieRound(g);
+}
 function resolveGuhuoResponse(g, d){
   if(!restoreGuhuoResponse(g, d)){
     if(d && d.actualCard) g.discard.push(d.actualCard);
@@ -397,6 +416,8 @@ function resolveGuhuoResponse(g, d){
     resolveGuhuoResponseSha(g, d.sourceSeat, d.actualCard, d.claimedCard);
   } else if(role==='桃' && g.phase==='dying' && g.pending && g.pending.asking===d.sourceSeat){
     resolveGuhuoResponseTao(g, d.sourceSeat, d.actualCard, d.claimedCard);
+  } else if(role==='无懈可击' && g.phase==='wuxie' && g.pending && g.pending.asking===d.sourceSeat){
+    resolveGuhuoResponseWuxie(g, d.sourceSeat, d.actualCard, d.claimedCard);
   } else if(d.actualCard) {
     g.discard.push(d.actualCard);
   }

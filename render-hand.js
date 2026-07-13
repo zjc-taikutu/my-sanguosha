@@ -186,12 +186,20 @@ function renderHand(g){
       const spec = CARD_PLAYS[actionId];
       const canRende = hasCap(me,'rende');
       const canShuangxiong = canShuangxiongDuelCard(me, card);
+      const canGuhuoActive = hasCap(me,'guhuo') && !g.guhuoUsed && guhuoClaimableNames().some(name=>{
+        const action=guhuoActionId(name);
+        const s=CARD_PLAYS[action];
+        if(!s) return false;
+        const claimed={ id:card.id, name, suit:card.suit, rank:card.rank, originalName:card.name };
+        if(s.canPlay && !s.canPlay(g, me, claimed)) return false;
+        return guhuoHasLegalTarget(g, mySeat, claimed, s);
+      });
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
-        if(spec.target || canRende || canShuangxiong){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/刘备仁德/双雄:点=选中
+        if(spec.target || canRende || canShuangxiong || canGuhuoActive){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/刘备仁德/双雄/蛊惑:点=选中
         else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
-      } else if(canRende || canShuangxiong){
-        // 刘备【仁德】可交出任意手牌;颜良文丑【双雄】可把异色手牌当【决斗】使用。
+      } else if(canRende || canShuangxiong || canGuhuoActive){
+        // 刘备【仁德】可交出任意手牌;颜良文丑【双雄】可把异色手牌当【决斗】使用;于吉【蛊惑】可扣置任意手牌声明合法牌名。
         usable=true;
         onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g); };
       }

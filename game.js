@@ -629,6 +629,7 @@ function normalize(g){
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
   // 于吉【蛊惑】:每回合限一次
   if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
+  if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   // 马谡【散谣】:出牌阶段限一次
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 曹彰【将驰】:本回合额外出杀次数剩余
@@ -3164,6 +3165,32 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
   });
 }
 
+function enqueueWangxi(g, item){
+  if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
+  g.wangxiQueue.push(item);
+}
+function startNextWangxi(g, resume){
+  if(!Array.isArray(g.wangxiQueue) || g.wangxiQueue.length===0) return false;
+  while(g.wangxiQueue.length>0){
+    const item=g.wangxiQueue.shift();
+    const p=g.players[item.seat];
+    const other=g.players[item.otherSeat];
+    if(!p || !p.alive) continue;
+    if(!item.death && (!other || !other.alive)) continue;
+    g.pending={
+      type:'wangxiAsk',
+      seat:item.seat,
+      otherSeat:item.otherSeat,
+      death:!!item.death,
+      amount:item.amount,
+      resume
+    };
+    g.phase='wangxiAsk';
+    g.log=pushLog(g.log, p.name+' 是否发动【忘隙】…');
+    return true;
+  }
+  return false;
+}
 function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, skipTianxiang, skipZhengyi, skipChain, skipZhimeng, skipRenxinSeats){
   const p=g.players[seat];
   if(!p) return false;
@@ -3275,6 +3302,32 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     startDying(g, seat, srcType, sourceSeat, amount);
     return true;
   }
+  // 李典【忘隙】统一入口:先把本次伤害加入队列。属性伤害若随后发生连环传导,传导伤害也会
+  // 继续入队;整条伤害链结束后再逐个询问,避免第一次 pending 截断后续传导目标。
+  if(amount>0){
+    if(typeof sourceSeat==='number' && sourceSeat !== seat && sourceSeat < g.players.length){
+      const other = g.players[sourceSeat];
+      // 受伤侧:受害者是李典
+      if(p && p.alive && generalHasCap(p, 'wangxi') && other && other.alive){
+        enqueueWangxi(g, {
+          seat: seat,
+          otherSeat: sourceSeat,
+          death: false,
+          amount: amount
+        });
+      }
+      // 造成侧:攻击者是李典
+      if(other && other.alive && p && p.alive && generalHasCap(other, 'wangxi')){
+        enqueueWangxi(g, {
+          seat: sourceSeat,
+          otherSeat: seat,
+          death: false,
+          amount: amount
+        });
+      }
+    }
+  }
+
   if(!skipChain && propagateChainedDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
 
   // 实际受伤且存活 -> 受伤后可选/触发型效果(互斥:一次只挂一个 pending)
@@ -3365,40 +3418,8 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
       }
     }
     
-    // 李典【忘隙】统一入口:受伤侧优先,否则造成侧(非自杀、双方存活)
-    // 不再走 hooks.onDamaged,避免与造成侧双路径互盖 pending
-    if(typeof sourceSeat==='number' && sourceSeat !== seat && sourceSeat < g.players.length){
-      const other = g.players[sourceSeat];
-      // 受伤侧:受害者是李典
-      if(p && p.alive && generalHasCap(p, 'wangxi') && other && other.alive){
-        g.pending = {
-          type:'wangxiAsk',
-          seat: seat,
-          otherSeat: sourceSeat,
-          death: false,
-          amount: amount,
-          resume:{type:srcType}
-        };
-        g.phase='wangxiAsk';
-        g.log=pushLog(g.log, p.name+' 是否发动【忘隙】…');
-        return true;
-      }
-      // 造成侧:攻击者是李典
-      if(other && other.alive && p && p.alive && generalHasCap(other, 'wangxi')){
-        g.pending = {
-          type:'wangxiAsk',
-          seat: sourceSeat,
-          otherSeat: seat,
-          death: false,
-          amount: amount,
-          resume:{type:srcType}
-        };
-        g.phase='wangxiAsk';
-        g.log=pushLog(g.log, other.name+' 是否发动【忘隙】…');
-        return true;
-      }
-    }
   }
+  if(!skipChain && startNextWangxi(g, {type:srcType})) return true;
   return false;
 }
 // ===== 濒死求桃:血量<=0 不立刻死亡,按座位顺序逐个询问是否打出【桃】救援 =====
@@ -3719,6 +3740,7 @@ function respondWangxi(activate){
       
       g.pending=null;
       if(checkWin(g)) return g;
+      if(startNextWangxi(g, resume)) return g;
       resumeAfterInterrupt(g, resume, seat);
       return g;
     }
@@ -3727,6 +3749,7 @@ function respondWangxi(activate){
     g.log=pushLog(g.log, me.name+'：不发动【忘隙】');
     g.pending=null;
     if(checkWin(g)) return g;
+    if(startNextWangxi(g, resume)) return g;
     resumeAfterInterrupt(g, resume, seat);
     return g;
   });
@@ -3740,6 +3763,7 @@ function respondWangxi(activate){
 // delayJudge 分支/respondXiaoguoChoice),seat 是被打断的那个人(dealDamage 的 seat 参数,
 // 也就是 resume.type==='sha'/'duel'/'aoe' 时这里需要的那个座位号)。
 function resumeAfterInterrupt(g, resume, seat){
+  if(startNextWangxi(g, resume)) return;
   if(resume.type==='ganglie'){
     resumeAfterInterrupt(g, resume.resume, resume.seat);
   } else if(resume.type==='tianxiang'){
@@ -5047,21 +5071,6 @@ function continueEnterDrawPhase(g){
     g.pending={type:'luoyiAsk', seat:g.turn};
     g.phase='luoyiAsk';
     g.log=pushLog(g.log, g.players[g.turn].name+' 是否发动【裸衣】,少摸1张牌换取本回合伤害加成…');
-  } else if(hasCap(g.players[g.turn], 'xunxun')){
-    // 李典【恂恂】: 摸牌阶段,放弃摸牌,改为亮出牌堆顶至多4张牌
-    const p = g.players[g.turn];
-    if(ensureDeck(g) && g.deck.length > 0){
-      const n = Math.min(4, g.deck.length);
-      const cards = g.deck.splice(g.deck.length - n, n);
-      g.pending = { type:'xunxunPick', seat: g.turn, cards, takeN: Math.min(2, n) };
-      g.phase = 'xunxunPick';
-      g.log = pushLog(g.log, p.name+' 发动【恂恂】,亮出牌堆顶'+n+'张牌…');
-      return;
-    } else {
-      // 牌堆为空,无法发动恂恂,直接进入摸牌阶段
-      g.log = pushLog(g.log, p.name+' 尝试发动【恂恂】,但牌堆为空,无法发动');
-      g.phase='draw';
-    }
   } else if(hasCap(g.players[g.turn], 'jiangchi')){
     // 曹彰【将驰】:摸牌阶段三选一
     const seat = g.turn;
