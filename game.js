@@ -4044,6 +4044,10 @@ function nextAskee(g, from, current){
 // startTrick: 锦囊牌已进弃牌堆后调用。初始化无懈询问轮次(exclude/depth 见 openWuxieRound 注释),
 // 交给 openWuxieRound 统一处理"算下一个问谁/问不到人就直接收尾"。
 function startTrick(g, info){
+  if(info.trick==='桃园结义' || info.trick==='五谷丰登'){
+    resolveTrick(g, info);
+    return;
+  }
   // card(可选):延时锦囊的物理牌对象,随 pending 透传,供 finishWuxieRound(被挡下→弃牌堆)/
   // resolveTrick(未被挡下→放进判定区)使用。seatB(可选):借刀杀人的第二个目标。
   // pool(可选):五谷丰登亮出的公共池。三者都只有各自那张牌会传,其它锦囊不传——
@@ -4077,10 +4081,14 @@ function openWuxieRound(g){
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
 function finishWuxieRound(g){
-  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card, sourceCard:g.pending.sourceCard, seatB:g.pending.seatB, pool:g.pending.pool};
+  const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card, sourceCard:g.pending.sourceCard, seatB:g.pending.seatB, pool:g.pending.pool, order:g.pending.order, idx:g.pending.idx, ctx:g.pending.ctx};
   const blocked = (g.pending.depth % 2)===1;
   if(g.pending.ctx==='aoe'){
     if(blocked){ aoeAdvance(g, info.to); } else { startAoeRespond(g, info.to); }
+  } else if(g.pending.ctx==='taoyuan'){
+    finishTaoyuanTarget(g, info, blocked);
+  } else if(g.pending.ctx==='wugu'){
+    finishWuguTargetWuxie(g, info, blocked);
   } else {
     if(blocked){
       if(info.trick==='铁索连环' && g.tiesuoQueue){
@@ -4099,6 +4107,88 @@ function finishWuxieRound(g){
       resolveTrick(g, info);
     }
   }
+}
+function aliveOrderFrom(g, from, includeFrom){
+  const order=[];
+  if(includeFrom && g.players[from] && g.players[from].alive) order.push(from);
+  let s=from;
+  const max=g.players.length;
+  for(let k=0;k<max;k++){
+    s=nextAlive(g,s);
+    if(s===null || s===from) break;
+    order.push(s);
+  }
+  return order;
+}
+function startTaoyuanWuxie(g, from, order, idx){
+  while(idx<order.length && (!g.players[order[idx]] || !g.players[order[idx]].alive)) idx++;
+  if(idx>=order.length){
+    g.pending=null;
+    g.phase='play';
+    g.log=pushLog(g.log, '【桃园结义】结算完毕');
+    return;
+  }
+  const to=order[idx];
+  g.pending={type:'wuxie', ctx:'taoyuan', trick:'桃园结义', from, to, exclude:from, depth:0, order, idx};
+  g.phase='wuxie';
+  g.log=pushLog(g.log, '结算对 '+g.players[to].name+' 的【桃园结义】…');
+  openWuxieRound(g);
+}
+function finishTaoyuanTarget(g, info, blocked){
+  const order=info.order || [];
+  const idx=Number.isInteger(info.idx) ? info.idx : 0;
+  const target=g.players[info.to];
+  const source=g.players[info.from];
+  if(blocked){
+    g.log=pushLog(g.log, '对 '+(target?target.name:'目标')+' 的【桃园结义】被抵消');
+    startTaoyuanWuxie(g, info.from, order, idx+1);
+    return;
+  }
+  if(target && target.alive && target.hp<target.maxHp){
+    target.hp++;
+    removeBuquCard(g, info.to);
+    g.log=pushLog(g.log, target.name+' 受【桃园结义】影响,回复1点体力');
+    if(source && info.to!==info.from && generalHasCap(target, 'enyuan')){
+      ensureDeck(g);
+      drawN(g, info.from, 1);
+      g.log=pushLog(g.log, target.name+' 回复1点体力,'+source.name+' 发动【恩怨】效果,摸一张牌');
+    }
+  } else if(target && target.alive){
+    g.log=pushLog(g.log, target.name+' 受【桃园结义】影响,体力已满');
+  }
+  startTaoyuanWuxie(g, info.from, order, idx+1);
+}
+function finishWugu(g, pool){
+  if(pool && pool.length) g.discard.push(...pool);
+  g.pending=null;
+  g.phase='play';
+  g.log=pushLog(g.log, '【五谷丰登】结算完毕');
+}
+function startWuguWuxie(g, from, pool, order, idx){
+  while(idx<order.length && (!g.players[order[idx]] || !g.players[order[idx]].alive)) idx++;
+  if(idx>=order.length || !pool || pool.length===0){
+    finishWugu(g, pool || []);
+    return;
+  }
+  const to=order[idx];
+  g.pending={type:'wuxie', ctx:'wugu', trick:'五谷丰登', from, to, exclude:from, depth:0, pool, order, idx};
+  g.phase='wuxie';
+  g.log=pushLog(g.log, '结算对 '+g.players[to].name+' 的【五谷丰登】…');
+  openWuxieRound(g);
+}
+function finishWuguTargetWuxie(g, info, blocked){
+  const order=info.order || [];
+  const idx=Number.isInteger(info.idx) ? info.idx : 0;
+  const pool=info.pool || [];
+  const target=g.players[info.to];
+  if(blocked){
+    g.log=pushLog(g.log, '对 '+(target?target.name:'目标')+' 的【五谷丰登】被抵消,跳过挑选');
+    startWuguWuxie(g, info.from, pool, order, idx+1);
+    return;
+  }
+  g.pending={type:'wugu', from:info.from, pool, order, idx};
+  g.phase='wugu';
+  g.log=pushLog(g.log, '轮到 '+(target?target.name:'目标')+' 从【五谷丰登】挑选');
 }
 // resolveTrick: 锦囊真正生效。决斗 -> 进入 duel 弃杀;顺手/拆桥 -> 作用于"手牌+装备",
 // 有多种可拿对象时开"选牌"子阶段交使用者选,唯一对象则直接结算,全空则无效果。
@@ -4123,30 +4213,8 @@ function resolveTrick(g, info){
     return;
   }
   if(info.trick==='桃园结义'){
-    // 对所有存活角色生效(含使用者自己);已满血的人跳过,不溢出、不报错。
-    const source = g.players[info.from];
-    g.players.forEach(p=>{ if(p && p.alive && p.hp<p.maxHp) p.hp++; });
-    // 为每个存活且实际回复体力的玩家移除不屈牌
-    // 只需要为周泰自己处理，因为只有周泰有不屈牌
-    g.players.forEach((p, seat) => {
-      if(p && p.alive && hasCap(p,'buqu') && p.buquCards && p.buquCards.length > 0 && p.hp > 0) {
-        removeBuquCard(g, seat);
-      }
-    });
-    // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
-    // 找到法正
-    const fazheng = g.players.find(p => p && p.alive && generalHasCap(p, 'enyuan'));
-    if(fazheng && generalHasCap(fazheng, 'enyuan')) {
-      const fazhengSeat = g.players.findIndex(p => p === fazheng);
-      // 如果法正回复了体力（即法正体力<maxHp），且使用者不是法正自己
-      if(fazhengSeat !== info.from && fazheng.hp > 0 && fazheng.hp <= fazheng.maxHp) {
-        ensureDeck(g);
-        drawN(g, info.from, 1);
-        g.log = pushLog(g.log, fazheng.name + ' 回复1点体力,' + source.name + ' 发动【恩怨】效果,摸一张牌');
-      }
-    }
-    g.pending=null; g.phase='play';
-    g.log=pushLog(g.log, g.players[info.from].name+' 【桃园结义】生效,所有存活角色回复1点体力');
+    const order=aliveOrderFrom(g, info.from, true);
+    startTaoyuanWuxie(g, info.from, order, 0);
     return;
   }
   if(info.trick==='五谷丰登'){
@@ -4157,9 +4225,8 @@ function resolveTrick(g, info){
     const order=[info.from];
     let s=info.from;
     for(let k=1;k<aliveCount(g);k++){ s=nextAlive(g,s); if(s===info.from) break; order.push(s); }
-    g.pending={type:'wugu', from:info.from, pool:info.pool.slice(), order, idx:0};
-    g.phase='wugu';
     g.log=pushLog(g.log, '【五谷丰登】开始,从 '+g.players[info.from].name+' 起依次挑选');
+    startWuguWuxie(g, info.from, info.pool.slice(), order, 0);
     return;
   }
   if(info.trick==='火攻'){

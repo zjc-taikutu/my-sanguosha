@@ -1311,12 +1311,7 @@ function wuguPick(poolIdx){
     pool.splice(poolIdx,1);
     me.hand.push(card);
     g.log=pushLog(g.log, me.name+' 从【五谷丰登】挑选了一张牌');
-    g.pending.idx = idx+1;
-    if(g.pending.idx>=order.length){
-      if(pool.length) g.discard.push(...pool); // 兜底:阵亡边界导致池未分完的剩牌
-      g.pending=null; g.phase='play';
-      g.log=pushLog(g.log, '【五谷丰登】结算完毕');
-    }
+    startWuguWuxie(g, g.pending.from, pool, order, idx+1);
     return g;
   });
 }
