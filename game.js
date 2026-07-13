@@ -4096,14 +4096,36 @@ function startTrick(g, info){
 // 原地更新,再重新走一遍座位遍历,不存在真正的递归调用,不会有调用栈风险。
 // openWuxieRound: (重新)计算这一轮该问谁;问不到人(exclude 是唯一存活者,极端边界)则直接收尾。
 function openWuxieRound(g){
-  const asking=nextAskee(g, g.pending.exclude, g.pending.exclude);
+  const asking=nextWuxieAskee(g, g.pending);
   if(asking===null){ finishWuxieRound(g); return; }
   g.pending.asking=asking;
+  markWuxieAsked(g);
   const verb = g.pending.depth>0 ? '反制' : '使用';
   g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
 }
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
+function nextWuxieAskee(g, pending, current){
+  if(pending && pending.askAll && pending.depth===0){
+    const n=g.players.length;
+    const asked=Array.isArray(pending.asked) ? pending.asked : [];
+    const start=Number.isInteger(current)
+      ? current
+      : ((Number.isInteger(pending.askStart) ? pending.askStart : pending.from) + n - 1) % n;
+    for(let k=1;k<=n;k++){
+      const s=(start+k)%n;
+      if(asked.includes(s)) continue;
+      if(g.players[s] && g.players[s].alive) return s;
+    }
+    return null;
+  }
+  return nextAskee(g, pending.exclude, Number.isInteger(current) ? current : pending.exclude);
+}
+function markWuxieAsked(g){
+  if(!(g.pending && g.pending.askAll && g.pending.depth===0 && Number.isInteger(g.pending.asking))) return;
+  if(!Array.isArray(g.pending.asked)) g.pending.asked=[];
+  if(!g.pending.asked.includes(g.pending.asking)) g.pending.asked.push(g.pending.asking);
+}
 function finishWuxieRound(g){
   const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to, card:g.pending.card, sourceCard:g.pending.sourceCard, seatB:g.pending.seatB, pool:g.pending.pool, order:g.pending.order, idx:g.pending.idx, ctx:g.pending.ctx};
   const blocked = (g.pending.depth % 2)===1;
@@ -4154,6 +4176,9 @@ function startTaoyuanWuxie(g, from, order, idx){
   }
   const to=order[idx];
   g.pending={type:'wuxie', ctx:'taoyuan', trick:'桃园结义', from, to, exclude:from, depth:0, order, idx};
+  g.pending.askAll=true;
+  g.pending.askStart=from;
+  g.pending.asked=[];
   g.phase='wuxie';
   g.log=pushLog(g.log, '结算对 '+g.players[to].name+' 的【桃园结义】…');
   openWuxieRound(g);
@@ -4196,6 +4221,9 @@ function startWuguWuxie(g, from, pool, order, idx){
   }
   const to=order[idx];
   g.pending={type:'wuxie', ctx:'wugu', trick:'五谷丰登', from, to, exclude:from, depth:0, pool, order, idx};
+  g.pending.askAll=true;
+  g.pending.askStart=from;
+  g.pending.asked=[];
   g.phase='wuxie';
   g.log=pushLog(g.log, '结算对 '+g.players[to].name+' 的【五谷丰登】…');
   openWuxieRound(g);
@@ -4394,16 +4422,19 @@ function respondWuxie(useWuxie){
       markCardSound(g, '无懈可击', mySeat, card);
       g.pending.depth++;
       g.pending.exclude=mySeat;
+      delete g.pending.asking;
+      if(g.pending.askAll) g.pending.asked=[];
       openWuxieRound(g);
       return g;
     }
     // 不出:指针推进到下一个存活玩家;绕回 exclude 即这一轮问完一圈 -> 收尾
     g.log=pushLog(g.log, me.name+'：不出');
-    const nxt=nextAskee(g, g.pending.exclude, mySeat);
+    const nxt=nextWuxieAskee(g, g.pending, mySeat);
     if(nxt===null){
       finishWuxieRound(g);
     } else {
       g.pending.asking=nxt;
+      markWuxieAsked(g);
       const verb = g.pending.depth>0 ? '反制' : '使用';
       g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否'+verb+'【无懈可击】…');
     }
