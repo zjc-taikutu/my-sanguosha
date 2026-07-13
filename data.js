@@ -485,7 +485,7 @@ function canUseAs(player, card, role){
   if(!card) return false;
   if(role==='杀' && isShaName(card.name)) return true;
   if(card.name===role) return true;
-  if(generalHasCap(player,'longdan')){
+  if(hasCap(player,'longdan')){
     if(role==='杀' && card.name==='闪') return true;
     if(role==='闪' && card.name==='杀') return true;
   }
