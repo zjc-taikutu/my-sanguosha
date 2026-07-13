@@ -2674,6 +2674,160 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaInfo){
   }
   g.phase='respond'; // 黑/无八卦阵:照常进响应,等目标出闪或受伤
 }
+// 陈宫【明策】入口：出牌阶段限一次，检查是否有可用的装备牌或杀
+function startMingce(){
+  tx(g=>{
+    if(g.phase!=='play' || g.turn!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'mingce')) return g;
+    if(g.mingceUsed) return g;
+    // 检查手牌是否有装备或杀
+    const hasMingceCard = (me.hand||[]).some((c,i)=>c && (isEquipment(c) || canUseAs(me,c,'杀')));
+    // 检查装备区是否有装备
+    const hasMingceEquip = me.equips && Object.values(me.equips).some(eq=>eq!==null);
+    if(!hasMingceCard && !hasMingceEquip) return g;
+    // 必须有其他存活玩家
+    const others = g.players.filter((p,i)=>p && p.alive && i!==mySeat);
+    if(others.length===0) return g;
+    g.mingceUsed = true;
+    g.pending = {type:'mingcePickCard', sourceSeat:mySeat};
+    g.phase = 'mingcePickCard';
+    return g;
+  });
+}
+// 陈宫【明策】检查是否有可用的牌（UI 按钮可见性用）
+function checkMingceCard(p){
+  if(!p || !p.alive || !hasCap(p,'mingce')) return false;
+  if(g && g.mingceUsed) return false;
+  const hand = (p.hand||[]).some((c,i)=>c && (isEquipment(c) || canUseAs(p,c,'杀')));
+  const equip = p.equips && Object.values(p.equips).some(eq=>eq!==null);
+  return hand || equip;
+}
+// 陈宫【明策】选择牌/装备
+function pickMingceCard(cardIdx, isEquip){
+  tx(g=>{
+    if(g.phase!=='mingcePickCard'||!g.pending||g.pending.type!=='mingcePickCard'||g.pending.sourceSeat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive) return g;
+    let card = null, cardName = '';
+    if(isEquip){
+      const equip = me.equips && me.equips[cardIdx];
+      if(!equip) return g;
+      card = equip;
+      cardName = equip.name;
+      me.equips[cardIdx] = null;
+    }else{
+      if(cardIdx<0 || cardIdx>=me.hand.length) return g;
+      const c = me.hand[cardIdx];
+      if(!c || (!isEquipment(c) && !canUseAs(me,c,'杀'))) return g;
+      card = me.hand.splice(cardIdx,1)[0];
+      cardName = card.name;
+    }
+    // 传入牌名与牌对象，进入选目标阶段
+    g.pending = {
+      type:'mingcePickTarget',
+      sourceSeat:mySeat,
+      targetSeat:null,
+      cardToGive:[card],
+      cardName:cardName
+    };
+    g.phase = 'mingcePickTarget';
+    return g;
+  });
+}
+// 陈宫【明策】选择接收牌的目标
+function pickMingceTarget(targetSeat){
+  tx(g=>{
+    if(g.phase!=='mingcePickTarget'||!g.pending||g.pending.type!=='mingcePickTarget'||g.pending.sourceSeat!==mySeat) return g;
+    const target = g.players[targetSeat];
+    if(!target || !target.alive || targetSeat===mySeat) return g;
+    g.pending.targetSeat = targetSeat;
+    // 找出目标攻击范围内的其他角色
+    const candidates = g.players.filter((p,i)=>p && p.alive && i!==targetSeat && i!==mySeat && canReachSha(g, targetSeat, i));
+    if(candidates.length===0){
+      // 无可选第二目标，直接进入选择阶段
+      g.pending = {
+        type:'mingceChoice',
+        sourceSeat:mySeat,
+        targetSeat:targetSeat,
+        target2Seat:null,
+        cardName:g.pending.cardName,
+        cardToGive:g.pending.cardToGive
+      };
+      g.phase = 'mingceChoice';
+    }else{
+      g.pending = {
+        type:'mingcePickTarget2',
+        sourceSeat:mySeat,
+        targetSeat:targetSeat,
+        cardToGive:g.pending.cardToGive,
+        cardName:g.pending.cardName,
+        candidates:candidates.map(p=>g.players.indexOf(p))
+      };
+      g.phase = 'mingcePickTarget2';
+    }
+    return g;
+  });
+}
+// 陈宫【明策】选择第二目标（被攻击者）
+function pickMingceTarget2(seat){
+  tx(g=>{
+    if(g.phase!=='mingcePickTarget2'||!g.pending||g.pending.type!=='mingcePickTarget2'||g.pending.sourceSeat!==mySeat) return g;
+    if(!g.pending.candidates.includes(seat)) return g;
+    g.pending = {
+      type:'mingceChoice',
+      sourceSeat:mySeat,
+      targetSeat:g.pending.targetSeat,
+      target2Seat:seat,
+      cardName:g.pending.cardName,
+      cardToGive:g.pending.cardToGive
+    };
+    g.phase = 'mingceChoice';
+    return g;
+  });
+}
+// 陈宫【明策】取消
+function cancelMingce(){
+  tx(g=>{
+    if(!(g.phase==='mingcePickCard'||g.phase==='mingcePickTarget'||g.phase==='mingcePickTarget2'||g.phase==='mingceChoice')||!g.pending||g.pending.sourceSeat!==mySeat) return g;
+    g.mingceUsed = false;
+    g.pending = null;
+    g.phase = 'play';
+    return g;
+  });
+}
+// 陈宫【明策】接收牌的角色选择：视为用杀 / 摸牌
+function chooseMingceOption(option){
+  tx(g=>{
+    if(g.phase!=='mingceChoice'||!g.pending||g.pending.type!=='mingceChoice'||g.pending.targetSeat!==mySeat) return g;
+    const source = g.players[g.pending.sourceSeat];
+    const target = g.players[g.pending.targetSeat];
+    const target2 = g.pending.target2Seat!==null ? g.players[g.pending.target2Seat] : null;
+    const cardName = g.pending.cardName;
+    const cardToGive = g.pending.cardToGive;
+    if(!target || !target.alive) return g;
+    // 先把牌交给目标
+    if(cardToGive && cardToGive.length>0){
+      cardToGive.forEach(c=>target.hand.push(c));
+      g.log = pushLog(g.log, (source?source.name:'陈宫')+' 将 【'+cardName+'】 交给 '+target.name+'（明策）');
+    }
+    if(option==='sha'){
+      // 视为对目标使用一张普通【杀】，无距离限制，无次数限制
+      if(target2 && target2.alive && source){
+        g.log = pushLog(g.log, target.name+' 选择视为对 '+target2.name+' 使用【杀】（明策）');
+        // 直接用 resolveShaUse，source 是视为使用杀的玩家（接收牌的角色）
+        resolveShaUse(g, g.players.indexOf(target), g.players.indexOf(target2), '明策:视为杀', 'none', undefined);
+      }
+    }else if(option==='draw'){
+      drawN(g, g.players.indexOf(target), 1);
+      g.log = pushLog(g.log, target.name+' 选择摸一张牌（明策）');
+    }
+    g.pending = null;
+    g.phase = 'play';
+    return g;
+  });
+}
+
 // respondTieqi: 仅攻击者(pending.from)可响应。不发动:直接接原尾巴(noShan=false)。
 // 发动:judge() 翻牌(可被鬼才改判,和其它判定场景同一套 maybeGuicai),红则 noShan=true。
 function respondTieqi(activate){
