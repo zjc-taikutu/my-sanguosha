@@ -2310,9 +2310,21 @@ function finishTurn(g, endingSeat){
 }
 // advanceXiaoguo: (重新)找下一个有资格的候选人问;问完(或从一开始就没人有资格)则真正切换回合。
 // 每个候选人发动或不发动之后都会调这个函数继续找下一个,直到问完一圈——理论上支持多个乐进都发动。
+// **真实bug修复**:asker===null(问完一圈,没人发动)分支曾经直接调用 finishTurn,没有先把
+// g.pending 置空——finishTurn/startTurn 这条链假定"进来时 pending 已经是 null",一旦这条
+// 假定被违反,骁果这个已经问完、毫无意义的 pending 对象就会原样带进下一个玩家的整个回合,
+// pruneExchangeCards 的 !g.pending 条件因此永远无法满足,导致这期间任何装备/出牌都会卡在
+// 中央出牌区不消失,直到未来某个完全不相关的动作自己的收尾逻辑碰巧把 g.pending 置空为止
+// (真实复现:乐进装备赤兔、黄忠装备绝影,两张牌都卡着不消失,直到后续一次杀伤害结算才
+// 一起清空——见 CLAUDE.md 对应条目)。这不是"信号设计得不够精细",pruneExchangeCards 的
+// !pending&&!aoe 判断本身完全够用、反应也很及时,问题纯粹是这个字段没有被正确置空。
+// 这里是骁果这整条链**唯一**"决定问完、交出控制权"的地方,修在这一处能同时覆盖
+// endTurn()/respondXiaoguo(false)/respondXiaoguoChoice 三条进入路径,不需要在各个调用点
+// 分别打补丁——这是"循环型响应函数必须在结束分支显式置空pending"这条通用约定的一个实例,
+// 同类模式见 enterDrawPhase(洛神)的说明。
 function advanceXiaoguo(g, endingSeat, current){
   const asker=nextXiaoguoAsker(g, endingSeat, current);
-  if(asker===null){ finishTurn(g, endingSeat); return; }
+  if(asker===null){ g.pending=null; finishTurn(g, endingSeat); return; }
   g.pending={type:'xiaoguo', endingSeat, asking:asker};
   g.phase='xiaoguo';
   g.log=pushLog(g.log, '结束阶段:询问 '+g.players[asker].name+' 是否发动【骁果】…');
@@ -2338,7 +2350,18 @@ function startTurn(g, seat){
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。
 // 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段,交给 advancePastPlay 继续判断
 // 出牌/弃牌阶段是否也被跳过——不在这里各自重复"检查下一个标志"的逻辑。
+// **真实bug修复**:甄姬【洛神】的三个"循环判定结束"分支(respondLuoshen 的"不发动"/
+// "牌堆无牌可判",finishLuoshenJudge 的判红分支)原本都是直接调用这个函数,没有先把
+// g.pending 置空——和骁果(advanceXiaoguo)是完全独立的第二个真实bug,但同一种模式:
+// 洛神判定结束、马上要进入摸牌阶段,这个函数假定"进来时 pending 已经是 null",一旦这条
+// 假定被违反,已经问完的洛神 pending 就会带着过期数据漏进摸牌/出牌阶段,同样会卡住
+// pruneExchangeCards。这里统一在入口显式置空,一次性覆盖洛神那三个结束分支,不需要
+// 在三处各自打补丁——这是"循环型响应函数必须在结束分支显式置空pending"这条通用约定的
+// 另一个实例(见 CLAUDE.md 对应条目和 advanceXiaoguo 的说明)。这个函数的全部现有调用点
+// (continueTurnStart 没有洛神能力时、洛神三个结束分支)本来就都是"pending 应该已经是
+// null"的边界,这里显式置空只是把这条隐含假设变成函数自己保证的事实,不依赖调用方记性。
 function enterDrawPhase(g){
+  g.pending=null;
   if(g.skipDraw){
     g.skipDraw=false;
     g.log=pushLog(g.log, g.players[g.turn].name+' 因【兵粮寸断】跳过摸牌阶段');
