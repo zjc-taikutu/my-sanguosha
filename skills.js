@@ -252,14 +252,21 @@ function recastLianHuan(cardIdx){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'lianhuan')) return g;
+    if(!me || !me.alive) return g;
     const card=me.hand[cardIdx];
-    if(!card || card.suit!=='♣') return g;
+    const isRealTieSuo = card && card.name==='铁索连环';
+    const isPangTongRecast = card && hasCap(me,'lianhuan') && card.suit==='♣';
+    if(!isRealTieSuo && !isPangTongRecast) return g;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
     drawN(g, mySeat, 1);
-    g.log=pushLog(g.log, me.name+' 重铸【'+card.name+'】发动【连环】,摸一张牌');
-    markSkillSound(g, '连环');
+    if(isRealTieSuo){
+      g.log=pushLog(g.log, me.name+' 重铸【铁索连环】,摸一张牌');
+      markCardSound(g, '铁索连环', mySeat, card);
+    } else {
+      g.log=pushLog(g.log, me.name+' 重铸【'+card.name+'】发动【连环】,摸一张牌');
+      markSkillSound(g, '连环');
+    }
     return g;
   });
 }
@@ -272,6 +279,127 @@ function guhuoClaimableNames(){
 
 function guhuoActionId(name){
   return isShaName(name) ? '杀' : name;
+}
+function guhuoResponseRole(name){
+  if(isShaName(name)) return '杀';
+  if(name==='闪') return '闪';
+  if(name==='桃') return '桃';
+  return null;
+}
+function guhuoResponseNamesForRole(role){
+  if(role==='杀') return ['杀','火杀','雷杀'];
+  if(role==='闪') return ['闪'];
+  if(role==='桃') return ['桃'];
+  return [];
+}
+function canStartGuhuoResponse(g, seat, role){
+  const me=g.players[seat];
+  if(!me || !me.alive || !hasCap(me,'guhuo') || g.guhuoUsed) return false;
+  if(role==='闪'){
+    if(g.phase==='respond' && g.pending && g.pending.to===seat && !g.pending.noShan) return true;
+    return g.phase==='aoeResp' && g.pending && g.pending.to===seat && g.pending.need==='闪';
+  }
+  if(role==='杀'){
+    if(me.jiangchiNoSlash) return false;
+    if(g.phase==='duel' && g.pending && g.pending.active===seat) return true;
+    return g.phase==='aoeResp' && g.pending && g.pending.to===seat && g.pending.need==='杀';
+  }
+  if(role==='桃'){
+    if(!(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===seat)) return false;
+    if(g.wanshaActive && g.wanshaDyingSeat===g.pending.seat){
+      const jiaxuSeat=findPlayerWithCap(g,'wansha');
+      if(jiaxuSeat!==null && jiaxuSeat===g.turn && seat!==jiaxuSeat && seat!==g.pending.seat) return false;
+    }
+    return true;
+  }
+  return false;
+}
+function restoreGuhuoResponse(g, d){
+  const r=d && d.response;
+  if(!r) return false;
+  g.phase=r.phase;
+  g.pending=r.pending;
+  return true;
+}
+function resolveGuhuoResponseShan(g, seat, actual, claimed){
+  if(!(g.phase==='respond' && g.pending && g.pending.to===seat)) return;
+  const me=g.players[seat];
+  const attacker=g.players[g.pending.from];
+  const needed=hasCap(attacker,'wushuang') ? 2 : 1;
+  const played=(g.pending.shanCount||0)+1;
+  g.discard.push(actual);
+  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,打出【'+claimed.name+'】抵消【杀】'+(needed>1?'（'+played+'/'+needed+'）':''));
+  markCardSound(g, '闪', seat, actual);
+  if(played<needed){ g.pending.shanCount=played; return; }
+  if(maybeStartShaOffsetEffects(g, g.pending.from, seat, g.pending.sourceCard)) return;
+  g.pending=null;
+  finishSingleShaTarget(g);
+}
+function resolveGuhuoResponseSha(g, seat, actual, claimed){
+  const me=g.players[seat];
+  if(g.phase==='duel' && g.pending && g.pending.active===seat){
+    const opp=(seat===g.pending.from)?g.pending.to:g.pending.from;
+    const needed=(!hasCap(me,'wushuang') && hasCap(g.players[opp],'wushuang')) ? 2 : 1;
+    const played=(g.pending.shaCount||0)+1;
+    g.discard.push(actual);
+    g.log=pushLog(g.log, me.name+' 【蛊惑】生效,打出【'+claimed.name+'】响应【决斗】'+(needed>1?'（'+played+'/'+needed+'）':''));
+    markCardSound(g, '杀', seat, actual, opp);
+    if(seat===g.turn) g.shaPlayedInDuel=true;
+    if(played<needed){ g.pending.shaCount=played; return; }
+    g.pending.active=(seat===g.pending.from)?g.pending.to:g.pending.from;
+    g.pending.shaCount=0;
+    return;
+  }
+  if(g.phase==='aoeResp' && g.pending && g.pending.to===seat && g.aoe && g.pending.need==='杀'){
+    g.discard.push(actual);
+    g.log=pushLog(g.log, me.name+' 【蛊惑】生效,打出【'+claimed.name+'】,抵消【'+g.aoe.trick+'】');
+    markCardSound(g, '杀', seat, actual);
+    aoeAdvance(g, seat);
+  }
+}
+function resolveGuhuoResponseAoe(g, seat, actual, claimed, role){
+  const me=g.players[seat];
+  if(!(g.phase==='aoeResp' && g.pending && g.pending.to===seat && g.aoe && g.pending.need===role)) return false;
+  g.discard.push(actual);
+  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,打出【'+claimed.name+'】,抵消【'+g.aoe.trick+'】');
+  markCardSound(g, role, seat, actual);
+  aoeAdvance(g, seat);
+  return true;
+}
+function resolveGuhuoResponseTao(g, seat, actual, claimed){
+  if(!(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===seat)) return;
+  const me=g.players[seat];
+  const dyingP=g.players[g.pending.seat];
+  if(!dyingP) return;
+  g.discard.push(actual);
+  dyingP.hp++;
+  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+claimed.name+'】对 '+dyingP.name+' 使用,回复1点体力（体力'+dyingP.hp+'）');
+  removeBuquCard(g, g.pending.seat);
+  if(generalHasCap(dyingP, 'enyuan') && seat!==g.pending.seat){
+    ensureDeck(g);
+    drawN(g, seat, 1);
+    g.log=pushLog(g.log, dyingP.name+' 回复1点体力,'+me.name+' 发动【恩怨】效果,摸一张牌');
+  }
+  markCardSound(g, '桃', seat, actual, g.pending.seat);
+  if(dyingP.hp>0) finishDying(g, false);
+}
+function resolveGuhuoResponse(g, d){
+  if(!restoreGuhuoResponse(g, d)){
+    if(d && d.actualCard) g.discard.push(d.actualCard);
+    return;
+  }
+  const role=guhuoResponseRole(d.claimedCard && d.claimedCard.name);
+  if(role==='闪' && g.phase==='aoeResp' && resolveGuhuoResponseAoe(g, d.sourceSeat, d.actualCard, d.claimedCard, '闪')){
+    return;
+  } else if(role==='闪' && g.phase==='respond' && g.pending && g.pending.to===d.sourceSeat){
+    resolveGuhuoResponseShan(g, d.sourceSeat, d.actualCard, d.claimedCard);
+  } else if(role==='杀' && ((g.phase==='duel' && g.pending && g.pending.active===d.sourceSeat) || (g.phase==='aoeResp' && g.pending && g.pending.to===d.sourceSeat))){
+    resolveGuhuoResponseSha(g, d.sourceSeat, d.actualCard, d.claimedCard);
+  } else if(role==='桃' && g.phase==='dying' && g.pending && g.pending.asking===d.sourceSeat){
+    resolveGuhuoResponseTao(g, d.sourceSeat, d.actualCard, d.claimedCard);
+  } else if(d.actualCard) {
+    g.discard.push(d.actualCard);
+  }
 }
 
 function runGuhuoAsSource(sourceSeat, fn){
@@ -324,6 +452,15 @@ function finishGuhuo(g, shouldResolve){
   g.phase='play';
   if(!me || !me.alive || !actual || !claimed){
     if(actual) g.discard.push(actual);
+    return;
+  }
+  if(d.response){
+    if(!shouldResolve){
+      g.discard.push(actual);
+      restoreGuhuoResponse(g, d);
+      return;
+    }
+    resolveGuhuoResponse(g, d);
     return;
   }
   if(!shouldResolve){
@@ -384,6 +521,41 @@ function startGuhuo(cardIdx, claimedName){
     me.hand.splice(cardIdx,1);
     g.guhuoUsed=true;
     g.pending={ type:'guhuoQuestion', sourceSeat:mySeat, actualCard:actual, claimedCard:claimed, questioners:[], answered:[] };
+    g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
+    markSkillSound(g, '蛊惑');
+    const asker=nextGuhuoAsker(g, mySeat);
+    if(asker===null){
+      g.log=pushLog(g.log, '无人可质疑【蛊惑】');
+      resolveGuhuoAfterQuestion(g);
+    } else {
+      g.pending.asking=asker;
+      g.phase='guhuoQuestion';
+      g.log=pushLog(g.log, g.players[asker].name+' 是否质疑【蛊惑】?');
+    }
+    return g;
+  });
+}
+function startGuhuoResponse(cardIdx, claimedName){
+  tx(g=>{
+    const role=guhuoResponseRole(claimedName);
+    if(!role || !canStartGuhuoResponse(g, mySeat, role)) return g;
+    const me=g.players[mySeat];
+    const actual=me && me.hand && me.hand[cardIdx];
+    if(!actual || !guhuoResponseNamesForRole(role).includes(claimedName)) return g;
+    const claimed={ id:actual.id, name:claimedName, suit:actual.suit, rank:actual.rank, originalName:actual.name };
+    me.hand.splice(cardIdx,1);
+    g.guhuoUsed=true;
+    const oldPhase=g.phase;
+    const oldPending=g.pending;
+    g.pending={
+      type:'guhuoQuestion',
+      sourceSeat:mySeat,
+      actualCard:actual,
+      claimedCard:claimed,
+      questioners:[],
+      answered:[],
+      response:{ phase:oldPhase, pending:oldPending }
+    };
     g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
     markSkillSound(g, '蛊惑');
     const asker=nextGuhuoAsker(g, mySeat);

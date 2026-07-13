@@ -229,6 +229,23 @@ function jijiuChoices(p){
   EQUIP_SLOTS.forEach(slot=>{ const card=p.equips&&p.equips[slot]; if(card&&isRed(card)) out.push({kind:'equip', slot, label:slotLabel[slot]+'【'+card.name+'】'}); });
   return out;
 }
+function addGuhuoResponseButtons(container, g, me, role){
+  if(!hasCap(me,'guhuo') || g.guhuoUsed) return 0;
+  const names=guhuoResponseNamesForRole(role);
+  if(names.length===0) return 0;
+  let count=0;
+  (me.hand||[]).forEach((card, idx)=>{
+    names.forEach(name=>{
+      const b=document.createElement('button');
+      b.className='ghost';
+      b.textContent='蛊惑:手牌【'+card.name+'】当【'+name+'】';
+      b.onclick=()=>{ confirmAndPlay('扣置这张手牌发动【蛊惑】,声明为【'+name+'】？', ()=>startGuhuoResponse(idx, name)); };
+      container.appendChild(b);
+      count++;
+    });
+  });
+  return count;
+}
 
 // renderPickGeneral: g.phase==='pickingGeneral' 阶段的UI。两种状态——①自己的
 // generalChoices 还有值(还没选):展示3个候选武将卡片(头像+武将名·技能名+完整desc说明
@@ -2342,6 +2359,7 @@ function renderControls(g){
       b1.textContent='出【闪】'; b1.onclick=()=>respondShan(true);
       c.appendChild(b1);
     }
+    const guhuoShanCount = !g.pending.noShan ? addGuhuoResponseButtons(c, g, me, '闪') : 0;
     const b2=document.createElement('button');
     b2.textContent='不闪（受伤）'; b2.onclick=()=>respondShan(false);
     c.appendChild(b2);
@@ -2351,7 +2369,8 @@ function renderControls(g){
     const lead = escapeHtml(from)+' 对你出【杀】,';
     let tail;
     if(g.pending.noShan) tail='对方发动了【铁骑】且判定为红,此杀不可被闪抵消,只能受到伤害。';
-    else if(!hasShan) tail='你没有【闪】,只能受到伤害。';
+    else if(!hasShan && guhuoShanCount===0) tail='你没有【闪】,只能受到伤害。';
+    else if(!hasShan) tail='你没有【闪】,可以发动【蛊惑】声明【闪】,或选择受到伤害。';
     else if(shanNeeded>1 && g.pending.shanCount>0) tail='对方是吕布【无双】,已打出'+g.pending.shanCount+'/'+shanNeeded+'张【闪】,还需再打出一张才能抵消!';
     else if(shanNeeded>1) tail='对方是吕布【无双】,需要连续打出2张【闪】才能抵消。';
     else tail='是否打出【闪】?';
@@ -2375,6 +2394,7 @@ function renderControls(g){
       b1.textContent='打出【杀】'; b1.onclick=()=>duelResponse(true);
       c.appendChild(b1);
     }
+    addGuhuoResponseButtons(c, g, me, '杀');
     const b2=document.createElement('button');
     b2.textContent='认输（受伤）'; b2.onclick=()=>duelResponse(false);
     c.appendChild(b2);
@@ -2504,6 +2524,7 @@ function renderControls(g){
       b.onclick=()=>respondDying(true, opt);
       c.appendChild(b);
     });
+    const guhuoTaoCount = addGuhuoResponseButtons(c, g, me, '桃');
     if(isSelf && hasCap(me,'niepan') && !me.nirvanaUsed){
       const nb=document.createElement('button'); nb.className='primary';
       nb.textContent='发动【涅槃】';
@@ -2513,7 +2534,7 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不救'; b2.onclick=()=>respondDying(false);
     c.appendChild(b2);
-    const canSave = hasTao || jijiuOpts.length>0;
+    const canSave = hasTao || jijiuOpts.length>0 || guhuoTaoCount>0;
     setBanner(canSave
       ? (isSelf ? dyingP.name+' 濒死,你是否使用【桃】自救?' : dyingP.name+' 濒死,是否对其使用【桃】救援?')
       : escapeHtml(dyingP.name)+' 濒死,你没有可用的【桃】,只能选择不救。');
@@ -2581,11 +2602,12 @@ function renderControls(g){
       b1.textContent='打出【'+need+'】'; b1.onclick=()=>aoeRespond(true);
       c.appendChild(b1);
     }
+    const guhuoAoeCount = addGuhuoResponseButtons(c, g, me, need);
     const b2=document.createElement('button');
     b2.textContent='不出（受伤）'; b2.onclick=()=>aoeRespond(false);
     c.appendChild(b2);
     const trick = g.aoe ? g.aoe.trick : need;
-    setBanner('【'+escapeHtml(trick)+'】要求你打出【'+escapeHtml(need)+'】。'+(hasCard?'':'你没有【'+escapeHtml(need)+'】,只能受到伤害。'));
+    setBanner('【'+escapeHtml(trick)+'】要求你打出【'+escapeHtml(need)+'】。'+((hasCard||guhuoAoeCount>0)?'':'你没有【'+escapeHtml(need)+'】,只能受到伤害。'));
     return;
   }
   if(g.phase==='aoeResp' && g.pending){
@@ -3111,11 +3133,12 @@ function renderControls(g){
           };
           c.appendChild(ub);
         }
-        if(hasCap(me,'lianhuan') && selCard.suit==='♣'){
+        if(selCard.name==='铁索连环' || (hasCap(me,'lianhuan') && selCard.suit==='♣')){
           const rb=document.createElement('button'); rb.className='ghost';
           const idx=selectedCardIdx;
-          rb.textContent='重铸【连环】';
-          rb.onclick=()=>{ confirmAndPlay('重铸这张梅花牌发动【连环】,弃置后摸一张牌？', ()=>recastLianHuan(idx)); };
+          rb.textContent=selCard.name==='铁索连环'?'重铸【铁索连环】':'重铸【连环】';
+          const msg=selCard.name==='铁索连环'?'重铸【铁索连环】,弃置后摸一张牌？':'重铸这张梅花牌发动【连环】,弃置后摸一张牌？';
+          rb.onclick=()=>{ confirmAndPlay(msg, ()=>recastLianHuan(idx)); };
           c.appendChild(rb);
         }
         const cb=document.createElement('button'); cb.className='ghost';
@@ -3125,7 +3148,8 @@ function renderControls(g){
       const rangeNote = (actionId==='杀') ? '，攻击距离 '+attackRange(g,mySeat)+'，仅范围内对手可选' : '';
       const rendeNote = hasCap(me,'rende') ? '；也可点目标座位上的“仁德”按钮交给别人' : '';
       const shuangxiongNote = canShuangxiongDuelCard(me, selCard) ? '；也可点目标座位上的“双雄:决斗”按钮' : '';
-      const recastNote = hasCap(me,'lianhuan') && selCard.suit==='♣' ? '；也可重铸发动【连环】' : '';
+      const canRecast = selCard.name==='铁索连环' || (hasCap(me,'lianhuan') && selCard.suit==='♣');
+      const recastNote = canRecast ? (selCard.name==='铁索连环' ? '；也可重铸【铁索连环】' : '；也可重铸发动【连环】') : '';
       const guhuoNote = hasCap(me,'guhuo') && !g.guhuoUsed ? '；也可发动【蛊惑】声明为其他牌' : '';
       setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+shuangxiongNote+recastNote+guhuoNote+'(或点牌取消)。');
       if(spec && !spec.target && spec.canPlay(g,me,selCard)){
@@ -3152,11 +3176,12 @@ function renderControls(g){
           c.appendChild(gb);
         });
       }
-      if(hasCap(me,'lianhuan') && selCard.suit==='♣'){
+      if(canRecast){
         const rb=document.createElement('button'); rb.className='ghost';
         const idx=selectedCardIdx;
-        rb.textContent='重铸【连环】';
-        rb.onclick=()=>{ confirmAndPlay('重铸这张梅花牌发动【连环】,弃置后摸一张牌？', ()=>recastLianHuan(idx)); };
+        rb.textContent=selCard.name==='铁索连环'?'重铸【铁索连环】':'重铸【连环】';
+        const msg=selCard.name==='铁索连环'?'重铸【铁索连环】,弃置后摸一张牌？':'重铸这张梅花牌发动【连环】,弃置后摸一张牌？';
+        rb.onclick=()=>{ confirmAndPlay(msg, ()=>recastLianHuan(idx)); };
         c.appendChild(rb);
       }
     } else {
