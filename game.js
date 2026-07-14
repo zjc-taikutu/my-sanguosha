@@ -250,6 +250,7 @@ function normalize(g){
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
     if(typeof p.jujianUsed!=='boolean') p.jujianUsed=false;
     if(typeof p.chanyuan!=='boolean') p.chanyuan=false;
+    if(typeof p.jiuShaBonus!=='boolean') p.jiuShaBonus=false;
     // 曹彰【将驰】本回合效果
     if(typeof p.jiangchiNoSlash!=='boolean') p.jiangchiNoSlash=false;
     if(typeof p.jiangchiNoDistance!=='boolean') p.jiangchiNoDistance=false;
@@ -677,6 +678,7 @@ function normalize(g){
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
   // 于吉【蛊惑】:每回合限一次
   if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
+  if(typeof g.jiuUsed!=='boolean') g.jiuUsed=false;
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   // 马谡【散谣】:出牌阶段限一次
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
@@ -1313,12 +1315,16 @@ function finishDrawPhase(g, seat, n){
   
   advancePastPlay(g);
 }
-function damageAmount(g, sourceSeat, baseAmount, cardType){
+function damageAmount(g, sourceSeat, baseAmount, cardType, options){
   let amount=baseAmount;
   const source=g.players[sourceSeat];
   if(source && g.luoyiActive && sourceSeat===g.turn && hasCap(source,'luoyi') && (cardType==='sha' || cardType==='duel')){
     amount++;
     g.log=pushLog(g.log, source.name+' 【裸衣】生效,此伤害+1');
+  }
+  if(options && options.jiuBonus && cardType==='sha' && source){
+    amount++;
+    g.log=pushLog(g.log, source.name+' 的【酒】生效,此【杀】伤害+1');
   }
   return amount;
 }
@@ -1649,7 +1655,7 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     return finishDelayCard(g, judgedSeat, DELAY_TRICKS[resume.trickName], replaceCard, resume.card);
   } else if(resume.kind === 'tieqiJudge'){
     // 铁骑判定
-    return finishTieqiJudge(g, resume.from, resume.to, replaceCard, resume.sourceCard, resume.shaColor, undefined);
+    return finishTieqiJudge(g, resume.from, resume.to, replaceCard, resume.sourceCard, resume.shaColor, resume.shaInfo);
   } else if(resume.kind === 'luoshenJudge'){
     // 洛神判定
     return finishLuoshenJudge(g, resume.seat, replaceCard);
@@ -1764,7 +1770,7 @@ function finishGuicai(g, finalCard){
     return;
   }
   if(resume.kind==='tieqiJudge'){
-    finishTieqiJudge(g, resume.from, resume.to, finalCard, resume.sourceCard, resume.shaColor, undefined);
+    finishTieqiJudge(g, resume.from, resume.to, finalCard, resume.sourceCard, resume.shaColor, resume.shaInfo);
     return;
   }
   if(resume.kind==='luoshenJudge'){
@@ -1797,6 +1803,7 @@ function finishGuicai(g, finalCard){
     else {
       g.pending={from:resume.from, to:resume.to};
       if(resume.sourceCard!==undefined) g.pending.sourceCard=resume.sourceCard;
+      if(resume.shaInfo && resume.shaInfo.jiuBonus) g.pending.jiuBonus=true;
       g.phase='respond';
     }
   } else if(resume.type==='aoe'){
@@ -2200,6 +2207,11 @@ function respondShuangxiong(activate){
 // ===== 统一出牌入口:出牌阶段所有牌共用样板,各牌独特部分在 CARD_PLAYS 表里 =====
 // actionId:除"杀"外都等于 card.name;杀固定为 '杀'(赵云的闪也走杀,物理牌名可能是'闪')。
 // 每项:canPlay(身份+独特前置校验)、target(是否指定目标,决定走不走统一目标校验)、effect(独特效果+日志)。
+function consumeJiuShaBonus(g, player){
+  if(!player || !player.jiuShaBonus) return undefined;
+  player.jiuShaBonus=false;
+  return { jiuBonus:true };
+}
 const CARD_PLAYS = {
   '杀': {
     target:true,
@@ -2294,7 +2306,7 @@ const CARD_PLAYS = {
       }
       
       // 正常结算杀
-      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, undefined);
+      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, consumeJiuShaBonus(g, me));
     }
   },
   '桃': {
@@ -2308,6 +2320,15 @@ const CARD_PLAYS = {
       // 法正【恩怨】：当其他角色令你回复1点体力后，其摸一张牌
       // 这里me是使用桃的角色，自己给自己回复体力，不触发恩怨
       // 恩怨仅在其他角色令法正回复体力时触发
+    }
+  },
+  '酒': {
+    target:false,
+    canPlay:(g,me,card)=> card.name==='酒' && !g.jiuUsed,
+    effect:(g,me,card)=>{
+      me.jiuShaBonus=true;
+      g.jiuUsed=true;
+      g.log=pushLog(g.log, me.name+' 使用【酒】,本回合下一张【杀】伤害+1');
     }
   },
   '决斗': {
@@ -2670,6 +2691,7 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
   if(hasCap(me,'tieqi')){
     g.pending={type:'tieqi', from:fromSeat, to:targetSeat, shaColor};
     if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+    if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
     g.phase='tieqi';
     g.log=pushLog(g.log, '是否发动【铁骑】进行判定…');
     return;
@@ -2680,6 +2702,7 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
     if(targetHandCount>=me.hp || targetHandCount<=attackRange(g,fromSeat)){
       g.pending={type:'liegong', from:fromSeat, to:targetSeat, shaColor};
       if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+      if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
       g.phase='liegong';
       g.log=pushLog(g.log, '是否发动【烈弓】,令此【杀】不可被【闪】抵消…');
       return;
@@ -2696,7 +2719,7 @@ function respondLiegong(activate){
     g.log=pushLog(g.log, activate
       ? g.players[from].name+' 发动【烈弓】,此【杀】不可被【闪】抵消'
       : g.players[from].name+'：不发动【烈弓】');
-    continueShaAfterTieqi(g, from, to, activate, g.pending.sourceCard, g.pending.shaColor);
+    continueShaAfterTieqi(g, from, to, activate, g.pending.sourceCard, g.pending.shaColor, g.pending.jiuBonus ? {jiuBonus:true} : undefined);
     return g;
   });
 }
@@ -2748,6 +2771,7 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInf
   const me=g.players[from];
   g.pending={from, to, noShan, shaColor};
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+  if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
   if(noShan){
     g.log=pushLog(g.log, '此【杀】不可被【闪】抵消(含视为闪的效果)');
     g.phase='respond';
@@ -2759,7 +2783,7 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInf
     g.phase='respond'; return; // 目标只能正常出闪/受伤
   }
   // 八卦阵:被杀需出闪前先判定,红=视为出闪 → 杀被抵消,攻击者继续出牌(与正常出闪同结果)
-  const r=tryBagua(g, to, {type:'sha', from, to, sourceCard});
+  const r=tryBagua(g, to, {type:'sha', from, to, sourceCard, shaInfo});
   if(r==='pending') return; // 鬼才改判进行中,收尾延后到 finishGuicai
   if(r){
     const sourceCardForSha = g.pending && g.pending.sourceCard;
@@ -2933,13 +2957,14 @@ function respondTieqi(activate){
     const from=g.pending.from, to=g.pending.to;
     if(!activate){
       g.log=pushLog(g.log, g.players[from].name+'：不发动【铁骑】');
-      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, undefined);
+      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, g.pending.jiuBonus ? {jiuBonus:true} : undefined);
       return g;
     }
     const card=judge(g);
-    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, undefined); return g; } // 无牌可判,视为未发动
-    if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard, shaColor:g.pending.shaColor})==='pending') return g;
-    finishTieqiJudge(g, from, to, card, g.pending.sourceCard, g.pending.shaColor, undefined);
+    const shaInfo = g.pending.jiuBonus ? {jiuBonus:true} : undefined;
+    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, shaInfo); return g; } // 无牌可判,视为未发动
+    if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard, shaColor:g.pending.shaColor, shaInfo})==='pending') return g;
+    finishTieqiJudge(g, from, to, card, g.pending.sourceCard, g.pending.shaColor, shaInfo);
     return g;
   });
 }
@@ -2980,7 +3005,7 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
     // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
     // 不是"没有颜色"——c1/c2 是 splice 之前存的引用,不受后面 splice 影响。
-    resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2), [c1, c2], undefined);
+    resolveShaUse(g, me, targetSeat, '用两张牌当【杀】(丈八蛇矛)', combinedShaColor(c1, c2), [c1, c2], consumeJiuShaBonus(g, me));
     // 丈八蛇矛是两张牌合成一个杀,没有单一牌面对象可传(c1/c2 是两张不同的牌,传其中任一张
     // 都是拼凑/误导),中央出牌区只传座位(仍能显示"谁"),card 留空退化为不显示牌面。
     markCardSound(g, '杀', mySeat, null, targetSeat); // 丈八蛇矛两张当杀不走 playCard 统一出口,单独补一次
@@ -3023,8 +3048,9 @@ function playShaFangtian(cardIdx, targets){
     else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
     const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
     g.log=pushLog(g.log, me.name+' 发动【方天画戟】,'+usedAs+',指定 '+order.length+' 个目标：'+order.map(t=>g.players[t].name).join('、'));
-    g.fangtianQueue = { from:mySeat, targets:order, idx:0, usedAs, shaColor:singleCardShaColor(card), sourceCard:card };
-    resolveShaUse(g, me, order[0], usedAs, singleCardShaColor(card), card, undefined);
+    const shaInfo = consumeJiuShaBonus(g, me);
+    g.fangtianQueue = { from:mySeat, targets:order, idx:0, usedAs, shaColor:singleCardShaColor(card), sourceCard:card, shaInfo };
+    resolveShaUse(g, me, order[0], usedAs, singleCardShaColor(card), card, shaInfo);
     markCardSound(g, '杀', mySeat, card, order); // 方天画戟多目标出杀不走 playCard 统一出口,单独补一次
     return g;
   });
@@ -3544,6 +3570,19 @@ function useJijiuCard(g, me, choice){
   }
   return null;
 }
+function useDyingJiuCard(g, me){
+  const idx=findUsableAs(me.hand, me, '酒');
+  if(idx<0) return null;
+  const card=me.hand.splice(idx,1)[0];
+  g.discard.push(card);
+  return card;
+}
+function useJiushiAsJiu(g, me){
+  if(!me || !hasCap(me,'jiushi') || me.faceup===false) return null;
+  me.faceup=false;
+  markSkillSound(g, '酒诗');
+  return {name:'酒', virtual:true};
+}
 function respondDying(useTao, jijiuChoice){
   tx(g=>{
     if(g.phase!=='dying'||!g.pending||g.pending.type!=='dying') return g;
@@ -3565,17 +3604,32 @@ function respondDying(useTao, jijiuChoice){
     
     if(useTao){
       let card;
-      if(jijiuChoice){
+      let asText = '';
+      let soundName = '桃';
+      if(jijiuChoice && jijiuChoice.kind==='jiu'){
+        if(g.pending.seat!==mySeat) return g;
+        card=useDyingJiuCard(g, me);
+        if(!card) return g;
+        asText='使用【酒】';
+        soundName='酒';
+      } else if(jijiuChoice && jijiuChoice.kind==='jiushiJiu'){
+        if(g.pending.seat!==mySeat) return g;
+        card=useJiushiAsJiu(g, me);
+        if(!card) return g;
+        asText='发动【酒诗】,视为使用【酒】';
+        soundName='酒';
+      } else if(jijiuChoice){
         card=useJijiuCard(g, me, jijiuChoice);
         if(!card) return g;
+        asText='打出【'+card.name+'】当【桃】';
       } else {
         const idx=findUsableAs(me.hand, me, '桃'); // 复用 canUseAs/findUsableAs seam,不硬编码牌名
         if(idx<0) return g; // 没有桃:状态不变(双重保险,按钮本就不该出现)
         card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+        asText='打出【'+card.name+'】';
       }
       dyingP.hp++;
-      const asTao = jijiuChoice ? '当【桃】' : '';
-      g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' 打出【'+card.name+'】'+asTao+',回复1点体力（体力'+dyingP.hp+'）');
+      g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' '+asText+',回复1点体力（体力'+dyingP.hp+'）');
       // 周泰【不屈】:回复体力时移除一张不屈牌
       removeBuquCard(g, g.pending.seat);
       // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
@@ -3585,8 +3639,8 @@ function respondDying(useTao, jijiuChoice){
         drawN(g, mySeat, 1);
         g.log = pushLog(g.log, dyingP.name + ' 回复1点体力,' + me.name + ' 发动【恩怨】效果,摸一张牌');
       }
-      if(jijiuChoice) markSkillSound(g, '急救');
-      markCardSound(g, '桃', mySeat, card, g.pending.seat);
+      if(jijiuChoice && jijiuChoice.kind!=='jiu' && jijiuChoice.kind!=='jiushiJiu') markSkillSound(g, '急救');
+      markCardSound(g, soundName, mySeat, card, g.pending.seat);
       if(dyingP.hp>0){ finishDying(g, false); }
       return g;
     }
@@ -3595,6 +3649,20 @@ function respondDying(useTao, jijiuChoice){
     if(nxt===null){ finishDying(g, true); return g; }
     g.pending.asking=nxt;
     g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否对 '+dyingP.name+' 使用【桃】…');
+    return g;
+  });
+}
+function jiushiUseJiu(){
+  tx(g=>{
+    if(g.phase!=='play'||g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'jiushi') || me.faceup===false || g.jiuUsed) return g;
+    me.faceup=false;
+    me.jiuShaBonus=true;
+    g.jiuUsed=true;
+    g.log=pushLog(g.log, me.name+' 发动【酒诗】,翻面并视为使用一张【酒】,本回合下一张【杀】伤害+1');
+    markSkillSound(g, '酒诗');
+    markCardSound(g, '酒', mySeat, {name:'酒', virtual:true});
     return g;
   });
 }
@@ -4061,6 +4129,7 @@ function advanceFangtianQueue(g){
   q.idx++;
   while(q.idx<q.targets.length && (!g.players[q.targets[q.idx]] || !g.players[q.targets[q.idx]].alive)) q.idx++;
   if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.phase='play'; return; }
+  q.shaInfo=null;
   resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard, undefined);
 }
 // checkWin: 存活<=1 则结束游戏(置 over/winner、清理 pending/aoe、记日志),返回 true;否则 false。
@@ -4698,7 +4767,7 @@ function respondShan(useShan){
       // 若此刻恰好无手牌则这次伤害+1。整体按一次 dealDamage 调用结算(amount 先算好再传),
       // 不拆成两次调用,这样依赖"这次伤害共多少点"的钩子(如郭嘉【天妒】)才能看到正确数值。
       const gudingBonus = hasCap(attacker,'gudingdao') && (me.hand||[]).length===0 ? 1 : 0;
-      const dying = dealDamage(g, mySeat, damageAmount(g, shaFrom, 1+gudingBonus, 'sha'), shaFrom, '不闪', 'sha', shaSourceCard);
+      const dying = dealDamage(g, mySeat, damageAmount(g, shaFrom, 1+gudingBonus, 'sha', {jiuBonus:!!g.pending.jiuBonus}), shaFrom, '不闪', 'sha', shaSourceCard);
       if(dying) return g; // 濒死流程接管,后续(pending清空/checkWin/phase=play)延后到 finishDying 处理
       // 麒麟弓:杀造成实际伤害且目标存活 → 弃目标坐骑;两匹时开选马子阶段(此处提前返回,交给 qilinResolve,不做收尾)
       if(maybeStartQilin(g, shaFrom, mySeat)) return g;
@@ -5113,10 +5182,11 @@ function startTurn(g, seat){
     return;
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];
+  g.players.forEach(p=>{ if(p) p.jiuShaBonus=false; });
   if(currentPlayer) {
     currentPlayer.fenxunUsed = false;
     currentPlayer.fenxunTarget = null;

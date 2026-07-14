@@ -2694,6 +2694,8 @@ function renderControls(g){
     const dyingP=g.players[g.pending.seat];
     const isSelf = g.pending.seat===mySeat;
     const hasTao = me.hand.some(card=>canUseAs(me,card,'桃'));
+    const hasJiu = isSelf && me.hand.some(card=>canUseAs(me,card,'酒'));
+    const canJiushiJiu = isSelf && hasCap(me,'jiushi') && me.faceup!==false;
     const canJijiu = hasCap(me,'jijiu') && g.turn!==mySeat;
     const jijiuOpts = canJijiu ? jijiuChoices(me) : [];
     if(hasTao){
@@ -2701,6 +2703,18 @@ function renderControls(g){
       b1.textContent = isSelf ? '打出【桃】自救' : '打出【桃】救 '+dyingP.name;
       b1.onclick=()=>respondDying(true);
       c.appendChild(b1);
+    }
+    if(hasJiu){
+      const jb=document.createElement('button'); jb.className='primary';
+      jb.textContent='使用【酒】自救';
+      jb.onclick=()=>respondDying(true, {kind:'jiu'});
+      c.appendChild(jb);
+    }
+    if(canJiushiJiu){
+      const jsb=document.createElement('button'); jsb.className='ghost';
+      jsb.textContent='酒诗:翻面当【酒】';
+      jsb.onclick=()=>respondDying(true, {kind:'jiushiJiu'});
+      c.appendChild(jsb);
     }
     jijiuOpts.forEach(opt=>{
       const b=document.createElement('button'); b.className='ghost';
@@ -2718,7 +2732,7 @@ function renderControls(g){
     const b2=document.createElement('button');
     b2.textContent='不救'; b2.onclick=()=>respondDying(false);
     c.appendChild(b2);
-    const canSave = hasTao || jijiuOpts.length>0 || guhuoTaoCount>0;
+    const canSave = hasTao || hasJiu || canJiushiJiu || jijiuOpts.length>0 || guhuoTaoCount>0;
     setBanner(canSave
       ? (isSelf ? dyingP.name+' 濒死,你是否使用【桃】自救?' : dyingP.name+' 濒死,是否对其使用【桃】救援?')
       : escapeHtml(dyingP.name)+' 濒死,你没有可用的【桃】,只能选择不救。');
@@ -3379,6 +3393,12 @@ function renderControls(g){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
       c.appendChild(kb);
+    }
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'jiushi') && me.faceup!==false && !g.jiuUsed){
+      const jb=document.createElement('button'); jb.className='ghost';
+      jb.textContent='酒诗:当【酒】';
+      jb.onclick=()=>{ confirmAndPlay('发动【酒诗】:翻面,视为使用一张【酒】？', ()=>jiushiUseJiu()); };
+      c.appendChild(jb);
     }
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'zhiheng') && !g.zhihengUsed && (me.hand||[]).length>=1){
       const sb=document.createElement('button'); sb.className='ghost';
