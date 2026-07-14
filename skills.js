@@ -1423,13 +1423,15 @@ function respondHuogong(activate, cardIdx){
 // wuguPick: 五谷丰登挑选。仅当前轮到的人(order[idx])可操作;poolIdx 校验后从公共池移除、
 // 收入挑选者手牌;idx 推进到下一个人,挑完一整圈(idx===order.length)则收尾——若池里还有剩牌
 // (阵亡导致 order 比 pool 短的边界),兜底弃入弃牌堆,不做复杂的重新分配,只保证不卡死。
-function wuguPick(poolIdx){
+function wuguPick(poolIdx, expectedIdx, expectedCardId){
   tx(g=>{
     if(g.phase!=='wugu'||!g.pending||g.pending.type!=='wugu') return g;
     const { order, idx, pool } = g.pending;
+    if(Number.isInteger(expectedIdx) && idx!==expectedIdx) return g;
     if(order[idx]!==mySeat) return g;
     const card = pool[poolIdx];
     if(!card) return g;
+    if(expectedCardId!==undefined && card.id!==expectedCardId) return g;
     const me=g.players[mySeat];
     pool.splice(poolIdx,1);
     me.hand.push(card);
@@ -1735,6 +1737,7 @@ function respondTiaoxin(targetSeat){
     if(g.tiaoxinUsed) return g; // 本回合已使用过
     const target = g.players[targetSeat];
     if(!target || !target.alive || targetSeat===mySeat) return g;
+    if((target.hand||[]).length===0) return g;
     
     g.tiaoxinUsed=true;
     g.pending={type:'tiaoxinChoice', from:mySeat, to:targetSeat};
@@ -1756,58 +1759,88 @@ function respondTiaoxinChoice(useSha){
     if(useSha){
       // 目标选择对挑衅者使用一张杀
       // 检查目标是否能出杀
-      const shaCard = findUsableAs(target.hand, target, '杀');
-      if(shaCard && shaCard.card){
+      const shaIdx = findUsableAs(target.hand, target, '杀');
+      if(shaIdx>=0 && canReachSha(g, to, from)){
+        const card=target.hand.splice(shaIdx,1)[0];
+        g.discard.push(card);
+        g.log=pushLog(g.log, target.name+' 对 '+asker.name+' 使用'+(isShaName(card.name)?'【'+card.name+'】':'【'+card.name+'】当【杀】')+'响应【挑衅】');
+        markCardSound(g, '杀', to, card, from);
+        if(card.name!=='杀'){
+          if(hasCap(target,'longdan')) markSkillSound(g,'龙胆');
+          else if(hasCap(target,'wusheng')) markSkillSound(g,'武圣');
+        }
         // 使用杀 - resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard)
         // 这里target是出杀者，from是目标
-        resolveShaUse(g, target, from, shaCard.role, singleCardShaColor(shaCard.card), shaCard.card, undefined);
-        g.pending=null; g.phase='play';
+        g.pending=null;
+        resolveShaUse(g, target, from, '挑衅:出【杀】', singleCardShaColor(card), card, undefined);
       } else {
         // 目标不能出杀，视为放弃使用杀，需要被弃置一张牌
         g.log=pushLog(g.log, target.name+' 无法对 '+asker.name+' 使用杀,自动选择被弃置一张牌');
-        // 落到弃置分支
-        const discardable=[...(target.hand||[]), ...Object.values(target.equips||{}).filter(e=>e)];
-        if(discardable.length>0){
-          const idx=Math.floor(Math.random()*discardable.length);
-          const card=discardable[idx];
-          if((target.hand||[]).includes(card)){
-            const handIdx=target.hand.indexOf(card);
-            target.hand.splice(handIdx, 1);
-            g.discard.push(card);
-          } else {
-            // 是装备牌
-            const slot=Object.keys(target.equips||{}).find(s=>target.equips[s]===card);
-            if(slot) {
-              target.equips[slot]=null;
-              g.discard.push(card);
-            }
-          }
-          g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的一张牌');
-        }
-        g.pending=null; g.phase='play';
+        startTiaoxinDiscard(g, from, to);
       }
     } else {
       // 目标选择被弃置一张牌
-      const discardable=[...(target.hand||[]), ...Object.values(target.equips||{}).filter(e=>e)];
-      if(discardable.length>0){
-        const idx=Math.floor(Math.random()*discardable.length);
-        const card=discardable[idx];
-        if((target.hand||[]).includes(card)){
-          const handIdx=target.hand.indexOf(card);
-          target.hand.splice(handIdx, 1);
-          g.discard.push(card);
-        } else {
-          // 是装备牌
-          const slot=Object.keys(target.equips||{}).find(s=>target.equips[s]===card);
-          if(slot) {
-            target.equips[slot]=null;
-            g.discard.push(card);
-          }
-        }
-        g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的一张牌');
-      }
-      g.pending=null; g.phase='play';
+      startTiaoxinDiscard(g, from, to);
     }
+    return g;
+  });
+}
+
+function tiaoxinDiscardOptions(target){
+  const opts=[];
+  (target.hand||[]).forEach((card, idx)=>{ if(card) opts.push({kind:'hand', idx}); });
+  EQUIP_SLOTS.forEach(slot=>{ if(target.equips && target.equips[slot]) opts.push({kind:'equip', slot}); });
+  return opts;
+}
+
+function startTiaoxinDiscard(g, from, to){
+  const asker=g.players[from];
+  const target=g.players[to];
+  if(!asker || !asker.alive || !target || !target.alive){
+    g.pending=null; g.phase='play';
+    return;
+  }
+  const opts=tiaoxinDiscardOptions(target);
+  if(opts.length===0){
+    g.pending=null; g.phase='play';
+    return;
+  }
+  g.pending={type:'tiaoxinDiscard', from, to};
+  g.phase='tiaoxinDiscard';
+  g.log=pushLog(g.log, asker.name+' 选择弃置 '+target.name+' 的一张牌…');
+}
+
+function pickTiaoxinDiscard(kind, value){
+  tx(g=>{
+    if(g.phase!=='tiaoxinDiscard'||!g.pending||g.pending.type!=='tiaoxinDiscard') return g;
+    const from=g.pending.from, to=g.pending.to;
+    if(from!==mySeat) return g;
+    const asker=g.players[from];
+    const target=g.players[to];
+    if(!asker || !asker.alive || !target || !target.alive){
+      g.pending=null; g.phase='play';
+      return g;
+    }
+    let card=null;
+    if(kind==='hand'){
+      const idx=Number(value);
+      if(!Number.isInteger(idx) || idx<0 || idx>=(target.hand||[]).length) return g;
+      card=target.hand.splice(idx,1)[0];
+      if(card){
+        g.discard.push(card);
+        g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的一张手牌');
+      }
+    } else if(kind==='equip'){
+      const slot=String(value||'');
+      if(!EQUIP_SLOTS.includes(slot) || !target.equips || !target.equips[slot]) return g;
+      card=target.equips[slot];
+      target.equips[slot]=null;
+      g.discard.push(card);
+      g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的装备【'+card.name+'】');
+    } else {
+      return g;
+    }
+    g.pending=null; g.phase='play';
     return g;
   });
 }

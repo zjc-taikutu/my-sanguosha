@@ -131,6 +131,7 @@ function respondQinglong(activate, cardIdx){
   tx(g=>{
     if(g.phase!=='qinglong'||!g.pending||g.pending.type!=='qinglong'||g.pending.from!==mySeat) return g;
     const me=g.players[mySeat]; // 攻击者本人(装备者)
+    const from=mySeat;
     const targetSeat=g.pending.to;
     if(!activate){
       g.log=pushLog(g.log, me.name+'：不发动【青龙偃月刀】');
@@ -146,7 +147,7 @@ function respondQinglong(activate, cardIdx){
           return attacker && attacker.alive && target && target.alive && 
                  generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
         }
-        if(id === 'guanshifu') return maybeStartGuanshifu(g, from, targetSeat, sourceCard);
+        if(id === 'guanshifu') return canStartGuanshifu(g, from);
         return false;
       });
       if(remainingAvailable.length > 0) {
@@ -191,17 +192,26 @@ function guanshifuOptionCount(p){
 // 触发机会——这是排查贯石斧同类问题时顺带发现的遗留 bug(青龙偃月刀比贯石斧更早实现,当时
 // 没有意识到八卦阵判红会绕开 respondShan),这次一并修复,接入贯石斧同样的三处调用点。
 // 返回 true 表示已开 pending,调用方应立即 return、不做后续收尾。
-function maybeStartQinglong(g, fromSeat, toSeat){
+function canStartQinglong(g, fromSeat){
   const attacker=g.players[fromSeat];
-  if(!hasCap(attacker,'qinglong') || !(attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀'))) return false;
+  return !!(attacker && attacker.alive && hasCap(attacker,'qinglong') && (attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀')));
+}
+function maybeStartQinglong(g, fromSeat, toSeat, sourceCard){
+  const attacker=g.players[fromSeat];
+  if(!canStartQinglong(g, fromSeat)) return false;
   g.pending={type:'qinglong', from:fromSeat, to:toSeat};
+  if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   g.phase='qinglong';
   g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
   return true;
 }
+function canStartGuanshifu(g, fromSeat){
+  const attacker=g.players[fromSeat];
+  return !!(attacker && attacker.alive && hasCap(attacker,'guanshifu') && guanshifuOptionCount(attacker)>=2);
+}
 function maybeStartGuanshifu(g, fromSeat, toSeat, sourceCard){
   const attacker=g.players[fromSeat];
-  if(!hasCap(attacker,'guanshifu') || guanshifuOptionCount(attacker)<2) return false;
+  if(!canStartGuanshifu(g, fromSeat)) return false;
   g.pending={type:'guanshi', from:fromSeat, to:toSeat};
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   g.phase='guanshi';
@@ -230,7 +240,7 @@ function respondGuanshi(picks){
           return attacker && attacker.alive && target && target.alive && 
                  generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
         }
-        if(id === 'qinglong') return maybeStartQinglong(g, from, to);
+        if(id === 'qinglong') return canStartQinglong(g, from);
         return false;
       });
       if(remainingAvailable.length > 0) {

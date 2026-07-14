@@ -323,6 +323,14 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  if(g.pending && g.pending.type==='tiaoxinDiscard'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 郭嘉【遗计】询问阶段:seat 应是数字座位号且对应玩家存活;任一不对就整体判无效,防止卡死。
   if(g.pending && g.pending.type==='yijiAsk'){
     const d=g.pending;
@@ -1823,19 +1831,13 @@ function maybeStartShaOffsetEffects(g, from, to, sourceCard){
   }
   
   // 检查青龙偃月刀
-  if(maybeStartQinglong(g, from, to)){
+  if(canStartQinglong(g, from)){
     available.push('qinglong');
-    // 还原 maybeStartQinglong 的副作用
-    g.pending = null;
-    g.phase = 'play';
   }
   
   // 检查贯石斧
-  if(maybeStartGuanshifu(g, from, to, sourceCard)){
+  if(canStartGuanshifu(g, from)){
     available.push('guanshifu');
-    // 还原 maybeStartGuanshifu 的副作用
-    g.pending = null;
-    g.phase = 'play';
   }
   
   if(available.length === 0) return false;
@@ -1896,8 +1898,8 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
       
       // 处理完猛进后,检查是否还有其他效果需要处理
       const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
-        if(id === 'qinglong') return maybeStartQinglong(g, from, to);
-        if(id === 'guanshifu') return maybeStartGuanshifu(g, from, to, sourceCard);
+        if(id === 'qinglong') return canStartQinglong(g, from);
+        if(id === 'guanshifu') return canStartGuanshifu(g, from);
         return false;
       });
       
@@ -1928,7 +1930,7 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
     g.log = pushLog(g.log, attacker.name+' 发动【猛进】,选择弃置 '+target.name+' 的一张牌…');
   } else if(effectId === 'qinglong') {
     // 重新启动青龙
-    maybeStartQinglong(g, from, to);
+    maybeStartQinglong(g, from, to, sourceCard);
   } else if(effectId === 'guanshifu') {
     // 重新启动贯石斧
     maybeStartGuanshifu(g, from, to, sourceCard);
@@ -1946,9 +1948,9 @@ function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
       return attacker && attacker.alive && target && target.alive && 
              generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
     } else if(id === 'qinglong') {
-      return maybeStartQinglong(g, from, to);
+      return canStartQinglong(g, from);
     } else if(id === 'guanshifu') {
-      return maybeStartGuanshifu(g, from, to, sourceCard);
+      return canStartGuanshifu(g, from);
     }
     return false;
   });
@@ -2007,8 +2009,8 @@ function mengjinPick(choice) {
     
     // 处理完猛进后,检查是否还有其他效果需要处理
     const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
-      if(id === 'qinglong') return maybeStartQinglong(g, from, to);
-      if(id === 'guanshifu') return maybeStartGuanshifu(g, from, to, sourceCard);
+      if(id === 'qinglong') return canStartQinglong(g, from);
+      if(id === 'guanshifu') return canStartGuanshifu(g, from);
       return false;
     });
     
@@ -2032,6 +2034,21 @@ function respondMengjin() {
     // 从shaOffsetChoice切换到mengjin
     g.pending = null;
     startShaOffsetEffect(g, from, to, 'mengjin', sourceCard);
+    return g;
+  });
+}
+function respondShaOffsetChoice(effectId) {
+  tx(g=>{
+    if(g.phase!=='shaOffsetChoice'||!g.pending||g.pending.type!=='shaOffsetChoice'||g.pending.from!==mySeat) return g;
+    const {from, to, available, sourceCard} = g.pending;
+    if(!effectId){
+      g.pending = null;
+      finishSingleShaTarget(g);
+      return g;
+    }
+    if(!Array.isArray(available) || !available.includes(effectId)) return g;
+    g.pending = null;
+    startShaOffsetEffect(g, from, to, effectId, sourceCard);
     return g;
   });
 }
@@ -4332,7 +4349,11 @@ function resolveTrick(g, info){
     if(!info.pool || info.pool.length===0){ g.pending=null; g.phase='play'; return; }
     const order=[info.from];
     let s=info.from;
-    for(let k=1;k<aliveCount(g);k++){ s=nextAlive(g,s); if(s===info.from) break; order.push(s); }
+    for(let k=1;k<aliveCount(g);k++){
+      s=nextAlive(g,s);
+      if(s===info.from || order.includes(s)) break;
+      order.push(s);
+    }
     g.log=pushLog(g.log, '【五谷丰登】开始,从 '+g.players[info.from].name+' 起依次挑选');
     startWuguWuxie(g, info.from, info.pool.slice(), order, 0);
     return;

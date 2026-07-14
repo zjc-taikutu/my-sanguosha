@@ -1770,15 +1770,15 @@ function renderControls(g){
       else if(effectId === 'qinglong') b.textContent='发动【青龙偃月刀】';
       else if(effectId === 'guanshifu') b.textContent='发动【贯石斧】';
       
-      if(effectId === 'mengjin') b.onclick=()=>respondMengjin();
-      else if(effectId === 'qinglong') b.onclick=()=>respondQinglong(true);
-      else if(effectId === 'guanshifu') b.onclick=()=>{ guanshiMode=true; guanshiPicks=[]; render(g); };
+      if(effectId === 'mengjin') b.onclick=()=>respondShaOffsetChoice('mengjin');
+      else if(effectId === 'qinglong') b.onclick=()=>respondShaOffsetChoice('qinglong');
+      else if(effectId === 'guanshifu') b.onclick=()=>respondShaOffsetChoice('guanshifu');
       c.appendChild(b);
     });
     
     const endBtn=document.createElement('button'); endBtn.className='ghost';
     endBtn.textContent='结束'; 
-    endBtn.onclick=()=>{ g.pending=null; finishSingleShaTarget(g); };
+    endBtn.onclick=()=>respondShaOffsetChoice(null);
     c.appendChild(endBtn);
     
     setBanner('你对 '+escapeHtml(toName)+' 的【杀】被【闪】抵消,选择发动效果…');
@@ -2378,16 +2378,48 @@ function renderControls(g){
   // 姜维【挑衅】:目标角色选择如何响应
   if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat){
     const from=g.players[g.pending.from].name, to=g.players[mySeat].name;
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='对其使用【杀】'; b1.onclick=()=>respondTiaoxinChoice(true); c.appendChild(b1);
+    const canSha=findUsableAs(me.hand, me, '杀')>=0 && canReachSha(g, mySeat, g.pending.from);
+    if(canSha){
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='对其使用【杀】'; b1.onclick=()=>respondTiaoxinChoice(true); c.appendChild(b1);
+    }
     const b2=document.createElement('button');
     b2.textContent='被弃置一张牌'; b2.onclick=()=>respondTiaoxinChoice(false); c.appendChild(b2);
-    setBanner(escapeHtml(from)+' 发动【挑衅】,请选择:对其使用一张【杀】,或被弃置一张牌。');
+    setBanner(escapeHtml(from)+' 发动【挑衅】,'+(canSha?'请选择:对其使用一张【杀】,或被弃置一张牌。':'你没有可用的【杀】,只能选择被弃置一张牌。'));
     return;
   }
   if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice'){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner('等待 '+escapeHtml(to)+' 选择对 '+escapeHtml(from)+' 使用【杀】或被弃置一张牌…');
+    return;
+  }
+  if(g.phase==='tiaoxinDiscard' && g.pending && g.pending.type==='tiaoxinDiscard' && g.pending.from===mySeat){
+    const target=g.players[g.pending.to];
+    const from=g.players[g.pending.from];
+    const div=document.createElement('div'); div.className='centered';
+    const h4=document.createElement('h4'); h4.textContent='【挑衅】弃置一张牌';
+    div.appendChild(h4);
+    (target.hand||[]).forEach((card, idx)=>{
+      const b=document.createElement('button'); b.className='ghost';
+      b.textContent='弃置手牌 '+(idx+1);
+      b.onclick=()=>pickTiaoxinDiscard('hand', idx);
+      div.appendChild(b);
+    });
+    EQUIP_SLOTS.forEach(slot=>{
+      const card=target.equips && target.equips[slot];
+      if(!card) return;
+      const b=document.createElement('button'); b.className='ghost';
+      b.textContent='弃置装备【'+card.name+'】';
+      b.onclick=()=>pickTiaoxinDiscard('equip', slot);
+      div.appendChild(b);
+    });
+    c.appendChild(div);
+    setBanner(escapeHtml(from?from.name:'姜维')+' 选择弃置 '+escapeHtml(target?target.name:'目标')+' 的一张牌。');
+    return;
+  }
+  if(g.phase==='tiaoxinDiscard' && g.pending && g.pending.type==='tiaoxinDiscard'){
+    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
+    setBanner('等待 '+escapeHtml(from)+' 选择弃置 '+escapeHtml(to)+' 的一张牌…');
     return;
   }
   if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
@@ -2396,8 +2428,12 @@ function renderControls(g){
     if(picker===mySeat){
       g.pending.pool.forEach((card,pi)=>{
         const b=document.createElement('button');
+        b.className='wugu-pick-btn';
         b.innerHTML='挑选 '+(cardFace(card)||card.name)+' '+card.name;
-        b.onclick=()=>wuguPick(pi);
+        b.onclick=()=>{
+          c.querySelectorAll('.wugu-pick-btn').forEach(btn=>{ btn.disabled=true; });
+          wuguPick(pi, g.pending.idx, card && card.id);
+        };
         c.appendChild(b);
       });
       setBanner('【五谷丰登】轮到你挑选,公共池:'+poolDesc);
@@ -3366,7 +3402,7 @@ function renderControls(g){
       qb.textContent='发动【奇袭】'; qb.onclick=()=>{ selectedCardIdx=null; qixiMode=true; qixiCardIdx=null; render(g); }; c.appendChild(qb);
     }
     // 姜维【挑衅】:出牌阶段限一次,选择一个其他角色
-    if(noLocalMode && selectedCardIdx===null && hasCap(me,'tiaoxin') && !g.tiaoxinUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat)){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'tiaoxin') && !g.tiaoxinUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat&&(p.hand||[]).length>0)){
       const tb=document.createElement('button'); tb.className='ghost';
       tb.textContent='发动【挑衅】'; tb.onclick=()=>{ selectedCardIdx=null; tiaoxinMode=true; render(g); }; c.appendChild(tb);
     }
