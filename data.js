@@ -392,6 +392,14 @@ const GENERALS = {
   yuji:           { id:'yuji',           name:'于吉',   gender:'male', maxHp:3, skill:'蛊惑/缠怨',
     desc:'蛊惑:每回合限一次,你可以扣置一张手牌,将此牌当任意一张基本牌或普通锦囊牌使用或打出,其他角色可质疑。若为假,此牌作废;若为真,质疑角色获得【缠怨】。缠怨:锁定技,你不能质疑【蛊惑】;当你的体力值为1时,你的所有其他技能失效。',
     caps:{ guhuo:true } },
+  // 左慈【化身/新生】v2:最小可用条目——仅为了让 hasCap(p,'huashen') 能被真实触发、
+  // GENERAL_IDS 里出现 zuoci、checkHuashenBeforeAssign 的库存生成有真实入口可测。
+  // 这次(v2)化身机制采用 p.huashenPool(只增不减的库存)取代v1的 p.huashenChoices
+  // (用完即弃的候选)设计,本步尚未接入询问/选择/新生流程,desc 先写占位说明,
+  // hooks 暂不加(新生不在本次范围内)。
+  zuoci: { id:'zuoci', name:'左慈', gender:'male', maxHp:3, skill:'化身/新生',
+    desc:'化身:你可以选择借用其他一名武将的单个技能。新生:尚未实现。',
+    caps:{ huashen:true } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口

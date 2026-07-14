@@ -262,9 +262,37 @@ function normalize(g){
     if(typeof p.caps!=='object'||p.caps===null) p.caps={};
     // 蔡文姬【断肠】等:武将技能整体失效标记
     if(typeof p.skillsLost!=='boolean') p.skillsLost=false;
+    // 左慈【化身】v2:huashenPool 是只增不减的库存(和 p.hand/p.delays 同款防御,
+    // Firebase 吞空数组),huashenGeneral/huashenSkillName 是当前声明借用的武将/技能名。
+    if(!Array.isArray(p.huashenPool)) p.huashenPool=[];
+    if(p.huashenGeneral===undefined) p.huashenGeneral=null;
+    if(typeof p.huashenSkillName!=='string') p.huashenSkillName=null;
+    // 不一致状态兜底:huashenGeneral非null但不在huashenPool里,整体清空(不是把huashenGeneral
+    // 塞进pool补救)——huashenPool"只增不减"意味着huashenGeneral正常情况下必然是从pool里
+    // 选出来的,这种不一致只可能是脏数据/未来代码写错,不该被静默"修好"而永久掩盖真正的bug,
+    // 和项目里其它"结构不完整就整体判无效清空"的既有防御(如huashenPick/xinshengAsk等pending
+    // 防御)保持同一原则。
+    if(p.huashenGeneral!==null && !p.huashenPool.includes(p.huashenGeneral)){
+      p.huashenGeneral=null;
+      p.huashenSkillName=null;
+    }
     // 判定区(延时锦囊):和 p.hand 同款防御,Firebase 吞空数组
     p.delays = p.delays || [];
   } });
+  // 左慈【化身】v2选择阶段:seat 应是数字座位号且对应玩家存活;该玩家应该确实"还没声明
+  // 技能"(huashenGeneral===null)且确实"有pool可选"(huashenPool非空)——不满足任一条
+  // 整体判无效清空,防止卡死(和v1的huashenPick/观星/李典恂恂同款写法)。**这次pending
+  // 里不存availGenerals副本**(设计理由见 checkHuashenBeforeAssign 注释),所以这里
+  // 也不需要校验"候选是不是过时快照"这类问题,只需要校验seat对应的huashenPool/
+  // huashenGeneral本身是否处于"确实还在等待声明"这个状态。
+  if(g.pending && g.pending.type==='huashenPick'){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral!==null
+       || !Array.isArray(p.huashenPool) || p.huashenPool.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
   if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
   // 无懈反制:exclude(当前轮不问谁的座位号)/depth(成功次数)都应是数字;缺失多半是旧数据,回退到"层0"
