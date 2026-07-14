@@ -89,7 +89,7 @@ function startGame(mode){
       if(shuffled.length < needed){
         // 武将数不够撑起三选一(每人3个候选且互不重复),安全退化为直接随机分配,不报错不卡死
         g.players.forEach((p,i)=>{ p.general = shuffled[i % shuffled.length]; });
-        finishGeneralAssign(g);
+        checkHuashenBeforeAssign(g);
         return g;
       }
       const pool = shuffled.slice(0, needed);
@@ -104,7 +104,7 @@ function startGame(mode){
 
     // random 模式:直接不重复分配,走原有开局收尾
     g.players.forEach((p,i)=>{ p.general = shuffled[i]; });
-    finishGeneralAssign(g);
+    checkHuashenBeforeAssign(g);
     return g;
   });
 }
@@ -211,7 +211,7 @@ function respondPickGeneral(generalId){
     // 写具体牌名会让所有人立刻收到暴露选择的弹窗提示。
     g.log = pushLog(g.log, me.name+' 已选定武将,等待其他玩家…');
     if(g.players.every(p=>p && p.general)){
-      finishGeneralAssign(g); // 全部选完,自动进入正式开局
+      checkHuashenBeforeAssign(g); // 全部选完,检查是否需要先问左慈化身,再进入正式开局
     }
     return g;
   });
@@ -233,7 +233,7 @@ function debugPickGeneral(generalId){
     me.generalChoices = null;
     g.log = pushLog(g.log, me.name+' (调试模式)选择了武将【'+GENERALS[generalId].name+'】');
     if(g.players.every(p=>p && p.general)){
-      finishGeneralAssign(g);
+      checkHuashenBeforeAssign(g); // 调试选将同样要走化身询问,不能绕开(否则选到左慈会静默无技能)
     }
     return g;
   });
