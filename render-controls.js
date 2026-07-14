@@ -558,6 +558,24 @@ function renderControls(g){
     renderPickGeneral(g, c);
     return;
   }
+  // 左慈【化身】开局初次声明(huashenPick)同样发生在 g.started 置 true(finishGeneralAssign)
+  // 之前——和 pickingGeneral 同一类问题,必须同样提前到"!g.started"判断之前检查,否则会被
+  // 下面的"!g.started"分支提前拦截、永远进不到 huashenPick 这条渲染逻辑(真实bug:此前这
+  // 两个分支写在函数末尾2177行附近,导致左慈化身声明期间UI一直显示"开始游戏"按钮而不是
+  // 化身候选,只有直接手工构造g.started=true的合成测试数据才会掩盖这个问题,真实点击流程
+  // 里 g.started 在huashenPick阶段确实是false——这是真实端到端点击测试才抓到的回归,vm
+  // 沙箱/合成状态的UI测试测不到)。回合中途的huashenChangeAskStart/PickStart/AskEnd/
+  // PickEnd四个阶段都发生在g.started已经为true之后,不受这个问题影响,不需要挪。
+  if(g.phase==='huashenPick' && g.pending && g.pending.type==='huashenPick' && g.pending.seat===mySeat){
+    const me=g.players[mySeat];
+    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenPick, '化身');
+    return;
+  }
+  if(g.phase==='huashenPick' && g.pending && g.pending.type==='huashenPick'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '化身');
+    return;
+  }
   // 鲁肃【好施】:选择目标
   if(g.phase==='haoshiPick' && g.pending && g.pending.type==='haoshiPick' && g.pending.seat===mySeat){
     const half = g.pending.half;
@@ -2174,17 +2192,8 @@ function renderControls(g){
     waitAskBanner(p?p.name:'小乔', '天香');
     return;
   }
-  // ===== 左慈【化身】:开局初次声明(huashenPick)+ 回合开始/结束更改(huashenChange*) =====
-  if(g.phase==='huashenPick' && g.pending && g.pending.type==='huashenPick' && g.pending.seat===mySeat){
-    const me=g.players[mySeat];
-    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenPick, '化身');
-    return;
-  }
-  if(g.phase==='huashenPick' && g.pending && g.pending.type==='huashenPick'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'左慈', '化身');
-    return;
-  }
+  // ===== 左慈【化身】:回合开始/结束更改(huashenChange*)——huashenPick(开局初次声明)
+  // 已经挪到上面 pickingGeneral 旁边,这里不再重复 =====
   if(g.phase==='huashenChangeAskStart' && g.pending && g.pending.type==='huashenChangeAskStart' && g.pending.seat===mySeat){
     renderHuashenChangeAsk(g, c, respondHuashenChangeAskStart);
     return;
