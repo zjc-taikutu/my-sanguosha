@@ -418,6 +418,21 @@ function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 // 手牌上限-1)和"同疾"两个技能名,但 GENERALS.caps 里只有 tongji 一个 key,对应"同疾"——
 // 项目当前无身份局/主公系统(CLAUDE.md 刘备条目已注明同类限制),妄尊没有可借用的实现,
 // 因此这里只收"同疾"一条,不为妄尊编造一个不存在的 cap。
+//
+// 【限定技/主公技/觉醒技/获得技能——本表暂不做类型过滤】官方"化身"规则通常要求排除
+// 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(袁术妄尊/刘备激将/曹操护驾/
+// 孙策制霸——这几个因为项目无身份局系统压根没被写进GENERALS.caps,天然不会出现在
+// 本表)、觉醒技(如姜维志继zhiji)、以及"觉醒/特殊条件下才动态获得的技能"(志继本身
+// 触发后会让姜维player.caps.guanxing=true,这是运行时追加的能力,和本表这种静态查表
+// 结构是两回事)。
+// 本表当前**不含任何技能类型分类元数据**,姜维志继/庞统涅槃这类技能和普通caps技能
+// 一视同仁被收录,均可被化身/新生声明借用——比如借到志继,hasCap(左慈,'zhiji')会
+// 因huashenHasCap生效,game.js里志继的觉醒判定(检查手牌是否为空等条件)是通用hasCap
+// 入口,借用后左慈理论上真的能触发这套觉醒流程,而不是被静默挡住。
+// 若以后要把这几类技能排除在化身候选之外,需要在respondHuashenPick/respondXinshengPick
+// (或对应的新版本函数名,后续改动可能会重命名)的候选校验逻辑里,依据某种技能类型标记
+// 过滤掉这些entry——本次暂不实现这个过滤,记在这里以防以后被误以为"什么都能借、这是
+// 故意的最终设计"。
 const HUASHEN_SKILL_TABLE = {
   zhangfei: [
     { name:'咆哮', caps:['unlimitedSha'] }
@@ -488,7 +503,7 @@ const HUASHEN_SKILL_TABLE = {
     { name:'马术', caps:['extraMinus1'] },
     { name:'猛进', caps:['mengjin'] }
   ],
-  mengHu: [
+  menghuo: [
     { name:'祸首', caps:['huoshou'] },
     { name:'再起', caps:['zaiqi'] }
   ],
