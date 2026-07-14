@@ -602,6 +602,10 @@ function render(g){
      !(g.phase==='qiaobianMove' && g.pending && g.pending.type==='qiaobianMove' && g.pending.seat===mySeat)) resetQiaobian();
   // 同款兜底:只要不在「自己的出牌阶段」,就退出借刀杀人选 A/B 模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetJiedao();
+  // 同款兜底:只要不在左慈"选武将→选技能"的三个阶段(开局初次声明/回合开始更改/回合结束
+  // 更改)里、且轮到自己操作,就退出两级选择模式,不留残留。
+  if(!(g.pending && g.pending.seat===mySeat &&
+       (g.pending.type==='huashenPick' || g.pending.type==='huashenChangePickStart' || g.pending.type==='huashenChangePickEnd'))) resetHuashenPick();
   const oppRowEl=document.getElementById('oppRow');
   const meSeatEl=document.getElementById('meSeat');
   // 骨架级重建(landscape-ui 第1阶段):.opp-row/#meSeat 各自独立容器,不再共用一个

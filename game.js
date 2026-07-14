@@ -262,9 +262,37 @@ function normalize(g){
     if(typeof p.caps!=='object'||p.caps===null) p.caps={};
     // 蔡文姬【断肠】等:武将技能整体失效标记
     if(typeof p.skillsLost!=='boolean') p.skillsLost=false;
+    // 左慈【化身】v2:huashenPool 是只增不减的库存(和 p.hand/p.delays 同款防御,
+    // Firebase 吞空数组),huashenGeneral/huashenSkillName 是当前声明借用的武将/技能名。
+    if(!Array.isArray(p.huashenPool)) p.huashenPool=[];
+    if(p.huashenGeneral===undefined) p.huashenGeneral=null;
+    if(typeof p.huashenSkillName!=='string') p.huashenSkillName=null;
+    // 不一致状态兜底:huashenGeneral非null但不在huashenPool里,整体清空(不是把huashenGeneral
+    // 塞进pool补救)——huashenPool"只增不减"意味着huashenGeneral正常情况下必然是从pool里
+    // 选出来的,这种不一致只可能是脏数据/未来代码写错,不该被静默"修好"而永久掩盖真正的bug,
+    // 和项目里其它"结构不完整就整体判无效清空"的既有防御(如huashenPick/xinshengAsk等pending
+    // 防御)保持同一原则。
+    if(p.huashenGeneral!==null && !p.huashenPool.includes(p.huashenGeneral)){
+      p.huashenGeneral=null;
+      p.huashenSkillName=null;
+    }
     // 判定区(延时锦囊):和 p.hand 同款防御,Firebase 吞空数组
     p.delays = p.delays || [];
   } });
+  // 左慈【化身】v2选择阶段:seat 应是数字座位号且对应玩家存活;该玩家应该确实"还没声明
+  // 技能"(huashenGeneral===null)且确实"有pool可选"(huashenPool非空)——不满足任一条
+  // 整体判无效清空,防止卡死(和v1的huashenPick/观星/李典恂恂同款写法)。**这次pending
+  // 里不存availGenerals副本**(设计理由见 checkHuashenBeforeAssign 注释),所以这里
+  // 也不需要校验"候选是不是过时快照"这类问题,只需要校验seat对应的huashenPool/
+  // huashenGeneral本身是否处于"确实还在等待声明"这个状态。
+  if(g.pending && g.pending.type==='huashenPick'){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral!==null
+       || !Array.isArray(p.huashenPool) || p.huashenPool.length===0){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
   if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
   // 无懈反制:exclude(当前轮不问谁的座位号)/depth(成功次数)都应是数字;缺失多半是旧数据,回退到"层0"
@@ -547,6 +575,18 @@ function normalize(g){
       g.pending=null; g.phase='draw';
     }
   }
+  // 左慈"更改化身"回合开始一侧:huashenChangeAskStart(是否更改)/huashenChangePickStart
+  // (两级选择)——和qiaobianTurnStart同一类"回合开始阶段的分支性询问",发生在判定/摸牌
+  // 阶段之前,无效时同样降级回退到摸牌阶段。额外校验huashenGeneral必须非null(和
+  // continueHuashenChangeCheckAtTurnStart的触发条件保持一致,防止脏状态下问出一个
+  // 本不该出现的询问)。
+  if(g.pending && (g.pending.type==='huashenChangeAskStart' || g.pending.type==='huashenChangePickStart')){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
+      g.pending=null; g.phase='draw';
+    }
+  }
   // 麒麟弓选马阶段:from/to 都应是数字座位号且存活;不对就整体判无效,防止卡死
   // (render.js 这里已经用 ?:'?' 防护过读取,不会真崩溃,但座位失效仍会让选择永远问不到人)。
   if(g.pending && g.pending.type==='qilin'){
@@ -755,6 +795,13 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 左慈【新生】:remaining计数循环询问,和节命的jiemingAsk同一套结构、同一套防御写法。
+  if(g.pending && g.pending.type==='xinshengAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
   if(g.pending && g.pending.type==='liuli'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to]){
@@ -770,6 +817,15 @@ function normalize(g){
   if(g.pending && g.pending.type==='biyue'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='discard';
+    }
+  }
+  // 左慈"更改化身"回合结束一侧:huashenChangeAskEnd/huashenChangePickEnd——和biyue同一类
+  // "回合结束阶段的分支性询问",无效时降级回退到弃牌阶段(biyue同款处理)。
+  if(g.pending && (g.pending.type==='huashenChangeAskEnd' || g.pending.type==='huashenChangePickEnd')){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
       g.pending=null; g.phase='discard';
     }
   }
@@ -4723,15 +4779,32 @@ function endTurn(){
     return g;
   });
 }
+// finishTurn: 回合结束的统一入口,链条 finishTurn -> continueHuashenChangeCheckAtTurnEnd ->
+// continueBiyueCheck -> startTurn(nextAlive)。之所以从原来的单个if/else重构成链条:
+// 借来的【闭月】和左慈自己的"更改化身"是两个各自独立、可能同时成立的回合结束可选技能,
+// if/else-if只能问一个、会让后问的那个被静默跳过,必须拆成两个独立链接分别询问。
 function finishTurn(g, endingSeat){
+  continueHuashenChangeCheckAtTurnEnd(g, endingSeat);
+}
+function continueHuashenChangeCheckAtTurnEnd(g, endingSeat){
+  const p = g.players[endingSeat];
+  if(p && p.alive && hasCap(p,'huashen') && p.huashenGeneral!==null){
+    g.pending = {type:'huashenChangeAskEnd', seat:endingSeat};
+    g.phase = 'huashenChangeAskEnd';
+    g.log = pushLog(g.log, p.name+' 是否更改【化身】声明的技能…');
+    return;
+  }
+  continueBiyueCheck(g, endingSeat);
+}
+function continueBiyueCheck(g, endingSeat){
   const p=g.players[endingSeat];
   if(p && p.alive && hasCap(p,'biyue')){
     g.pending={type:'biyue', seat:endingSeat};
     g.phase='biyue';
     g.log=pushLog(g.log, p.name+' 是否发动【闭月】摸1张牌…');
-  } else {
-    startTurn(g, nextAlive(g, endingSeat));
+    return;
   }
+  startTurn(g, nextAlive(g, endingSeat));
 }
 
 // 凌统【旋风】相关函数
@@ -5049,7 +5122,7 @@ function startTurn(g, seat){
     g.log = pushLog(g.log, p.name + ' 发动【志继】觉醒,体力上限-1,请选择:回复1点体力或摸两张牌');
     return; // 等待玩家选择
   }
-  continueGuanxingCheck(g, seat);
+  continueHuashenChangeCheckAtTurnStart(g, seat);
 }
 // enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。

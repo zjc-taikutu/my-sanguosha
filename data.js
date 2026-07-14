@@ -392,9 +392,306 @@ const GENERALS = {
   yuji:           { id:'yuji',           name:'于吉',   gender:'male', maxHp:3, skill:'蛊惑/缠怨',
     desc:'蛊惑:每回合限一次,你可以扣置一张手牌,将此牌当任意一张基本牌或普通锦囊牌使用或打出,其他角色可质疑。若为假,此牌作废;若为真,质疑角色获得【缠怨】。缠怨:锁定技,你不能质疑【蛊惑】;当你的体力值为1时,你的所有其他技能失效。',
     caps:{ guhuo:true } },
+  // 左慈【化身/新生】(v2 完整版:化身+更改化身+新生均已实现)。
+  // 新生按荀彧【节命】(jiemingAsk/continueJieming/respondJieming/finishJieming)同一套
+  // "remaining 计数循环"四段式实现,见 continueXinsheng/respondXinshengAsk/
+  // finishXinsheng(skills.js)——每受到1点伤害独立问一次是否发动,不是"看总伤害点数
+  // 只问一次"。这次是 zuoci 自己的普通 onDamaged hook,和节命/遗计的接入方式完全
+  // 一致,不涉及 v1 那套"借用的技能自己的hook是否优先触发"的排队机制——新生不关心
+  // 借用的技能有没有生效,只是左慈本人受伤后的一个独立技能。
+  zuoci: { id:'zuoci', name:'左慈', gender:'male', maxHp:3, skill:'化身/新生',
+    desc:'化身:你可以选择借用其他一名武将的单个技能(可在回合开始/结束时重新声明)。'+
+      '新生:每受到1点伤害后,你可以获得一个新的武将(将其加入可借用的武将库,不立即声明借用)。',
+    caps:{ huashen:true },
+    hooks:{
+      onDamaged(g, seat, ctx){
+        const p=g.players[seat];
+        if(!p || !p.alive) return;
+        const amount=Math.max(1, (ctx && ctx.amount) || 1);
+        g.pending={type:'xinshengAsk', seat, remaining:amount, resume:{type:ctx.srcType}};
+        g.phase='xinshengAsk';
+        g.log=pushLog(g.log, p.name+' 是否发动【新生】,获得一个新的武将…');
+      }
+    } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
+
+// ---------- 左慈【化身】技能拆分表(数据基础层,尚未接入游戏逻辑) ----------
+// HUASHEN_SKILL_TABLE:把 GENERALS 里每个武将"整个打包"的 caps/hooks,按单个技能名的粒度
+// 拆开,供左慈【化身】(选择借用其他武将的单个技能)使用。覆盖 GENERALS 里当前已实现的全部
+// 64 个武将(左慈自己除外),每条 caps/hooks key 均已用脚本逐一核对确认真实存在于对应武将的
+// GENERALS 条目里(无编造/无遗漏)。
+//
+// 【架构约定,后续实现化身逻辑时必须遵守】任何时候只应动态查询"左慈当前借用的那个具体武将id"
+// 对应的 cap/hook 值,绝不能把借来的值静态复制/覆写到 player.caps 等对象上——否则会有多个武将
+// 共用同一个 cap key 时的覆盖风险(如周瑜【英姿】和鲁肃【好施】都用 caps.extraDrawPhase,一个是
+// 数值1、一个是数值2;若静态复制,后借的值会覆盖先借的,且卸下/切换借用技能后不会自动失效)。
+// 正确做法应类似 hasCap/generalHasCap 的实时查询模式:hasCap(player,cap) 从不缓存,每次都重新
+// 从 getGeneral(player.general) 现查——化身借用的技能同理,应该是"每次查询时现查左慈当前借用的
+// 是哪个武将/技能",而不是"借用那一刻就把值写死"。
+//
+// 【凌统"旋风"特例】lingtong 唯一一条同时标了 caps 和 hook——caps.xuanfeng 和
+// hooks.onLoseEquip 服务于同一个技能(不是两个不同技能),借用时两者必须作为整体一起生效,
+// 只借其一无意义(只借 cap 没有实际触发逻辑;只借 hook 则查询"是否有旋风能力"的地方会查不到)。
+//
+// 【袁术"妄尊"未纳入】yuanshu 的 GENERALS.desc 提到"妄尊"(主公技,主公准备阶段摸一张牌、
+// 手牌上限-1)和"同疾"两个技能名,但 GENERALS.caps 里只有 tongji 一个 key,对应"同疾"——
+// 项目当前无身份局/主公系统(CLAUDE.md 刘备条目已注明同类限制),妄尊没有可借用的实现,
+// 因此这里只收"同疾"一条,不为妄尊编造一个不存在的 cap。
+//
+// 【限定技/主公技/觉醒技/获得技能——本表暂不做类型过滤】官方"化身"规则通常要求排除
+// 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(袁术妄尊/刘备激将/曹操护驾/
+// 孙策制霸——这几个因为项目无身份局系统压根没被写进GENERALS.caps,天然不会出现在
+// 本表)、觉醒技(如姜维志继zhiji)、以及"觉醒/特殊条件下才动态获得的技能"(志继本身
+// 触发后会让姜维player.caps.guanxing=true,这是运行时追加的能力,和本表这种静态查表
+// 结构是两回事)。
+// 本表当前**不含任何技能类型分类元数据**,姜维志继/庞统涅槃这类技能和普通caps技能
+// 一视同仁被收录,均可被化身/新生声明借用——比如借到志继,hasCap(左慈,'zhiji')会
+// 因huashenHasCap生效,game.js里志继的觉醒判定(检查手牌是否为空等条件)是通用hasCap
+// 入口,借用后左慈理论上真的能触发这套觉醒流程,而不是被静默挡住。
+// 若以后要把这几类技能排除在化身候选之外,需要在respondHuashenPick/respondXinshengPick
+// (或对应的新版本函数名,后续改动可能会重命名)的候选校验逻辑里,依据某种技能类型标记
+// 过滤掉这些entry——本次暂不实现这个过滤,记在这里以防以后被误以为"什么都能借、这是
+// 故意的最终设计"。
+const HUASHEN_SKILL_TABLE = {
+  zhangfei: [
+    { name:'咆哮', caps:['unlimitedSha'] }
+  ],
+  guojia: [
+    { name:'天妒', caps:['tiandu'] },
+    { name:'遗计', hook:'onDamaged' }
+  ],
+  sunshangxiang: [
+    { name:'枭姬', hook:'onLoseEquip' }
+  ],
+  diaochan: [
+    { name:'离间', caps:['lijian'] },
+    { name:'闭月', caps:['biyue'] }
+  ],
+  kongrong: [
+    { name:'礼让', caps:['lirang'] },
+    { name:'争义', caps:['zhengyi'] }
+  ],
+  zhaoyun: [
+    { name:'龙胆', caps:['longdan'] }
+  ],
+  lvmeng: [
+    { name:'克己', caps:['keji'] }
+  ],
+  simayi: [
+    { name:'反馈', hook:'onDamaged' },
+    { name:'鬼才', caps:['guicai'] }
+  ],
+  xiahoudun: [
+    { name:'刚烈', hook:'onDamaged' }
+  ],
+  xuchu: [
+    { name:'裸衣', caps:['luoyi'] }
+  ],
+  yanliangwenchou: [
+    { name:'双雄', caps:['shuangxiong'] }
+  ],
+  xunyu: [
+    { name:'驱虎', caps:['quhu'] },
+    { name:'节命', hook:'onDamaged' }
+  ],
+  daqiao: [
+    { name:'国色', caps:['guose'] },
+    { name:'流离', caps:['liuli'] }
+  ],
+  xiaoqiao: [
+    { name:'天香', caps:['tianxiang'] },
+    { name:'红颜', caps:['hongyan'] }
+  ],
+  pangtong: [
+    { name:'连环', caps:['lianhuan'] },
+    { name:'涅槃', caps:['niepan'] }
+  ],
+  masu: [
+    { name:'散谣', caps:['sanyao'] },
+    { name:'制蛮', caps:['zhimeng'] }
+  ],
+  machao: [
+    { name:'马术', caps:['extraMinus1'] },
+    { name:'铁骑', caps:['tieqi'] }
+  ],
+  lidian: [
+    { name:'恂恂', caps:['xunxun'] },
+    { name:'忘隙', caps:['wangxi'] }
+  ],
+  pangde: [
+    { name:'马术', caps:['extraMinus1'] },
+    { name:'猛进', caps:['mengjin'] }
+  ],
+  menghuo: [
+    { name:'祸首', caps:['huoshou'] },
+    { name:'再起', caps:['zaiqi'] }
+  ],
+  zhenji: [
+    { name:'洛神', caps:['luoshen'] },
+    { name:'倾国', caps:['qingguo'] }
+  ],
+  zhangliao: [
+    { name:'突袭', caps:['tuxi'] }
+  ],
+  ganning: [
+    { name:'奇袭', caps:['qixi'] }
+  ],
+  huanggai: [
+    { name:'苦肉', caps:['kurou'] }
+  ],
+  huaxiong: [
+    { name:'耀武', caps:['yaowu'] }
+  ],
+  huangyueying: [
+    { name:'集智', caps:['jizhi'] }
+  ],
+  sunquan: [
+    { name:'制衡', caps:['zhiheng'] }
+  ],
+  zhouyu: [
+    { name:'英姿', caps:['extraDrawPhase'], note:'数值型cap,值为1' },
+    { name:'反间', caps:['fanjian'] }
+  ],
+  sunce: [
+    { name:'激昂', caps:['jiang'] }
+  ],
+  huatuo: [
+    { name:'青囊', caps:['qingnang'] },
+    { name:'急救', caps:['jijiu'] }
+  ],
+  liubei: [
+    { name:'仁德', caps:['rende'] }
+  ],
+  caocao: [
+    { name:'奸雄', hook:'onDamaged' }
+  ],
+  guanyu: [
+    { name:'武圣', caps:['wusheng'] }
+  ],
+  huangzhong: [
+    { name:'烈弓', caps:['liegong'] }
+  ],
+  xuhuang: [
+    { name:'断粮', caps:['duanliang'] }
+  ],
+  yujin: [
+    { name:'毅重', caps:['yizhong'] }
+  ],
+  yuejin: [
+    { name:'骁果', caps:['xiaoguo'] }
+  ],
+  zhanghe: [
+    { name:'巧变', caps:['qiaobian'] }
+  ],
+  lvbu: [
+    { name:'无双', caps:['wushuang'] }
+  ],
+  zhuge: [
+    { name:'观星', caps:['guanxing'] },
+    { name:'空城', caps:['kongcheng'] }
+  ],
+  jiangwei: [
+    { name:'挑衅', caps:['tiaoxin'] },
+    { name:'志继', caps:['zhiji'], note:'觉醒技,hooks为空对象{},当前无额外触发逻辑' }
+  ],
+  zhoutai: [
+    { name:'不屈', caps:['buqu'], note:'hooks为空对象{},当前无额外触发逻辑' }
+  ],
+  weiyan: [
+    { name:'狂骨', caps:['kuanggu'] }
+  ],
+  lusu: [
+    { name:'好施', caps:['haoshi'] },
+    { name:'好施(额外摸牌)', caps:['extraDrawPhase'], note:'与周瑜英姿共用同一个数值型cap key,值为2——见本表顶部架构约定关于覆盖风险的说明' },
+    { name:'缔盟', caps:['dimeng'] }
+  ],
+  xiahouyuan: [
+    { name:'神速', caps:['shensu'] }
+  ],
+  taishici: [
+    { name:'天义', caps:['tianyi'] }
+  ],
+  dianwei: [
+    { name:'强袭', caps:['qiangxi'] }
+  ],
+  gongsunzan: [
+    { name:'趫猛', caps:['qiaomeng'] },
+    { name:'义从', caps:['yicong'] }
+  ],
+  jiaxu: [
+    { name:'完杀', caps:['wansha'] },
+    { name:'乱武', caps:['luanwu'] },
+    { name:'帷幕', caps:['weimu'] }
+  ],
+  yuanshao: [
+    { name:'乱击', caps:['luanji'] }
+  ],
+  yuanshu: [
+    { name:'同疾', caps:['tongji'] }
+  ],
+  zhangjiao: [
+    { name:'雷击', caps:['leiji'] },
+    { name:'鬼道', caps:['guidu'] }
+  ],
+  caiwenji: [
+    { name:'悲歌', caps:['beige'] },
+    { name:'断肠', caps:['duanchang'] }
+  ],
+  caoren: [
+    { name:'据守', caps:['jushou'] }
+  ],
+  chengong: [
+    { name:'明策', caps:['mingce'] },
+    { name:'智迟', caps:['zhichi'] }
+  ],
+  zhurong: [
+    { name:'巨象', caps:['juxiang'] },
+    { name:'烈刃', caps:['lieRen'] }
+  ],
+  lingtong: [
+    { name:'旋风', caps:['xuanfeng'], hook:'onLoseEquip', note:'caps和hook共同构成同一技能,借用时必须整体一起生效,见本表顶部架构约定' }
+  ],
+  fazheng: [
+    { name:'恩怨', caps:['enyuan'] },
+    { name:'眩惑', caps:['huanhuo'] }
+  ],
+  dingfeng: [
+    { name:'短兵', caps:['duanbing'] },
+    { name:'奋迅', caps:['fenxun'] }
+  ],
+  caochong: [
+    { name:'称象', caps:['chengxiang'] },
+    { name:'仁心', caps:['renxin'] }
+  ],
+  xushu: [
+    { name:'无言', caps:['wuyan'] },
+    { name:'举荐', caps:['jujian'] }
+  ],
+  caozhang: [
+    { name:'将驰', caps:['jiangchi'] }
+  ],
+  caozhi: [
+    { name:'落英', caps:['luoying'] },
+    { name:'酒诗', caps:['jiushi'] }
+  ],
+  yuji: [
+    { name:'蛊惑', caps:['guhuo'] }
+  ]
+};
+
+// validateHuashenPick: 校验"从pool里选一个武将+声明其一个技能"这个操作是否合法——
+// generalId必须在pool里,skillName必须是HUASHEN_SKILL_TABLE[generalId]里真实存在的
+// 技能名。供respondHuashenPick(开局初始声明)/respondHuashenChangePickStart/
+// respondHuashenChangePickEnd(回合开始/结束的更改化身)共用,避免同一段校验逻辑写三遍。
+function validateHuashenPick(pool, generalId, skillName){
+  if(!Array.isArray(pool) || !pool.includes(generalId)) return false;
+  const entries = HUASHEN_SKILL_TABLE[generalId];
+  if(!entries || !entries.some(e=>e.name===skillName)) return false;
+  return true;
+}
+
 function chanyuanLocksSkills(player){
   return !!(player && player.chanyuan && player.hp<=1);
 }
@@ -426,12 +723,29 @@ function equipHasCap(player, cap){
     return !!(info && info.cap===cap);
   });
 }
-// 统一能力入口:武将 caps 或 装备 cap 任一提供即算拥有。实时查询无缓存 —— 卸下/替换装备后自然失效。
+// huashenSkillEntry: 左慈当前声明借用的那个具体技能条目(HUASHEN_SKILL_TABLE里的一项),
+// 没有借用/借用武将或技能名对不上(理论上不该发生,兜底防御)则返回null。
+function huashenSkillEntry(player){
+  if(!player || player.huashenGeneral===undefined || player.huashenGeneral===null) return null;
+  const entries = HUASHEN_SKILL_TABLE[player.huashenGeneral];
+  if(!entries) return null;
+  return entries.find(e=>e.name===player.huashenSkillName) || null;
+}
+// huashenHasCap: 左慈通过【化身】借用的技能是否提供某个布尔能力——只查当前声明借用的
+// 那一个技能条目的caps数组,不查huashenGeneral整个武将的其它技能(左慈只借了"单个技能",
+// 不是整个武将)。断肠等"武将技能整体失效"效果对借来的技能同样生效(和generalHasCap
+// 共用同一条skillsLost/chanyuanLocksSkills前置判断,由hasCap统一把关,这里不重复判断)。
+function huashenHasCap(player, cap){
+  const entry = huashenSkillEntry(player);
+  return !!(entry && Array.isArray(entry.caps) && entry.caps.includes(cap));
+}
+// 统一能力入口:武将 caps 或 装备 cap 或 化身借用的技能 任一提供即算拥有。实时查询无缓存
+// —— 卸下/替换装备、更改化身声明后自然失效。
 // player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
 function hasCap(player, cap){
   if(equipHasCap(player, cap)) return true;
   if(player && (player.skillsLost || chanyuanLocksSkills(player))) return false;
-  return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]);
+  return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]) || huashenHasCap(player, cap);
 }
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
@@ -485,7 +799,7 @@ function canUseAs(player, card, role){
   if(!card) return false;
   if(role==='杀' && isShaName(card.name)) return true;
   if(card.name===role) return true;
-  if(generalHasCap(player,'longdan')){
+  if(hasCap(player,'longdan')){
     if(role==='杀' && card.name==='闪') return true;
     if(role==='闪' && card.name==='杀') return true;
   }
@@ -595,12 +909,13 @@ function buildDeck(){
 // 导出给Node.js使用
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    GENERALS, GENERAL_IDS, getGeneral, generalMaxHp, hasCap,
+    GENERALS, GENERAL_IDS, getGeneral, generalMaxHp, hasCap, HUASHEN_SKILL_TABLE,
     EQUIPS, EQUIP_SLOTS, emptyEquips, getEquip,
     SEATS, MIN_PLAYERS, MAX_HP, START_HAND, BASIC_CARDS,
     DELAY_TRICKS,
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
-    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap
+    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap,
+    validateHuashenPick, huashenSkillEntry, huashenHasCap
   };
 }

@@ -89,7 +89,7 @@ function startGame(mode){
       if(shuffled.length < needed){
         // 武将数不够撑起三选一(每人3个候选且互不重复),安全退化为直接随机分配,不报错不卡死
         g.players.forEach((p,i)=>{ p.general = shuffled[i % shuffled.length]; });
-        finishGeneralAssign(g);
+        checkHuashenBeforeAssign(g);
         return g;
       }
       const pool = shuffled.slice(0, needed);
@@ -104,7 +104,7 @@ function startGame(mode){
 
     // random 模式:直接不重复分配,走原有开局收尾
     g.players.forEach((p,i)=>{ p.general = shuffled[i]; });
-    finishGeneralAssign(g);
+    checkHuashenBeforeAssign(g);
     return g;
   });
 }
@@ -130,6 +130,111 @@ function finishGeneralAssign(g){
   startTurn(g, 0);
 }
 
+// checkHuashenBeforeAssign: 左慈【化身】v2 完整调度器——生成初始库存(p.huashenPool)+
+// 依次询问所有"还没声明借用哪个技能"的左慈(按座位顺序一次问一个,respondHuashenPick
+// 结算后会再次调用本函数找下一个待处理的座位),全部问完才真正进入 finishGeneralAssign
+// ——和三选一武将"全部选完才finishGeneralAssign"同一衔接结构。
+//
+// 【候选生成这次必须是幂等的,这是对第一块产出代码的一处必要修改】——第一块设计时
+// checkHuashenBeforeAssign 只做候选生成、只会被独立调用一次,所以当时"不需要考虑
+// 已经有pool了"这种情况;但这次把它和"排队询问"合并成一个函数后,respondHuashenPick
+// 会反复调用它来找下一个待处理的左慈,如果候选生成部分不做"只在pool为空时才生成"
+// 这个幂等判断,后一次调用会把还在等待声明的左慈的pool重新洗一遍——这正是v1版本
+// (checkHuashenBeforeAssign/checkHuashenBeforeAssign 那次)踩过的"先有鸡先有蛋"
+// 时序坑的另一种变体,这次必须一开始就避开。
+//
+// 排除条件统一:候选 = GENERAL_IDS - ['zuoci', ...p.huashenPool] ——不管是这里(开局)
+// 还是以后的【新生】重选,排除逻辑都是这一条,不额外排除"场上其他玩家在用的武将"。
+function checkHuashenBeforeAssign(g){
+  g.players.forEach(p=>{
+    if(hasCap(p,'huashen') && p.huashenPool.length===0){
+      const excluded = ['zuoci', ...p.huashenPool];
+      const avail = GENERAL_IDS.filter(id=>!excluded.includes(id));
+      const shuffled = [...avail].sort(()=>Math.random()-0.5);
+      p.huashenPool = shuffled.slice(0,2);
+    }
+  });
+  // 找第一个"有pool但还没声明技能"的座位——不假设"一局只会有一个左慈"(遍历全部玩家,
+  // findIndex按座位顺序找,不break提前退出;若还有其他左慈待处理,respondHuashenPick
+  // 结算后会再次调用本函数,自然找到下一个)。
+  const pendingSeat = g.players.findIndex(p=>p && hasCap(p,'huashen') && p.huashenPool.length>0 && p.huashenGeneral===null);
+  if(pendingSeat<0){
+    finishGeneralAssign(g);
+    return;
+  }
+  // pending不缓存候选副本——respondHuashenPick/UI都直接实时读g.players[seat].huashenPool
+  // 本体,不在pending里存一份快照。理由:①这次范围内pool在"开出pending"到"处理完毕"之间
+  // 不可能变化(新生/更改化身都不在本块范围内),缓存防的是一个眼下不存在的问题;②这个
+  // 项目里"化身借用"相关的查询函数(hasCap/huashenSkillEntry等)一贯坚持"只动态查询,
+  // 绝不静态复制"这条架构原则,pending存副本正是在开一个新的静态复制实例,和既有原则
+  // 相悖;③少一份数据意味着normalize要防御的字段更少,也免疫"副本和本体不同步"这整
+  // 一类bug;④为后续"更改化身"铺路更顺,那个流程大概率也要从pool里选,统一走实时读取
+  // 不需要为"pending里有没有缓存"分两套逻辑。
+  g.pending = { type:'huashenPick', seat:pendingSeat };
+  g.phase = 'huashenPick';
+  // 日志刻意不透露候选内容/最终选择——和 respondPickGeneral 同一个"正式开局
+  // (finishGeneralAssign的g.started=true)前都是隐藏信息"的窗口期。
+  g.log = pushLog(g.log, g.players[pendingSeat].name+' 是否发动【化身】,选择借用一名武将的技能…');
+}
+
+// respondHuashenPick v2: 左慈从 p.huashenPool(实时读取,不是pending里的快照)里选一个
+// 武将,声明借用它的一个具体技能。**和v1最大的行为差异:选完不清空 huashenPool**——
+// 库存只增不减,已经声明的技能对应的武将依然留在库存里,为将来"更改化身"时可以切回来
+// 做准备(这是第三块的范围,这里只负责"不要清空",不实现"切换"本身)。
+function respondHuashenPick(generalId, skillName){
+  tx(g=>{
+    if(g.phase!=='huashenPick' || !g.pending || g.pending.type!=='huashenPick' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)) return g;
+    me.huashenGeneral = generalId;
+    me.huashenSkillName = skillName;
+    // 不清空 me.huashenPool —— v2的关键行为差异,见函数注释。
+    g.log = pushLog(g.log, me.name+' 已选定借用的技能,等待其他玩家…');
+    g.pending = null;
+    checkHuashenBeforeAssign(g); // 不直接调finishGeneralAssign——可能还有其他左慈待处理
+    return g;
+  });
+}
+
+// respondHuashenChangeAskEnd/respondHuashenChangePickEnd: 回合结束阶段"是否更改化身"
+// 询问及其两级选择结算。不能复用 respondHuashenPick——那个函数的守卫写死了
+// g.phase!=='huashenPick',且收尾调 checkHuashenBeforeAssign/finishGeneralAssign,
+// 是开局专属的一次性流程,不能套在"回合中途重新声明"这个场景上;这里各自独立定义,
+// 收尾统一 continueBiyueCheck(和 continueHuashenChangeCheckAtTurnEnd 在没有化身/拒绝
+// 更改时落到的下一环完全一致)。
+function respondHuashenChangeAskEnd(activate){
+  tx(g=>{
+    if(g.phase!=='huashenChangeAskEnd' || !g.pending || g.pending.type!=='huashenChangeAskEnd' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive){ g.pending=null; g.phase='discard'; return g; }
+    const endingSeat = g.pending.seat;
+    if(!activate){
+      g.log = pushLog(g.log, me.name+'：不更改【化身】');
+      g.pending = null;
+      continueBiyueCheck(g, endingSeat);
+      return g;
+    }
+    g.pending = {type:'huashenChangePickEnd', seat:endingSeat};
+    g.phase = 'huashenChangePickEnd';
+    g.log = pushLog(g.log, me.name+' 重新选择借用一名武将的技能…');
+    return g;
+  });
+}
+function respondHuashenChangePickEnd(generalId, skillName){
+  tx(g=>{
+    if(g.phase!=='huashenChangePickEnd' || !g.pending || g.pending.type!=='huashenChangePickEnd' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    const endingSeat = g.pending.seat;
+    if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)){ return g; }
+    me.huashenGeneral = generalId;
+    me.huashenSkillName = skillName;
+    g.log = pushLog(g.log, me.name+' 已更改【化身】声明的技能');
+    g.pending = null;
+    continueBiyueCheck(g, endingSeat);
+    return g;
+  });
+}
+
 // respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
 function respondPickGeneral(generalId){
   tx(g=>{
@@ -143,7 +248,7 @@ function respondPickGeneral(generalId){
     // 写具体牌名会让所有人立刻收到暴露选择的弹窗提示。
     g.log = pushLog(g.log, me.name+' 已选定武将,等待其他玩家…');
     if(g.players.every(p=>p && p.general)){
-      finishGeneralAssign(g); // 全部选完,自动进入正式开局
+      checkHuashenBeforeAssign(g); // 全部选完,检查是否需要先问左慈化身,再进入正式开局
     }
     return g;
   });
@@ -165,7 +270,7 @@ function debugPickGeneral(generalId){
     me.generalChoices = null;
     g.log = pushLog(g.log, me.name+' (调试模式)选择了武将【'+GENERALS[generalId].name+'】');
     if(g.players.every(p=>p && p.general)){
-      finishGeneralAssign(g);
+      checkHuashenBeforeAssign(g); // 调试选将同样要走化身询问,不能绕开(否则选到左慈会静默无技能)
     }
     return g;
   });

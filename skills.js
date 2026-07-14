@@ -666,6 +666,58 @@ function cancelGuhuoTarget(){
 // continueQiaobianCheck 更早——观星是"准备阶段"的交互,巧变是"回合开始时(判定阶段之前)"
 // 的交互,准备阶段本来就在判定阶段之前,所以观星要插在链路里更靠前的位置。没有这个能力
 // 或牌堆(含重洗弃牌堆)一张都没有则直接放行到原有链路(继续走巧变检查),不受这次改动影响。
+// continueHuashenChangeCheckAtTurnStart: 左慈"更改化身"回合开始一侧的入口,插在
+// startTurn 链路最前面(比观星更早)——更改化身本身不涉及判定/摸牌逻辑,放在链路最前面
+// 只是为了和回合结束一侧(finishTurn -> continueHuashenChangeCheckAtTurnEnd -> ...)
+// 对称,没有必须更早/更晚的规则依据。没有化身能力或尚未声明借用技能(huashenGeneral为
+// null,说明还在huashenPick阶段或从未借用过)则直接放行到continueGuanxingCheck,不受
+// 这次改动影响。
+function continueHuashenChangeCheckAtTurnStart(g, seat){
+  const p = g.players[seat];
+  if(p && p.alive && hasCap(p,'huashen') && p.huashenGeneral!==null){
+    g.pending = {type:'huashenChangeAskStart', seat};
+    g.phase = 'huashenChangeAskStart';
+    g.log = pushLog(g.log, p.name+' 是否更改【化身】声明的技能…');
+    return;
+  }
+  continueGuanxingCheck(g, seat);
+}
+// respondHuashenChangeAskStart/respondHuashenChangePickStart: 回合开始阶段"是否更改
+// 化身"的询问及两级选择结算,和回合结束一侧(respondHuashenChangeAskEnd/PickEnd,见
+// room-lifecycle.js)是两个独立的respond函数——不是同一个函数靠source字段分支,这样
+// 各自的收尾(继续continueGuanxingCheck vs continueBiyueCheck)天然不会写错。
+function respondHuashenChangeAskStart(activate){
+  tx(g=>{
+    if(g.phase!=='huashenChangeAskStart' || !g.pending || g.pending.type!=='huashenChangeAskStart' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive){ g.pending=null; g.phase='draw'; return g; }
+    const seat = g.pending.seat;
+    if(!activate){
+      g.log = pushLog(g.log, me.name+'：不更改【化身】');
+      g.pending = null;
+      continueGuanxingCheck(g, seat);
+      return g;
+    }
+    g.pending = {type:'huashenChangePickStart', seat};
+    g.phase = 'huashenChangePickStart';
+    g.log = pushLog(g.log, me.name+' 重新选择借用一名武将的技能…');
+    return g;
+  });
+}
+function respondHuashenChangePickStart(generalId, skillName){
+  tx(g=>{
+    if(g.phase!=='huashenChangePickStart' || !g.pending || g.pending.type!=='huashenChangePickStart' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    const seat = g.pending.seat;
+    if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)){ return g; }
+    me.huashenGeneral = generalId;
+    me.huashenSkillName = skillName;
+    g.log = pushLog(g.log, me.name+' 已更改【化身】声明的技能');
+    g.pending = null;
+    continueGuanxingCheck(g, seat);
+    return g;
+  });
+}
 function continueGuanxingCheck(g, seat){
   const p=g.players[seat];
   if(hasCap(p,'guanxing')){
@@ -1215,6 +1267,56 @@ function respondJieming(targetSeat){
     continueJieming(g, seat, remaining-1, resume);
     return g;
   });
+}
+
+// ===== 左慈【新生】:每受到1点伤害后可选择发动一次,获得一个新武将加入 huashenPool =====
+// 完全照抄荀彧【节命】的 remaining 计数循环四段式(continueJieming/respondJieming/
+// finishJieming 同构),不重新发明:GENERALS.zuoci.hooks.onDamaged 只负责开第一次
+// 询问(remaining=amount),每次响应完(不管发动与否)都调 continueXinsheng 推进计数,
+// remaining 耗尽才收尾。
+function continueXinsheng(g, seat, remaining, resume){
+  if(remaining>0 && g.players[seat] && g.players[seat].alive){
+    g.pending={type:'xinshengAsk', seat, remaining, resume};
+    g.phase='xinshengAsk';
+    g.log=pushLog(g.log, g.players[seat].name+' 是否继续发动【新生】('+remaining+'次)…');
+  } else {
+    finishXinsheng(g, resume, seat);
+  }
+}
+
+function respondXinshengAsk(activate){
+  tx(g=>{
+    if(g.phase!=='xinshengAsk'||!g.pending||g.pending.type!=='xinshengAsk'||g.pending.seat!==mySeat) return g;
+    const {seat, remaining, resume}=g.pending;
+    const self=g.players[seat];
+    if(!activate){
+      g.log=pushLog(g.log, self.name+'：不发动【新生】');
+      continueXinsheng(g, seat, remaining-1, resume);
+      return g;
+    }
+    // 排除条件统一:候选 = GENERAL_IDS - ['zuoci', ...p.huashenPool] ——和
+    // checkHuashenBeforeAssign 生成初始库存那一处完全同一条规则,不额外排除
+    // "场上其他玩家在用的武将"。
+    const excluded=['zuoci', ...self.huashenPool];
+    const avail=GENERAL_IDS.filter(id=>!excluded.includes(id));
+    if(avail.length===0){
+      g.log=pushLog(g.log, self.name+' 【新生】没有可获得的新武将了');
+      continueXinsheng(g, seat, remaining-1, resume);
+      return g;
+    }
+    const picked=avail[Math.floor(Math.random()*avail.length)];
+    self.huashenPool.push(picked);
+    g.log=pushLog(g.log, self.name+' 发动【新生】,获得一个新的武将');
+    markSkillSound(g, '新生');
+    continueXinsheng(g, seat, remaining-1, resume);
+    return g;
+  });
+}
+
+function finishXinsheng(g, resume, seat){
+  g.pending=null;
+  if(checkWin(g)) return;
+  resumeAfterInterrupt(g, resume, seat);
 }
 
 // ===== 郭嘉【遗计】:受伤后可选发动,看牌堆顶2张、分给任意角色(含自己) =====
