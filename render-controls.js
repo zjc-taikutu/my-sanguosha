@@ -206,12 +206,21 @@ function waitAskBanner(name, skill){
 function renderHuashenTwoStepPick(g, c, availGenerals, respondFn, titlePrefix){
   const pool = Array.isArray(availGenerals) ? availGenerals : [];
   if(huashenPickGeneral===null){
+    // 第一步(选武将):每个候选武将各是不同的武将,desc各不相同——每个候选按钮各自配
+    // 一段完整的GENERALS[gid].desc说明(不裁剪到单条技能),让玩家在选之前就能看清楚
+    // 整个武将的完整技能说明。按钮+说明包成一个小容器一起appendChild,保持"这段说明
+    // 属于哪个候选"视觉上一一对应,不和其它候选的按钮/说明混在一起。
     pool.forEach(gid=>{
       const gen=getGeneral(gid); if(!gen) return;
+      const wrap=document.createElement('div'); wrap.className='huashen-candidate';
       const b=document.createElement('button');
       b.textContent=gen.name+'('+gen.skill+')';
       b.onclick=()=>{ huashenPickGeneral=gid; render(g); };
-      c.appendChild(b);
+      wrap.appendChild(b);
+      const desc=document.createElement('div'); desc.className='huashen-candidate-desc';
+      desc.textContent=gen.desc||'(暂无说明)';
+      wrap.appendChild(desc);
+      c.appendChild(wrap);
     });
     setBanner('【'+titlePrefix+'】请选择要借用的武将…');
     return;
@@ -223,6 +232,15 @@ function renderHuashenTwoStepPick(g, c, availGenerals, respondFn, titlePrefix){
     respondFn(gid, skillName);
     return;
   }
+  // 第二步(选技能):这几个按钮全部属于同一个武将(huashenPickGeneral),desc是
+  // 同一份文本,不需要在每个技能按钮下都重复贴一遍——统一在按钮上方展示这一个武将的
+  // 完整desc一次,和第一步"每个候选各自一份"的处理方式不同,是因为第二步候选数量
+  // 少但内容重复,重复展示反而是视觉噪音。
+  const genForPick = getGeneral(huashenPickGeneral);
+  const descBlock=document.createElement('div'); descBlock.className='huashen-candidate-desc';
+  descBlock.style.cssText='flex-basis:100%;margin-bottom:4px;';
+  descBlock.textContent=(genForPick&&genForPick.desc)||'(暂无说明)';
+  c.appendChild(descBlock);
   entries.forEach(e=>{
     const b=document.createElement('button');
     b.textContent=e.name;
@@ -232,7 +250,7 @@ function renderHuashenTwoStepPick(g, c, availGenerals, respondFn, titlePrefix){
   const back=document.createElement('button'); back.className='ghost';
   back.textContent='重新选武将'; back.onclick=()=>{ huashenPickGeneral=null; render(g); };
   c.appendChild(back);
-  setBanner('【'+titlePrefix+'】请选择借用 '+(getGeneral(huashenPickGeneral)?getGeneral(huashenPickGeneral).name:'')+' 的哪个技能…');
+  setBanner('【'+titlePrefix+'】请选择借用 '+(genForPick?genForPick.name:'')+' 的哪个技能…');
 }
 // renderHuashenChangeAsk: 回合开始/结束"是否更改化身"的二选一询问,respondFn 是各自的
 // respondHuashenChangeAskStart/respondHuashenChangeAskEnd。

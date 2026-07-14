@@ -467,6 +467,19 @@
   .seat-delays .dchip{font-size:8px;padding:0 3px;border:1px solid #7a5fa0;border-radius:4px;
     color:#e2d6f5;background:rgba(40,25,60,.75);white-space:nowrap;
     text-shadow:0 1px 2px rgba(0,0,0,.9);}
+  /* 左慈【化身】声明后的"化身：XX·YY"提示行:和 .seat-delays 的紫色系(锦囊)、
+     .seat-equip-bar 的金色系(装备)区分开,用青色系代表"借用的技能"这个新概念。
+     字号跟 .seat-equip-bar 同一套 clamp(cqw) 写法(按卡片自身宽度缩放,不需要额外的
+     @container 断点),自带不透明底衬(和 .dchip 同一原则,不依赖 .seat-scrim-bottom
+     的半透明渐变——那条渐变本身已经够用,这里多一层自己的底色只是让这一行在装备/判定区
+     之间更醒目、层次分明,不是必须)。整行可点击(cursor:pointer,呼应装备行/判定区chip
+     同样整行可点的既有交互),行内的"?"字符只是视觉提示,不是独立的可点击热区。 */
+  .seat-huashen-line{font-size:clamp(7px,6.5cqw,10px);padding:1px 4px;margin:0 3px 1px;
+    border:1px solid #3a8ba0;border-radius:4px;color:#bfe8f0;background:rgba(15,45,55,.75);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
+    text-shadow:0 1px 2px rgba(0,0,0,.9);}
+  .seat-huashen-line .huashen-info-mark{font-weight:700;color:#8fd6e6;}
+  .seat.me .seat-huashen-line{font-size:10px;padding:2px 5px;}
   /* (第4次微调:原来这里有一条 .seat-title .info-badge 的尺寸规则,"?"已经从标题栏
      挪到右上角、身份方块下方,改由上面的 .seat-info-badge 负责尺寸和定位,这条已删除,
      不再保留一条永远命中不到的死规则。) */
@@ -592,6 +605,16 @@
     padding:10px 12px;margin:4px 0 0;font-size:14px;
   }
   .controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;flex-basis:100%;margin-top:2px;}
+  /* 左慈【化身】选技能环节(renderHuashenTwoStepPick):每个候选武将的按钮配一段完整
+     desc说明。.huashen-candidate 是"按钮+说明"的小容器,自己走 flex-direction:column
+     (按钮在上、说明在下),宽度限制在合理范围内避免整段desc撑成一长条——#controls本身
+     是flex-wrap的行,每个candidate容器是其中一个换行单元,和其它按钮混排也不冲突。
+     配色/字号复用三选一候选卡片(.general-pick-desc)已经验证过的暗淡小字风格,不新造
+     一套视觉语言。 */
+  .huashen-candidate{display:flex;flex-direction:column;align-items:stretch;gap:4px;
+    max-width:260px;}
+  .huashen-candidate-desc{font-size:12px;color:var(--paper-dim);line-height:1.5;
+    text-align:left;}
 
   /* 底部一整行:自己的座位卡(左)+手牌(右)——对应参考图"左下角自己座位卡+底部手牌行"。
      阶段1只做最基础的横排,skill按钮("豹头"样式的武将说明入口)等细节留给阶段3处理。 */
@@ -1172,16 +1195,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=141"></script>
-<script src="data.js?v=141"></script>
-<script src="room-lifecycle.js?v=141"></script>
-<script src="game.js?v=141"></script>
-<script src="weapons.js?v=141"></script>
-<script src="skills.js?v=141"></script>
-<script src="render.js?v=141"></script>
-<script src="render-table.js?v=141"></script>
-<script src="render-hand.js?v=141"></script>
-<script src="render-controls.js?v=141"></script>
-<script src="render-log.js?v=141"></script>
+<script src="config.js?v=142"></script>
+<script src="data.js?v=142"></script>
+<script src="room-lifecycle.js?v=142"></script>
+<script src="game.js?v=142"></script>
+<script src="weapons.js?v=142"></script>
+<script src="skills.js?v=142"></script>
+<script src="render.js?v=142"></script>
+<script src="render-table.js?v=142"></script>
+<script src="render-hand.js?v=142"></script>
+<script src="render-controls.js?v=142"></script>
+<script src="render-log.js?v=142"></script>
 </body>
 </html>
