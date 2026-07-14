@@ -795,6 +795,13 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 左慈【新生】:remaining计数循环询问,和节命的jiemingAsk同一套结构、同一套防御写法。
+  if(g.pending && g.pending.type==='xinshengAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
   if(g.pending && g.pending.type==='liuli'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to]){

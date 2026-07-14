@@ -2107,6 +2107,23 @@ function renderControls(g){
     waitAskBanner(p?p.name:'荀彧', '节命');
     return;
   }
+  // 左慈【新生】:简单的"是否发动"二选一(参照寒冰剑respondHanbingAsk同款写法),
+  // 每受到1点伤害问一次,g.pending.remaining 提示还剩几次。
+  if(g.phase==='xinshengAsk' && g.pending && g.pending.type==='xinshengAsk' && g.pending.seat===mySeat){
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【新生】'; b1.onclick=()=>respondXinshengAsk(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondXinshengAsk(false);
+    c.appendChild(b2);
+    setBanner('你受到伤害,是否发动【新生】获得一个新的武将? 剩余 '+g.pending.remaining+' 次。');
+    return;
+  }
+  if(g.phase==='xinshengAsk' && g.pending && g.pending.type==='xinshengAsk'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '新生');
+    return;
+  }
   if(g.phase==='liuli' && g.pending && g.pending.type==='liuli' && g.pending.to===mySeat){
     const opts=liuliDiscardOptions(me);
     const targets=g.pending.targets||[];

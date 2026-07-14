@@ -392,14 +392,27 @@ const GENERALS = {
   yuji:           { id:'yuji',           name:'于吉',   gender:'male', maxHp:3, skill:'蛊惑/缠怨',
     desc:'蛊惑:每回合限一次,你可以扣置一张手牌,将此牌当任意一张基本牌或普通锦囊牌使用或打出,其他角色可质疑。若为假,此牌作废;若为真,质疑角色获得【缠怨】。缠怨:锁定技,你不能质疑【蛊惑】;当你的体力值为1时,你的所有其他技能失效。',
     caps:{ guhuo:true } },
-  // 左慈【化身/新生】v2:最小可用条目——仅为了让 hasCap(p,'huashen') 能被真实触发、
-  // GENERAL_IDS 里出现 zuoci、checkHuashenBeforeAssign 的库存生成有真实入口可测。
-  // 这次(v2)化身机制采用 p.huashenPool(只增不减的库存)取代v1的 p.huashenChoices
-  // (用完即弃的候选)设计,本步尚未接入询问/选择/新生流程,desc 先写占位说明,
-  // hooks 暂不加(新生不在本次范围内)。
+  // 左慈【化身/新生】(v2 完整版:化身+更改化身+新生均已实现)。
+  // 新生按荀彧【节命】(jiemingAsk/continueJieming/respondJieming/finishJieming)同一套
+  // "remaining 计数循环"四段式实现,见 continueXinsheng/respondXinshengAsk/
+  // finishXinsheng(skills.js)——每受到1点伤害独立问一次是否发动,不是"看总伤害点数
+  // 只问一次"。这次是 zuoci 自己的普通 onDamaged hook,和节命/遗计的接入方式完全
+  // 一致,不涉及 v1 那套"借用的技能自己的hook是否优先触发"的排队机制——新生不关心
+  // 借用的技能有没有生效,只是左慈本人受伤后的一个独立技能。
   zuoci: { id:'zuoci', name:'左慈', gender:'male', maxHp:3, skill:'化身/新生',
-    desc:'化身:你可以选择借用其他一名武将的单个技能。新生:尚未实现。',
-    caps:{ huashen:true } },
+    desc:'化身:你可以选择借用其他一名武将的单个技能(可在回合开始/结束时重新声明)。'+
+      '新生:每受到1点伤害后,你可以获得一个新的武将(将其加入可借用的武将库,不立即声明借用)。',
+    caps:{ huashen:true },
+    hooks:{
+      onDamaged(g, seat, ctx){
+        const p=g.players[seat];
+        if(!p || !p.alive) return;
+        const amount=Math.max(1, (ctx && ctx.amount) || 1);
+        g.pending={type:'xinshengAsk', seat, remaining:amount, resume:{type:ctx.srcType}};
+        g.phase='xinshengAsk';
+        g.log=pushLog(g.log, p.name+' 是否发动【新生】,获得一个新的武将…');
+      }
+    } },
 };
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
