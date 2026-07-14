@@ -404,8 +404,15 @@ function renderSeatCard(g, seat, isSelf){
   // 不够,三选一选将阶段选完但还没正式开局前仍是隐藏信息,这是一个真实修过的信息泄露bug
   // (见CLAUDE.md),这里延续同一条件不变。
   const avatarReady = g.started && gen;
+  // 左慈【化身】:声明借用某个武将后,座位卡头像改用那个武将的立绘,只改这一处视觉展示——
+  // p.general 本身恒为'zuoci',技能判定(hasCap/generalHasCap等)、genLabel、genNameVert
+  // 全部继续走 p.general/gen,不受这条影响。只在 p.general==='zuoci' 时才生效,不碰其他
+  // 任何武将的座位卡渲染(renderSeatCard 是所有座位共用的同一个函数)。avatarGen 拿不到
+  // (huashenGeneral 是脏数据/查无对应武将,理论上不该发生)时兜底退回 gen,不崩溃。
+  const isZuociWithHuashen = p.general==='zuoci' && p.huashenGeneral;
+  const avatarGen = isZuociWithHuashen ? (getGeneral(p.huashenGeneral) || gen) : gen;
   const avatarImg = avatarReady
-    ? '<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
+    ? '<img class="avatar" src="'+generalAvatarSrc(avatarGen.id)+'" onerror="avatarError(this)" alt="">'
     : '';
   const avatarPlaceholder = '<div class="avatar-placeholder"'+(avatarReady?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
   // 武将名竖排(writing-mode:vertical-rl + text-orientation:upright,见CSS)。固定字号,
@@ -454,6 +461,21 @@ function renderSeatCard(g, seat, isSelf){
   // 渲染这一整行;手牌数在 g.started 时恒非空(至少是数字0,不会是空字符串),所以这行
   // 在开局后基本总会渲染,除非连手牌图标都判断为 null(未开局时)且也没有装备可显示。
   const equipRow = (handIcon || equipBar) ? '<div class="seat-equip-row">'+handIcon+equipBar+'</div>' : '';
+  // 左慈【化身】:声明借用某个武将后,座位卡新增一行"化身：<武将名>·<技能名>"+可点击
+  // "?"角标(复用 showGeneralInfo,和武将说明"?"同一套展示组件,不新造弹窗)。
+  // **放置位置的取舍**:字面上"名字下方"更贴近标题栏(.seat-title)正下方,但那一带
+  // (.seat-title/.seat-left 的像素级 top 偏移、竖排武将名高度、血量胶囊位置)是经过多轮
+  // WCAG对比度实测+响应式断点校准出来的脆弱几何(见CLAUDE.md第7次微调等多轮记录),往
+  // 那里插一条新行需要重新验证整套断点下的重叠/对比度,风险和工作量都明显偏高。改放进
+  // 已经证明能安全伸缩的 .seat-bottom(判定区+装备行所在的底部flex列,行数本来就是可变
+  // 的,判定区0~N行、装备区对手0~4行不等,早已验证过增删行不会打乱布局)。视觉上仿
+  // .seat-delays 的 .dchip(紫色系呼应锦囊)、装备行的金色高亮,这里用青色系区分"这是
+  // 借用的技能"这个新概念,不与既有色系混淆。
+  const huashenLine = (avatarReady && isZuociWithHuashen)
+    ? '<div class="seat-huashen-line" title="'+escapeHtml((avatarGen&&avatarGen.desc)||'')+'" onclick="event.stopPropagation();showGeneralInfo(\''+p.huashenGeneral+'\')">化身：'
+      + escapeHtml(avatarGen?avatarGen.name:p.huashenGeneral)+'·'+escapeHtml(p.huashenSkillName||'')
+      + ' <span class="huashen-info-mark">?</span></div>'
+    : '';
   // 判定区(延时锦囊):紫色 chip,叠在装备条上方(仍在图片上层),同样自带半透明底衬。
   const delayRow = (g.started && (p.delays||[]).length>0)
     ? '<div class="seat-delays">'+p.delays.map(c=>{
@@ -522,7 +544,7 @@ function renderSeatCard(g, seat, isSelf){
     // 确认"右上角只有身份牌"这个现状继续保留,不新增内容,这里未改动。**
     + '<div class="seat-identity"></div>'
     + infoBadge
-    + '<div class="seat-bottom">'+delayRow+equipRow+'</div>';
+    + '<div class="seat-bottom">'+huashenLine+delayRow+equipRow+'</div>';
 }
 
 
