@@ -575,6 +575,18 @@ function normalize(g){
       g.pending=null; g.phase='draw';
     }
   }
+  // 左慈"更改化身"回合开始一侧:huashenChangeAskStart(是否更改)/huashenChangePickStart
+  // (两级选择)——和qiaobianTurnStart同一类"回合开始阶段的分支性询问",发生在判定/摸牌
+  // 阶段之前,无效时同样降级回退到摸牌阶段。额外校验huashenGeneral必须非null(和
+  // continueHuashenChangeCheckAtTurnStart的触发条件保持一致,防止脏状态下问出一个
+  // 本不该出现的询问)。
+  if(g.pending && (g.pending.type==='huashenChangeAskStart' || g.pending.type==='huashenChangePickStart')){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
+      g.pending=null; g.phase='draw';
+    }
+  }
   // 麒麟弓选马阶段:from/to 都应是数字座位号且存活;不对就整体判无效,防止卡死
   // (render.js 这里已经用 ?:'?' 防护过读取,不会真崩溃,但座位失效仍会让选择永远问不到人)。
   if(g.pending && g.pending.type==='qilin'){
@@ -798,6 +810,15 @@ function normalize(g){
   if(g.pending && g.pending.type==='biyue'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      g.pending=null; g.phase='discard';
+    }
+  }
+  // 左慈"更改化身"回合结束一侧:huashenChangeAskEnd/huashenChangePickEnd——和biyue同一类
+  // "回合结束阶段的分支性询问",无效时降级回退到弃牌阶段(biyue同款处理)。
+  if(g.pending && (g.pending.type==='huashenChangeAskEnd' || g.pending.type==='huashenChangePickEnd')){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
       g.pending=null; g.phase='discard';
     }
   }
@@ -4751,15 +4772,32 @@ function endTurn(){
     return g;
   });
 }
+// finishTurn: 回合结束的统一入口,链条 finishTurn -> continueHuashenChangeCheckAtTurnEnd ->
+// continueBiyueCheck -> startTurn(nextAlive)。之所以从原来的单个if/else重构成链条:
+// 借来的【闭月】和左慈自己的"更改化身"是两个各自独立、可能同时成立的回合结束可选技能,
+// if/else-if只能问一个、会让后问的那个被静默跳过,必须拆成两个独立链接分别询问。
 function finishTurn(g, endingSeat){
+  continueHuashenChangeCheckAtTurnEnd(g, endingSeat);
+}
+function continueHuashenChangeCheckAtTurnEnd(g, endingSeat){
+  const p = g.players[endingSeat];
+  if(p && p.alive && hasCap(p,'huashen') && p.huashenGeneral!==null){
+    g.pending = {type:'huashenChangeAskEnd', seat:endingSeat};
+    g.phase = 'huashenChangeAskEnd';
+    g.log = pushLog(g.log, p.name+' 是否更改【化身】声明的技能…');
+    return;
+  }
+  continueBiyueCheck(g, endingSeat);
+}
+function continueBiyueCheck(g, endingSeat){
   const p=g.players[endingSeat];
   if(p && p.alive && hasCap(p,'biyue')){
     g.pending={type:'biyue', seat:endingSeat};
     g.phase='biyue';
     g.log=pushLog(g.log, p.name+' 是否发动【闭月】摸1张牌…');
-  } else {
-    startTurn(g, nextAlive(g, endingSeat));
+    return;
   }
+  startTurn(g, nextAlive(g, endingSeat));
 }
 
 // 凌统【旋风】相关函数
@@ -5077,7 +5115,7 @@ function startTurn(g, seat){
     g.log = pushLog(g.log, p.name + ' 发动【志继】觉醒,体力上限-1,请选择:回复1点体力或摸两张牌');
     return; // 等待玩家选择
   }
-  continueGuanxingCheck(g, seat);
+  continueHuashenChangeCheckAtTurnStart(g, seat);
 }
 // enterDrawPhase: 回合开始判定阶段结束、即将进入摸牌阶段前的统一入口(startTurn 正常路径、
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。

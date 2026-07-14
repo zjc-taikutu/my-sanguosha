@@ -157,6 +157,7 @@
 - **数据库写权限全开**：任何知道房间号的人能改/删数据。朋友局接受。
 - **代码已是多文件结构，但 `game.js`/`render.js` 各自仍是很大的单文件**（`game.js` 约 3700+ 行，`render.js` 约 3000 行，`data.js` 约 450 行）：再加大型系统（如身份场）时，可考虑按域进一步拆分（比如把武将技能/装备特效从 `game.js` 里拆出来）。
 - **铁索连环队列推进时中央出牌区不显示牌面**：`advanceTieSuoQueue` 拿不到牌对象（原始那张梅花实体牌在更早的 `lianHuan`/`recastLianHuan` 里已经处理完，跨函数没有传递），`markCardSound(g,'铁索连环',q.from,null,to)` 第4个参数只能传 `null`。要修需要把牌对象存进 `g.tiesuoQueue` 状态跨函数传递（还要确认所有调用 `startTieSuoTargets` 的入口是否都要改传牌），是设计层面的改动，暂缓——不要当成新 bug 重新排查一遍，已知且刻意不修。
+- **`advanceXiaoguo` 里 `continueEndPhaseAfterXiaoguo(g, endingSeat); finishTurn(g, endingSeat);` 这一行会导致 `finishTurn` 被完整调用两次**（骁果问完一圈这条路径下，即 `asker===null` 分支）。已用真实 trace 验证过：两次都是真实执行、不是被幂等保护挡住——`continueEndPhaseAfterXiaoguo` 自己内部在没有旋风/举荐/据守可触发时，尾部已经调用过一次 `finishTurn`，紧接着这行又显式再调一次，两次调用完全独立执行。目前因为这条链路上的每一环（`continueHuashenChangeCheckAtTurnEnd`/`continueBiyueCheck`/`startTurn` 等）都是无消耗型的读判断（不消耗任何一次性资源、多跑一次不改变下一次判断结果），两次调用巧合收敛到同一个终态，仅表现为重复的日志/pending 对象（内容相同、但不是同一个引用）。**风险**：若未来这条链路中任何一环换成消耗型判断（比如某个一次性标志位在检查的同时就顺手翻转），重复调用就会造成真正的逻辑错误（某项技能被问两次、或某个跳过判断被执行两次导致状态错位），而不只是日志重复这么轻。**左慈【化身】的"更改化身"接入 `finishTurn` 链条之后，这条 bug 的触发面被放大了**——新增的 huashen 路径（`continueHuashenChangeCheckAtTurnEnd`）现在也会被这次重复调用命中，多产生一条重复日志。需要单独排查 `advanceXiaoguo` 的调用逻辑修复（大概率是删掉这行里多余的那次 `finishTurn` 调用），不在左慈"更改化身"这次改动范围内处理。
 
 ## 五、当前进度
 

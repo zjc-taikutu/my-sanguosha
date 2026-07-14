@@ -668,6 +668,17 @@ const HUASHEN_SKILL_TABLE = {
   ]
 };
 
+// validateHuashenPick: 校验"从pool里选一个武将+声明其一个技能"这个操作是否合法——
+// generalId必须在pool里,skillName必须是HUASHEN_SKILL_TABLE[generalId]里真实存在的
+// 技能名。供respondHuashenPick(开局初始声明)/respondHuashenChangePickStart/
+// respondHuashenChangePickEnd(回合开始/结束的更改化身)共用,避免同一段校验逻辑写三遍。
+function validateHuashenPick(pool, generalId, skillName){
+  if(!Array.isArray(pool) || !pool.includes(generalId)) return false;
+  const entries = HUASHEN_SKILL_TABLE[generalId];
+  if(!entries || !entries.some(e=>e.name===skillName)) return false;
+  return true;
+}
+
 function chanyuanLocksSkills(player){
   return !!(player && player.chanyuan && player.hp<=1);
 }
@@ -699,12 +710,29 @@ function equipHasCap(player, cap){
     return !!(info && info.cap===cap);
   });
 }
-// 统一能力入口:武将 caps 或 装备 cap 任一提供即算拥有。实时查询无缓存 —— 卸下/替换装备后自然失效。
+// huashenSkillEntry: 左慈当前声明借用的那个具体技能条目(HUASHEN_SKILL_TABLE里的一项),
+// 没有借用/借用武将或技能名对不上(理论上不该发生,兜底防御)则返回null。
+function huashenSkillEntry(player){
+  if(!player || player.huashenGeneral===undefined || player.huashenGeneral===null) return null;
+  const entries = HUASHEN_SKILL_TABLE[player.huashenGeneral];
+  if(!entries) return null;
+  return entries.find(e=>e.name===player.huashenSkillName) || null;
+}
+// huashenHasCap: 左慈通过【化身】借用的技能是否提供某个布尔能力——只查当前声明借用的
+// 那一个技能条目的caps数组,不查huashenGeneral整个武将的其它技能(左慈只借了"单个技能",
+// 不是整个武将)。断肠等"武将技能整体失效"效果对借来的技能同样生效(和generalHasCap
+// 共用同一条skillsLost/chanyuanLocksSkills前置判断,由hasCap统一把关,这里不重复判断)。
+function huashenHasCap(player, cap){
+  const entry = huashenSkillEntry(player);
+  return !!(entry && Array.isArray(entry.caps) && entry.caps.includes(cap));
+}
+// 统一能力入口:武将 caps 或 装备 cap 或 化身借用的技能 任一提供即算拥有。实时查询无缓存
+// —— 卸下/替换装备、更改化身声明后自然失效。
 // player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
 function hasCap(player, cap){
   if(equipHasCap(player, cap)) return true;
   if(player && (player.skillsLost || chanyuanLocksSkills(player))) return false;
-  return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]);
+  return generalHasCap(player, cap) || !!(player && player.caps && player.caps[cap]) || huashenHasCap(player, cap);
 }
 // ===== 牌的花色/点数(判定机制的地基;本步只加数据+显示,不做任何看花色的规则)=====
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
@@ -874,6 +902,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DELAY_TRICKS,
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
-    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap
+    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap,
+    validateHuashenPick, huashenSkillEntry, huashenHasCap
   };
 }

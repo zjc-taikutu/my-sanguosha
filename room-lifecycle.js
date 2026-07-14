@@ -185,15 +185,52 @@ function respondHuashenPick(generalId, skillName){
   tx(g=>{
     if(g.phase!=='huashenPick' || !g.pending || g.pending.type!=='huashenPick' || g.pending.seat!==mySeat) return g;
     const me = g.players[mySeat];
-    if(!me || !Array.isArray(me.huashenPool) || !me.huashenPool.includes(generalId)) return g;
-    const entries = HUASHEN_SKILL_TABLE[generalId];
-    if(!entries || !entries.some(e=>e.name===skillName)) return g;
+    if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)) return g;
     me.huashenGeneral = generalId;
     me.huashenSkillName = skillName;
     // 不清空 me.huashenPool —— v2的关键行为差异,见函数注释。
     g.log = pushLog(g.log, me.name+' 已选定借用的技能,等待其他玩家…');
     g.pending = null;
     checkHuashenBeforeAssign(g); // 不直接调finishGeneralAssign——可能还有其他左慈待处理
+    return g;
+  });
+}
+
+// respondHuashenChangeAskEnd/respondHuashenChangePickEnd: 回合结束阶段"是否更改化身"
+// 询问及其两级选择结算。不能复用 respondHuashenPick——那个函数的守卫写死了
+// g.phase!=='huashenPick',且收尾调 checkHuashenBeforeAssign/finishGeneralAssign,
+// 是开局专属的一次性流程,不能套在"回合中途重新声明"这个场景上;这里各自独立定义,
+// 收尾统一 continueBiyueCheck(和 continueHuashenChangeCheckAtTurnEnd 在没有化身/拒绝
+// 更改时落到的下一环完全一致)。
+function respondHuashenChangeAskEnd(activate){
+  tx(g=>{
+    if(g.phase!=='huashenChangeAskEnd' || !g.pending || g.pending.type!=='huashenChangeAskEnd' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive){ g.pending=null; g.phase='discard'; return g; }
+    const endingSeat = g.pending.seat;
+    if(!activate){
+      g.log = pushLog(g.log, me.name+'：不更改【化身】');
+      g.pending = null;
+      continueBiyueCheck(g, endingSeat);
+      return g;
+    }
+    g.pending = {type:'huashenChangePickEnd', seat:endingSeat};
+    g.phase = 'huashenChangePickEnd';
+    g.log = pushLog(g.log, me.name+' 重新选择借用一名武将的技能…');
+    return g;
+  });
+}
+function respondHuashenChangePickEnd(generalId, skillName){
+  tx(g=>{
+    if(g.phase!=='huashenChangePickEnd' || !g.pending || g.pending.type!=='huashenChangePickEnd' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    const endingSeat = g.pending.seat;
+    if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)){ return g; }
+    me.huashenGeneral = generalId;
+    me.huashenSkillName = skillName;
+    g.log = pushLog(g.log, me.name+' 已更改【化身】声明的技能');
+    g.pending = null;
+    continueBiyueCheck(g, endingSeat);
     return g;
   });
 }

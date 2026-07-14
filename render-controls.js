@@ -174,6 +174,12 @@ function resetQiaobian(){ qiaobianMode=false; qiaobianCardIdx=null; qiaobianPhas
 let guanxingTop = [];
 let guanxingBottom = [];
 function resetGuanxing(){ guanxingTop=[]; guanxingBottom=[]; }
+
+// 左慈【化身】两级选择("选武将→选技能")的客户端状态,huashenPick(开局初次声明)/
+// huashenChangePickStart(回合开始更改)/huashenChangePickEnd(回合结束更改)三个服务端
+// 阶段共用同一份客户端选择状态——同一时刻只可能处于其中一个阶段,不会冲突。
+let huashenPickGeneral = null;
+function resetHuashenPick(){ huashenPickGeneral=null; }
 // 李典【恂恂】: 选择获得哪些牌和置于底部的顺序。和观星类似,但语义不同:
 // xunxunKeep = 要获得的牌的下标数组, xunxunBottom = 其余牌置于底部的顺序
 let xunxunKeep = [];
@@ -190,6 +196,54 @@ function resetJiedao(){ jiedaoSeatA=null; }
 // 原有的 p / (p?p.name:'默认名') 兜底写法),skill 传技能名(不含书名号,函数内部补【】)。
 function waitAskBanner(name, skill){
   setBanner('等待 '+escapeHtml(name||'')+' 决定是否发动【'+skill+'】…');
+}
+// renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
+// 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
+// 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
+// 是最终提交函数——huashenPick/respondHuashenChangePickStart/respondHuashenChangePickEnd
+// 三个服务端阶段各自传各自的respondFn,UI层完全共用。titlePrefix仅用于banner文案区分
+// 场景(如"化身"/"更改化身")。
+function renderHuashenTwoStepPick(g, c, availGenerals, respondFn, titlePrefix){
+  const pool = Array.isArray(availGenerals) ? availGenerals : [];
+  if(huashenPickGeneral===null){
+    pool.forEach(gid=>{
+      const gen=getGeneral(gid); if(!gen) return;
+      const b=document.createElement('button');
+      b.textContent=gen.name+'('+gen.skill+')';
+      b.onclick=()=>{ huashenPickGeneral=gid; render(g); };
+      c.appendChild(b);
+    });
+    setBanner('【'+titlePrefix+'】请选择要借用的武将…');
+    return;
+  }
+  const entries = HUASHEN_SKILL_TABLE[huashenPickGeneral] || [];
+  if(entries.length===1){
+    const gid=huashenPickGeneral, skillName=entries[0].name;
+    resetHuashenPick();
+    respondFn(gid, skillName);
+    return;
+  }
+  entries.forEach(e=>{
+    const b=document.createElement('button');
+    b.textContent=e.name;
+    b.onclick=()=>{ const gid=huashenPickGeneral; resetHuashenPick(); respondFn(gid, e.name); };
+    c.appendChild(b);
+  });
+  const back=document.createElement('button'); back.className='ghost';
+  back.textContent='重新选武将'; back.onclick=()=>{ huashenPickGeneral=null; render(g); };
+  c.appendChild(back);
+  setBanner('【'+titlePrefix+'】请选择借用 '+(getGeneral(huashenPickGeneral)?getGeneral(huashenPickGeneral).name:'')+' 的哪个技能…');
+}
+// renderHuashenChangeAsk: 回合开始/结束"是否更改化身"的二选一询问,respondFn 是各自的
+// respondHuashenChangeAskStart/respondHuashenChangeAskEnd。
+function renderHuashenChangeAsk(g, c, respondFn){
+  const b1=document.createElement('button'); b1.className='primary';
+  b1.textContent='更改【化身】'; b1.onclick=()=>respondFn(true);
+  c.appendChild(b1);
+  const b2=document.createElement('button');
+  b2.textContent='不更改'; b2.onclick=()=>respondFn(false);
+  c.appendChild(b2);
+  setBanner('是否更改【化身】声明的技能?');
 }
 // fangtianSuffix: 方天画戟排队中的目标提示后缀(如"(方天画戟 目标2/3)"),没有排队则返回空串。
 // 附加在响应阶段(respond/tieqi/liegong)的 banner 末尾,帮旁观者看懂"这是第几个目标"。
@@ -2101,6 +2155,55 @@ function renderControls(g){
   if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang'){
     const p=g.players[g.pending.seat];
     waitAskBanner(p?p.name:'小乔', '天香');
+    return;
+  }
+  // ===== 左慈【化身】:开局初次声明(huashenPick)+ 回合开始/结束更改(huashenChange*) =====
+  if(g.phase==='huashenPick' && g.pending && g.pending.type==='huashenPick' && g.pending.seat===mySeat){
+    const me=g.players[mySeat];
+    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenPick, '化身');
+    return;
+  }
+  if(g.phase==='huashenPick' && g.pending && g.pending.type==='huashenPick'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '化身');
+    return;
+  }
+  if(g.phase==='huashenChangeAskStart' && g.pending && g.pending.type==='huashenChangeAskStart' && g.pending.seat===mySeat){
+    renderHuashenChangeAsk(g, c, respondHuashenChangeAskStart);
+    return;
+  }
+  if(g.phase==='huashenChangeAskStart' && g.pending && g.pending.type==='huashenChangeAskStart'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '化身');
+    return;
+  }
+  if(g.phase==='huashenChangePickStart' && g.pending && g.pending.type==='huashenChangePickStart' && g.pending.seat===mySeat){
+    const me=g.players[mySeat];
+    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenChangePickStart, '化身');
+    return;
+  }
+  if(g.phase==='huashenChangePickStart' && g.pending && g.pending.type==='huashenChangePickStart'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '化身');
+    return;
+  }
+  if(g.phase==='huashenChangeAskEnd' && g.pending && g.pending.type==='huashenChangeAskEnd' && g.pending.seat===mySeat){
+    renderHuashenChangeAsk(g, c, respondHuashenChangeAskEnd);
+    return;
+  }
+  if(g.phase==='huashenChangeAskEnd' && g.pending && g.pending.type==='huashenChangeAskEnd'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '化身');
+    return;
+  }
+  if(g.phase==='huashenChangePickEnd' && g.pending && g.pending.type==='huashenChangePickEnd' && g.pending.seat===mySeat){
+    const me=g.players[mySeat];
+    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenChangePickEnd, '化身');
+    return;
+  }
+  if(g.phase==='huashenChangePickEnd' && g.pending && g.pending.type==='huashenChangePickEnd'){
+    const p=g.players[g.pending.seat];
+    waitAskBanner(p?p.name:'左慈', '化身');
     return;
   }
   if(g.phase==='biyue' && g.pending && g.pending.type==='biyue' && g.pending.seat===mySeat){

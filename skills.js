@@ -666,6 +666,58 @@ function cancelGuhuoTarget(){
 // continueQiaobianCheck 更早——观星是"准备阶段"的交互,巧变是"回合开始时(判定阶段之前)"
 // 的交互,准备阶段本来就在判定阶段之前,所以观星要插在链路里更靠前的位置。没有这个能力
 // 或牌堆(含重洗弃牌堆)一张都没有则直接放行到原有链路(继续走巧变检查),不受这次改动影响。
+// continueHuashenChangeCheckAtTurnStart: 左慈"更改化身"回合开始一侧的入口,插在
+// startTurn 链路最前面(比观星更早)——更改化身本身不涉及判定/摸牌逻辑,放在链路最前面
+// 只是为了和回合结束一侧(finishTurn -> continueHuashenChangeCheckAtTurnEnd -> ...)
+// 对称,没有必须更早/更晚的规则依据。没有化身能力或尚未声明借用技能(huashenGeneral为
+// null,说明还在huashenPick阶段或从未借用过)则直接放行到continueGuanxingCheck,不受
+// 这次改动影响。
+function continueHuashenChangeCheckAtTurnStart(g, seat){
+  const p = g.players[seat];
+  if(p && p.alive && hasCap(p,'huashen') && p.huashenGeneral!==null){
+    g.pending = {type:'huashenChangeAskStart', seat};
+    g.phase = 'huashenChangeAskStart';
+    g.log = pushLog(g.log, p.name+' 是否更改【化身】声明的技能…');
+    return;
+  }
+  continueGuanxingCheck(g, seat);
+}
+// respondHuashenChangeAskStart/respondHuashenChangePickStart: 回合开始阶段"是否更改
+// 化身"的询问及两级选择结算,和回合结束一侧(respondHuashenChangeAskEnd/PickEnd,见
+// room-lifecycle.js)是两个独立的respond函数——不是同一个函数靠source字段分支,这样
+// 各自的收尾(继续continueGuanxingCheck vs continueBiyueCheck)天然不会写错。
+function respondHuashenChangeAskStart(activate){
+  tx(g=>{
+    if(g.phase!=='huashenChangeAskStart' || !g.pending || g.pending.type!=='huashenChangeAskStart' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive){ g.pending=null; g.phase='draw'; return g; }
+    const seat = g.pending.seat;
+    if(!activate){
+      g.log = pushLog(g.log, me.name+'：不更改【化身】');
+      g.pending = null;
+      continueGuanxingCheck(g, seat);
+      return g;
+    }
+    g.pending = {type:'huashenChangePickStart', seat};
+    g.phase = 'huashenChangePickStart';
+    g.log = pushLog(g.log, me.name+' 重新选择借用一名武将的技能…');
+    return g;
+  });
+}
+function respondHuashenChangePickStart(generalId, skillName){
+  tx(g=>{
+    if(g.phase!=='huashenChangePickStart' || !g.pending || g.pending.type!=='huashenChangePickStart' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    const seat = g.pending.seat;
+    if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)){ return g; }
+    me.huashenGeneral = generalId;
+    me.huashenSkillName = skillName;
+    g.log = pushLog(g.log, me.name+' 已更改【化身】声明的技能');
+    g.pending = null;
+    continueGuanxingCheck(g, seat);
+    return g;
+  });
+}
 function continueGuanxingCheck(g, seat){
   const p=g.players[seat];
   if(hasCap(p,'guanxing')){
