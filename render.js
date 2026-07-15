@@ -209,6 +209,41 @@ checkLandscapeGate();
 window.addEventListener('resize', checkLandscapeGate);
 window.addEventListener('orientationchange', checkLandscapeGate);
 
+// ===== 宽屏桌面布局(desktop-layout-8p 第3步骨架) =====
+// assignSeatZones(playerCount, mySeat): 纯函数,把"我"以外的座位分到 top/left/right
+// 三个区域(见函数内注释),"我"自己固定 'me'。返回数组按座位号索引取值。
+// 分区规则(过渡态刻意从简,不追求精雕细琢):
+//   - 对手数(others=playerCount-1) <=3(即2~4人局): 全部 top
+//   - others===4(5人局): top3 + left1
+//   - others===5(6人局): top3 + left2
+//   - others>=6(7/8人局): top3 + left2 + right(others-5),7人局right1、8人局right2,
+//     同一条公式覆盖两档,不用为7人单独写分支。
+// 区内顺序按绝对座位号从小到大(不随mySeat旋转),保证同一输入永远同一输出。
+function assignSeatZones(playerCount, mySeat){
+  const zones = new Array(playerCount);
+  zones[mySeat] = 'me';
+  const others = [];
+  for(let s=0; s<playerCount; s++){
+    if(s!==mySeat) others.push(s);
+  }
+  const n = others.length;
+  let topCount, leftCount, rightCount;
+  if(n<=3){
+    topCount = n; leftCount = 0; rightCount = 0;
+  } else if(n===4){
+    topCount = 3; leftCount = 1; rightCount = 0;
+  } else if(n===5){
+    topCount = 3; leftCount = 2; rightCount = 0;
+  } else {
+    // n===6(7人局): top3+left2+right1；n===7(8人局): top3+left2+right2
+    topCount = 3; leftCount = 2; rightCount = n - 5;
+  }
+  let i = 0;
+  for(let k=0;k<topCount;k++)   zones[others[i++]] = 'top';
+  for(let k=0;k<leftCount;k++)  zones[others[i++]] = 'left';
+  for(let k=0;k<rightCount;k++) zones[others[i++]] = 'right';
+  return zones;
+}
 // 常驻"关闭房间"按钮(cleanupRoom):只需要绑定一次,不放进render(g)里——这是一个固定
 // 挂在页面角落、不随游戏状态变化的元素,和 #helpBtn/#logBtn 同一类"页面初始化时绑一次"
 // 的静态入口,不需要每次重绘都重新赋值 onclick(重复赋值同一个函数本身无害,但没必要)。
