@@ -936,10 +936,12 @@
   .log-panel{max-height:132px;overflow-y:auto;text-align:left;font-size:13px;line-height:1.6;
     color:var(--paper-dim);background:rgba(0,0,0,.18);border:1px solid var(--line);
     border-radius:10px;padding:8px 10px;margin-top:6px;flex-basis:100%;
-    /* flex-basis:100% 是这次信息条改造新加的:.panel.table 现在是 flex 容器,不加这条
-       .log-panel 会按内容宽度收缩、可能和 phase-pill/deckinfo 挤在同一行,而不是像
-       banner/controls 一样独占一整行。position:fixed 生效(见下面 900px 断点)时这条
-       自动失效,不冲突。 */}
+    /* flex-basis:100% 是历史遗留:.log-panel 曾经是 .panel.table(flex容器)的最后一个
+       子项,靠这条独占一整行;桌面布局第4步把它挪成 .panel.table 的同级兄弟节点后
+       (见 index.html 结构里的说明),它不再是任何 flex 容器的子项,这条属性对现在的
+       默认/窄屏状态已经不生效(浏览器会安全忽略非 flex-item 上的 flex-basis),留着
+       不影响任何效果,只是不必要,不特意删除。position:fixed 生效(见下面 900px 断点)
+       /grid 里的独立列(见桌面布局 @media(min-width:1024px))时同样不冲突。 */}
   .log-panel div{padding:2px 0;}
   .log-panel div:last-child{color:var(--paper);}
   /* 宽屏(>=900px,手机断点之外)下把常驻日志面板切到右侧,不再挤在 controls 下方——
@@ -1127,7 +1129,10 @@
   @media (min-width:1024px){
     #game.desktop-layout{
       display:grid;
-      grid-template-columns:minmax(100px,180px) 1fr minmax(100px,180px);
+      /* 第4步新增第4列专门给日志面板——不和已经放 right 座位卡的第3列共用,
+         座位/中央出牌区/信息条/手牌这些原有内容一律收在前3列(见下面各条
+         grid-column 从 1/-1 改成 1/4),第4列从第1行到最后一行整列只属于日志面板。 */
+      grid-template-columns:minmax(100px,180px) 1fr minmax(100px,180px) minmax(220px,300px);
       grid-template-rows:repeat(8,auto);
       column-gap:12px; row-gap:8px;
       align-items:start;
@@ -1141,19 +1146,39 @@
     /* left: 最多2个,纵向排在最左列的第2/3行 */
     #game.desktop-layout .seat[data-zone="left"][data-zone-index="0"]{ grid-column:1; grid-row:2; }
     #game.desktop-layout .seat[data-zone="left"][data-zone-index="1"]{ grid-column:1; grid-row:3; }
-    /* right: 最多2个,纵向排在最右列的第2/3行 */
+    /* right: 最多2个,纵向排在最右列(第3列)的第2/3行 */
     #game.desktop-layout .seat[data-zone="right"][data-zone-index="0"]{ grid-column:3; grid-row:2; }
     #game.desktop-layout .seat[data-zone="right"][data-zone-index="1"]{ grid-column:3; grid-row:3; }
     /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块) */
     #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:center; }
-    /* 我:固定在座位区正下方,占满整行宽度 */
-    #game.desktop-layout #meSeat{ grid-column:1 / -1; grid-row:4; justify-self:center; }
+    /* 我:固定在座位区正下方,占满前3列宽度(不侵入第4列日志专属列) */
+    #game.desktop-layout #meSeat{ grid-column:1 / 4; grid-row:4; justify-self:center; }
     /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化
-       (信息条/手牌具体怎么摆留给下一步) */
-    #game.desktop-layout .panel.table{ grid-column:1 / -1; grid-row:5; }
-    #game.desktop-layout #myGeneral{ grid-column:1 / -1; grid-row:6; }
-    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / -1; grid-row:7; }
-    #game.desktop-layout #hand{ grid-column:1 / -1; grid-row:8; }
+       (信息条/手牌具体怎么摆留给下一步);同样限定在前3列,不侵入第4列。 */
+    #game.desktop-layout .panel.table{ grid-column:1 / 4; grid-row:5; }
+    #game.desktop-layout #myGeneral{ grid-column:1 / 4; grid-row:6; }
+    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / 4; grid-row:7; }
+    #game.desktop-layout #hand{ grid-column:1 / 4; grid-row:8; }
+    /* 第4步:日志面板挪到独立的第4列,纵向占满整个网格的高度(第1行到最后一行)——
+       它是独立于座位区域的常驻信息区,不需要跟着座位卡的行高走,内容多了自己滚动
+       (overflow-y:auto 是 .log-panel 基础规则里本来就有的)。
+       #game.desktop-layout{align-items:start} 这条父级设置会让网格项默认按内容
+       自身高度顶部对齐、不拉伸——这里必须显式 align-self:stretch 覆盖回来,否则
+       "占满整列高度"不会生效,只会显示成顶部一小块。
+       max-height 也要放开(基础规则里窄屏/常规宽屏用的132px上限不再适用),改成
+       height:100%(配合 stretch 撑满的高度)+ overflow-y:auto 处理超出内容的滚动。
+       position:fixed 是 @media(min-width:900px) 那条更早的宽屏覆盖规则(900px<1024px
+       的桌面布局阈值,两者会同时命中)——fixed 定位元素完全脱离文档流,不participate
+       任何 grid 布局,必须在这里显式覆盖回 position:static 才能让它重新参与 grid
+       定位;这条选择器同时包含 #game 的 id 和 .desktop-layout/.log-panel 两个 class,
+       特异性天然高于 900px 断点那条纯 class 选择器,不依赖源码顺序也能赢,但仍然按
+       约定写在源码更后面。 */
+    #game.desktop-layout .log-panel{
+      grid-column:4; grid-row:1 / -1;
+      position:static; align-self:stretch;
+      max-height:none; height:100%;
+      margin-top:0;
+    }
   }
 
   .hidden{display:none!important;}
@@ -1220,8 +1245,14 @@
       <div class="deckinfo" id="deckInfo"></div>
       <div id="banner"></div>
       <div class="controls" id="controls"></div>
-      <div class="log-panel" id="logPanel"></div>
     </div>
+    <!-- log-panel 挪到 .panel.table 外面(不再是它的flex子项)——桌面布局(第4步)要把它放进
+         Grid 单独切出来的一整列、纵向占满全高,这需要它是 #game 的直接子元素才能参与 grid
+         定位;.log-panel 的 class 选择器本身不依赖 DOM 位置(没有 .panel.table .log-panel
+         这种祖先限定写法),挪到外面对窄屏/900px+浮动这两套既有样式完全不影响——它在
+         .panel.table 内本来就是 flex-basis:100% 独占一行的最后一个子项,挪成同级的下一个
+         兄弟节点,窄屏视觉位置不变。 -->
+    <div class="log-panel" id="logPanel"></div>
 
     <div class="hand-label" id="myGeneral"></div>
     <div class="hand-label">你的手牌</div>
@@ -1241,16 +1272,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=148"></script>
-<script src="data.js?v=148"></script>
-<script src="room-lifecycle.js?v=148"></script>
-<script src="game.js?v=148"></script>
-<script src="weapons.js?v=148"></script>
-<script src="skills.js?v=148"></script>
-<script src="render.js?v=148"></script>
-<script src="render-table.js?v=148"></script>
-<script src="render-hand.js?v=148"></script>
-<script src="render-controls.js?v=148"></script>
-<script src="render-log.js?v=148"></script>
+<script src="config.js?v=149"></script>
+<script src="data.js?v=149"></script>
+<script src="room-lifecycle.js?v=149"></script>
+<script src="game.js?v=149"></script>
+<script src="weapons.js?v=149"></script>
+<script src="skills.js?v=149"></script>
+<script src="render.js?v=149"></script>
+<script src="render-table.js?v=149"></script>
+<script src="render-hand.js?v=149"></script>
+<script src="render-controls.js?v=149"></script>
+<script src="render-log.js?v=149"></script>
 </body>
 </html>
