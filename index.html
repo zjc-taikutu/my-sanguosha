@@ -449,6 +449,14 @@
   }
   .seat-equip-bar .erow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     color:var(--paper);}
+  /* 内容密度分支(desktop-layout-8p 第5步):装备名文字本来就一直在渲染,窄屏靠上面这条
+     nowrap+ellipsis 截断长名字("雌雄双股剑"/"青龙偃月刀"这类)。宽屏下 render.js 的
+     renderSeatCard 会读 isDesktopLayout()(不新增 @media 断点重复判断同一件事)给这一行
+     多加一个 wide-name class——这里只是纯 class 选择器(不带 @media),取消截断、允许
+     完整装备名换行显示,不撑破卡片(卡片本身 overflow:hidden,换行多出的高度会被这一层
+     裁掉而不是把布局撑破,已用真实浏览器截图验证过多件装备同时存在时不溢出/不重叠)。 */
+  .seat-equip-bar .erow.wide-name{white-space:normal;overflow:visible;text-overflow:clip;
+    overflow-wrap:anywhere;}
   .seat-equip-bar .erow b{color:var(--gold);font-weight:700;margin-right:.15em;} /* 类别首字:金色,和装备名区分;margin用em随字号缩放 */
   .seat-equip-bar .erow .efd{margin-right:.2em;} /* 花色点数:颜色由 render.js 的 seatEquipFace 按红/黑分别给 */
   .seat-equip-bar .erow.filled{cursor:pointer;}
@@ -936,10 +944,12 @@
   .log-panel{max-height:132px;overflow-y:auto;text-align:left;font-size:13px;line-height:1.6;
     color:var(--paper-dim);background:rgba(0,0,0,.18);border:1px solid var(--line);
     border-radius:10px;padding:8px 10px;margin-top:6px;flex-basis:100%;
-    /* flex-basis:100% 是这次信息条改造新加的:.panel.table 现在是 flex 容器,不加这条
-       .log-panel 会按内容宽度收缩、可能和 phase-pill/deckinfo 挤在同一行,而不是像
-       banner/controls 一样独占一整行。position:fixed 生效(见下面 900px 断点)时这条
-       自动失效,不冲突。 */}
+    /* flex-basis:100% 是历史遗留:.log-panel 曾经是 .panel.table(flex容器)的最后一个
+       子项,靠这条独占一整行;桌面布局第4步把它挪成 .panel.table 的同级兄弟节点后
+       (见 index.html 结构里的说明),它不再是任何 flex 容器的子项,这条属性对现在的
+       默认/窄屏状态已经不生效(浏览器会安全忽略非 flex-item 上的 flex-basis),留着
+       不影响任何效果,只是不必要,不特意删除。position:fixed 生效(见下面 900px 断点)
+       /grid 里的独立列(见桌面布局 @media(min-width:1024px))时同样不冲突。 */}
   .log-panel div{padding:2px 0;}
   .log-panel div:last-child{color:var(--paper);}
   /* 宽屏(>=900px,手机断点之外)下把常驻日志面板切到右侧,不再挤在 controls 下方——
@@ -1110,6 +1120,119 @@
     .card{width:44px;height:64px;--badge:12px;}
   }
 
+  /* ===== 宽屏桌面布局(feature/desktop-layout-8p 第3步骨架) =====
+     只处理"座位卡+中央出牌区怎么摆",信息条/手牌行这一步只给"各占一整行、按顺序往下排"
+     的兜底位置(不重叠即可)——具体怎么排布留给下一步(#4日志面板挪位置/#5内容密度分支)
+     专门处理,这里不深究。是否启用这套grid由 render.js 的 isDesktopLayout()/
+     updateDesktopLayoutFlag() 双重把关:JS 判断 window.innerWidth>=1024 才会给 #game
+     加上 desktop-layout 这个 class,这里的 @media(min-width:1024px) 是第二道保险,
+     两边都满足才真正生效(和 checkLandscapeGate() 的软引导一样,JS 判断负责动态响应
+     resize,不是只在页面加载那一刻算一次)。
+     #game 变成 grid 容器后,它原本的每一个直接子元素都会变成 grid item——为了不改动
+     #oppRow/.bottom-row 内部现有的 DOM 结构(座位卡仍然是 #oppRow 的子节点,#meSeat/
+     #hand 仍然是 .bottom-row 的子节点,不需要为宽屏布局单独维护一份不同的 DOM 树),
+     这两个容器在桌面模式下用 display:contents"打散"成透明壳——它们自己不再生成盒子,
+     但子孙节点(.seat[data-zone]/#meSeat/#hand)会直接以 #game 的 grid item 身份参与
+     布局,而不是被"困"在各自父级的盒子里只能整体挪动。*/
+  @media (min-width:1024px){
+    /* .wrap 的基础规则(见文件靠前的 .wrap{max-width:880px;...})是给竖排/窄屏内容设计的
+       宽度上限——桌面布局这套4列grid(座位区3列+日志专属1列)天然需要比880px更宽的空间
+       才能舒展,继续受这个上限约束会让#game被迫挤在一条880px的窄带里,座位区和视口边缘
+       之间留出大片空白,日志列也会被连带挤扁。这里用:has()按#game是否带desktop-layout
+       这个class判断(和上面@media(max-height:460px)里.wrap:has(#game:not(.hidden))
+       同一个既有写法,#game是.wrap的直接子元素,不需要新增JS/新增class去传递这个状态),
+       取消max-width限制,让.wrap(以及它唯一真正需要撑开的孙子#game)能撑满到接近整个
+       视口宽度(减去.wrap自身padding)。 */
+    .wrap:has(#game.desktop-layout){ max-width:none; }
+    #game.desktop-layout{
+      display:grid;
+      /* 第4步新增第4列专门给日志面板——不和已经放 right 座位卡的第3列共用,
+         座位/中央出牌区/信息条/手牌这些原有内容一律收在前3列(见下面各条
+         grid-column 从 1/-1 改成 1/4),第4列从第1行到最后一行整列只属于日志面板。 */
+      grid-template-columns:minmax(100px,180px) 1fr minmax(100px,180px) minmax(220px,300px);
+      /* 第8步:me+手牌合并进同一行后,总行数从8收紧到7(座位区3行+信息条/武将名/手牌标签
+         各1行+合并后的me+手牌1行),没有空行,不会因为"预留了一行却没人占用"而多出一段
+         意外的行间距(row-gap 对每条相邻track都生效,哪怕某条track是空的)。 */
+      grid-template-rows:repeat(7,auto);
+      column-gap:12px; row-gap:8px;
+      align-items:start;
+    }
+    #game.desktop-layout #oppRow{ display:contents; }
+    #game.desktop-layout .bottom-row{ display:contents; }
+    /* top: 最多3个(assignSeatZones 的 topCount 上限)——Grid 原生不支持"多个item共享同一
+       grid-area 时自动横向排开"(同区域内的item默认会叠在一起),之前给每张top座位卡各自
+       精确写 grid-column:1/2/3 是绕开这个限制的权宜写法,但那要求"每个座位卡都是#game这个
+       grid的直接item"这个前提——一旦引入#oppTopRow这个真实的flex容器,top座位卡就不再是
+       #game的直接item了,不需要也不能再各自精确定位。改成#oppTopRow整体占据grid-column:
+       1/4(横跨left到right三列的宽度)+grid-row:1这一个区域,内部用display:flex让最多3张
+       座位卡自然横向排开、不重叠——它不像#oppRow那样用display:contents打散,而是一个
+       真实的flex容器,因为它需要自己的flex布局上下文来排布top这几张卡片。gap/padding
+       比照.opp-row的既有数值,保持视觉一致。 */
+    #game.desktop-layout #oppTopRow{
+      grid-column:1 / 4; grid-row:1;
+      display:flex; justify-content:center; gap:8px; padding:8px 8px 4px;
+    }
+    /* left: 最多2个,纵向排在最左列的第2/3行 */
+    #game.desktop-layout .seat[data-zone="left"][data-zone-index="0"]{ grid-column:1; grid-row:2; }
+    #game.desktop-layout .seat[data-zone="left"][data-zone-index="1"]{ grid-column:1; grid-row:3; }
+    /* right: 最多2个,纵向排在最右列(第3列)的第2/3行 */
+    #game.desktop-layout .seat[data-zone="right"][data-zone-index="0"]{ grid-column:3; grid-row:2; }
+    #game.desktop-layout .seat[data-zone="right"][data-zone-index="1"]{ grid-column:3; grid-row:3; }
+    /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块) */
+    #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:center; }
+    /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化;
+       同样限定在前3列,不侵入第4列。行号相应从原来的5/6/7上移一行(第8步me+手牌
+       合并后腾出了原来me单独占用的那一行)。 */
+    #game.desktop-layout .panel.table{ grid-column:1 / 4; grid-row:4; }
+    #game.desktop-layout #myGeneral{ grid-column:1 / 4; grid-row:5; }
+    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / 4; grid-row:6; }
+    /* 第8步:我的座位卡+手牌合并成同一行——me固定用第1列(和left/right座位卡共用
+       同一条列轨道,宽度天然保持一致,不需要另外定义一组新的列宽),手牌占第2~3列
+       (剩余宽度,即中央+right那两条列轨道合起来的宽度)。原来两者各自占一整行、
+       me还用justify-self:center让自己在1/4这个跨列范围内居中——现在两者在同一行
+       分别落在各自固定的列里,不再需要justify-self这个居中手段。 */
+    #game.desktop-layout #meSeat{ grid-column:1; grid-row:7; }
+    #game.desktop-layout #hand{ grid-column:2 / 4; grid-row:7; }
+    /* 第9步修复:.seat.me 的基础规则(见文件靠前的 .seat.me{width:220px;max-width:260px})
+       是给窄屏/flex布局场景设计的——.opp-row 用 flex,对手数量少时 flex:1 会把单个对手撑到
+       200px 上限,"我"的座位卡如果还是 180px 反而比对手更窄,和"更大、更醒目"的设计意图
+       矛盾,所以显式定死 220px(Playwright 实测抓到的真实问题,见那条注释)。但这次 me
+       座位卡改用 grid-column:1 后,分到的是这条列轨道 minmax(100px,180px) 的宽度,220px
+       会直接超出这个空间、溢出到 grid-column:2/4 (#hand 所在的列),和手牌区域产生真实
+       重叠(实测过:me 宽度220px、和 #hand 之间 gap 为负值)。"对手行flex撑宽"这个原始
+       问题在这里不成立——desktop 布局下 me 和对手的列宽都是 grid 固定分配、互不影响,
+       不存在"对手被撑宽导致我显得更窄"这回事,所以这里安全地把宽度收窄回和 grid-column:1
+       一致的180px,不影响.seat.me基础规则本身(那条220px仍然只在窄屏/flex模式下生效),
+       也不碰 left/right 座位卡(选择器只限定 .seat.me,不会命中它们)。写法参照上面
+       .wrap:has(#game.desktop-layout) 这条"用desktop-layout作用域覆盖旧规则"的既有模式,
+       保持风格一致。 */
+    #game.desktop-layout .seat.me{ width:180px; max-width:180px; }
+    /* 第4步:日志面板挪到独立的第4列;第8步收紧成grid-row:1 / span 3——只覆盖座位区
+       (top/left/right)+中央出牌区这3行,不再一路占满到底(原来是1/-1占满全部7行,
+       会一路盖到"我+手牌"合并后的那一行)。用span而不是写死结束行号(比如1/4),
+       是为了以后座位区行数变化(或者日志下面要插入别的内容,比如聊天框)时,只需要
+       改这里的span数字,不用重新计算"到底该到第几行"这个绝对行号。
+       它是独立于座位区域的常驻信息区,不需要跟着座位卡的行高走,内容多了自己滚动
+       (overflow-y:auto 是 .log-panel 基础规则里本来就有的)。
+       #game.desktop-layout{align-items:start} 这条父级设置会让网格项默认按内容
+       自身高度顶部对齐、不拉伸——这里必须显式 align-self:stretch 覆盖回来,否则
+       "占满整列高度"不会生效,只会显示成顶部一小块。
+       max-height 也要放开(基础规则里窄屏/常规宽屏用的132px上限不再适用),改成
+       height:100%(配合 stretch 撑满的高度)+ overflow-y:auto 处理超出内容的滚动。
+       position:fixed 是 @media(min-width:900px) 那条更早的宽屏覆盖规则(900px<1024px
+       的桌面布局阈值,两者会同时命中)——fixed 定位元素完全脱离文档流,不participate
+       任何 grid 布局,必须在这里显式覆盖回 position:static 才能让它重新参与 grid
+       定位;这条选择器同时包含 #game 的 id 和 .desktop-layout/.log-panel 两个 class,
+       特异性天然高于 900px 断点那条纯 class 选择器,不依赖源码顺序也能赢,但仍然按
+       约定写在源码更后面。 */
+    #game.desktop-layout .log-panel{
+      grid-column:4; grid-row:1 / span 3;
+      position:static; align-self:stretch;
+      max-height:none; height:100%;
+      margin-top:0;
+    }
+  }
+
   .hidden{display:none!important;}
 </style>
 </head>
@@ -1164,6 +1287,12 @@
        淡入淡出)+信息面板(阶段3会改造成独立信息条)+自己座位卡(#meSeat)+手牌行,
        取代旧版 #seats 网格环绕布局。 -->
   <div id="game" class="hidden">
+    <!-- #oppTopRow 只在宽屏桌面布局(.desktop-layout)下才会被使用(装zone==='top'的座位卡),
+         窄屏下永远是空的、没有任何CSS属性的占位元素(不挂.opp-row这类会带来无条件基础样式
+         的class)——render.js只有desktopLayoutActive为真时才会把座位分流进来,窄屏下
+         zones本身就是null,不存在"这个座位归哪个zone"这个概念,天然不会分流任何座位进来,
+         详见render.js里buildSeatDOM调用点的说明。 -->
+    <div id="oppTopRow"></div>
     <div class="opp-row" id="oppRow"></div>
     <div class="table-strip" id="tableStrip">
       <div id="tableCard" class="table-card"></div>
@@ -1174,8 +1303,14 @@
       <div class="deckinfo" id="deckInfo"></div>
       <div id="banner"></div>
       <div class="controls" id="controls"></div>
-      <div class="log-panel" id="logPanel"></div>
     </div>
+    <!-- log-panel 挪到 .panel.table 外面(不再是它的flex子项)——桌面布局(第4步)要把它放进
+         Grid 单独切出来的一整列、纵向占满全高,这需要它是 #game 的直接子元素才能参与 grid
+         定位;.log-panel 的 class 选择器本身不依赖 DOM 位置(没有 .panel.table .log-panel
+         这种祖先限定写法),挪到外面对窄屏/900px+浮动这两套既有样式完全不影响——它在
+         .panel.table 内本来就是 flex-basis:100% 独占一行的最后一个子项,挪成同级的下一个
+         兄弟节点,窄屏视觉位置不变。 -->
+    <div class="log-panel" id="logPanel"></div>
 
     <div class="hand-label" id="myGeneral"></div>
     <div class="hand-label">你的手牌</div>
@@ -1195,16 +1330,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=147"></script>
-<script src="data.js?v=147"></script>
-<script src="room-lifecycle.js?v=147"></script>
-<script src="game.js?v=147"></script>
-<script src="weapons.js?v=147"></script>
-<script src="skills.js?v=147"></script>
-<script src="render.js?v=147"></script>
-<script src="render-table.js?v=147"></script>
-<script src="render-hand.js?v=147"></script>
-<script src="render-controls.js?v=147"></script>
-<script src="render-log.js?v=147"></script>
+<script src="config.js?v=154"></script>
+<script src="data.js?v=154"></script>
+<script src="room-lifecycle.js?v=154"></script>
+<script src="game.js?v=154"></script>
+<script src="weapons.js?v=154"></script>
+<script src="skills.js?v=154"></script>
+<script src="render.js?v=154"></script>
+<script src="render-table.js?v=154"></script>
+<script src="render-hand.js?v=154"></script>
+<script src="render-controls.js?v=154"></script>
+<script src="render-log.js?v=154"></script>
 </body>
 </html>

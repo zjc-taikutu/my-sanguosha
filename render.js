@@ -209,6 +209,92 @@ checkLandscapeGate();
 window.addEventListener('resize', checkLandscapeGate);
 window.addEventListener('orientationchange', checkLandscapeGate);
 
+// ===== 宽屏桌面布局(desktop-layout-8p 第3步骨架) =====
+// assignSeatZones(playerCount, mySeat): 纯函数,把"我"以外的座位分到 top/left/right
+// 三个区域(见函数内注释),"我"自己固定 'me'。返回数组按座位号索引取值。
+// 分区规则(过渡态刻意从简,不追求精雕细琢):
+//   - 对手数(others=playerCount-1) <=3(即2~4人局): 全部 top
+//   - others===4(5人局): top3 + left1
+//   - others===5(6人局): top3 + left2
+//   - others>=6(7/8人局): top3 + left2 + right(others-5),7人局right1、8人局right2,
+//     同一条公式覆盖两档,不用为7人单独写分支。
+// 区内顺序按绝对座位号从小到大(不随mySeat旋转),保证同一输入永远同一输出。
+function assignSeatZones(playerCount, mySeat){
+  const zones = new Array(playerCount);
+  zones[mySeat] = 'me';
+  const others = [];
+  for(let s=0; s<playerCount; s++){
+    if(s!==mySeat) others.push(s);
+  }
+  const n = others.length;
+  let topCount, leftCount, rightCount;
+  if(n<=3){
+    topCount = n; leftCount = 0; rightCount = 0;
+  } else if(n===4){
+    topCount = 3; leftCount = 1; rightCount = 0;
+  } else if(n===5){
+    topCount = 3; leftCount = 2; rightCount = 0;
+  } else {
+    // n===6(7人局): top3+left2+right1；n===7(8人局): top3+left2+right2
+    topCount = 3; leftCount = 2; rightCount = n - 5;
+  }
+  let i = 0;
+  for(let k=0;k<topCount;k++)   zones[others[i++]] = 'top';
+  for(let k=0;k<leftCount;k++)  zones[others[i++]] = 'left';
+  for(let k=0;k<rightCount;k++) zones[others[i++]] = 'right';
+  return zones;
+}
+// isDesktopLayout(): 宽屏(>=1024px)专属"座位按上/左/右/我四区摆位"布局是否启用的唯一
+// 开关——和 isPortrait()/checkLandscapeGate() 同一套写法,页面加载后立即算一次+注册
+// resize 监听动态更新,不是只在加载那一刻判断一次。desktopLayoutActive 这个标志位供
+// render() 决定要不要计算/写入 data-zone,后续步骤(日志面板挪位置/内容密度分支)会
+// 复用同一个标志位,不重复判断。#game 上的 desktop-layout class 只是把这个 JS 判断结果
+// 同步给 CSS(CSS 自己的 @media(min-width:1024px) 断点是双重保险,两边同时满足才生效)。
+let desktopLayoutActive = false;
+function isDesktopLayout(){ return window.innerWidth >= 1024; }
+function updateDesktopLayoutFlag(){
+  desktopLayoutActive = isDesktopLayout();
+  const gameEl = document.getElementById('game');
+  if(gameEl) gameEl.classList.toggle('desktop-layout', desktopLayoutActive);
+}
+updateDesktopLayoutFlag();
+// updateLogPanelHeight(): 第8步——日志面板的高度不能靠纯CSS的grid-row:span N声明
+// (最初的实现方式),因为"座位区+中央出牌区"这个组合的真实渲染底边,在不同人数/座位
+// 组合下,既可能比#tableStrip自身的渲染框更低(#tableStrip用align-self:center只占
+// 约64px、被更高的座位卡挤在中间时——8人局left/right都占满的场景),也可能反过来
+// (5人局这类left/right没坐满、tableStrip自身的最小高度反而撑出了原本没有座位卡的
+// 那一行,导致按grid行数对齐会比座位卡实际渲染的位置多出一截)。两个方向都可能出问题,
+// 靠纯CSS写死"跨几行"算不出正确结果,只能在JS里动态测量实际渲染出来的位置:取
+// "#oppTopRow/#oppRow 内所有座位卡的底边"(注意排除#meSeat——那是"我"的座位卡,
+// 已经合并到手牌那一行,不属于"座位区+中央出牌区"这个范围,如果不排除会把日志面板
+// 撑到页面最下面)和"#tableStrip自身底边"两者中更靠下(视口坐标更大)的那一个,减去
+// 日志面板自身的顶边,换算成一个具体像素高度,直接用内联style覆盖掉CSS里那份声明
+// (那份CSS的grid-row:1/span 3依然保留在index.html里,是这个JS计算失效时的兜底,
+// 比如极端边界下座位/tableStrip都不存在时这个函数会直接不设置任何内联高度)。
+function updateLogPanelHeight(){
+  const logEl = document.getElementById('logPanel');
+  if(!logEl) return;
+  if(!desktopLayoutActive){
+    logEl.style.height=''; // 窄屏下清掉可能残留的内联高度,让窄屏自己的CSS(max-height:132px等)重新生效
+    return;
+  }
+  let maxBottom = -Infinity;
+  document.querySelectorAll('#oppTopRow .seat, #oppRow .seat').forEach(el=>{
+    const r=el.getBoundingClientRect();
+    if(r.bottom>maxBottom) maxBottom=r.bottom;
+  });
+  const tableStripEl=document.getElementById('tableStrip');
+  if(tableStripEl){
+    const r=tableStripEl.getBoundingClientRect();
+    if(r.bottom>maxBottom) maxBottom=r.bottom;
+  }
+  if(maxBottom===-Infinity) return; // 理论边界:座位卡和tableStrip都不存在(尚未开局等),不设置,交给CSS兜底
+  const logTop = logEl.getBoundingClientRect().top;
+  const height = maxBottom - logTop;
+  if(height>0) logEl.style.height = height+'px';
+}
+window.addEventListener('resize', () => { updateDesktopLayoutFlag(); updateLogPanelHeight(); });
+
 // 常驻"关闭房间"按钮(cleanupRoom):只需要绑定一次,不放进render(g)里——这是一个固定
 // 挂在页面角落、不随游戏状态变化的元素,和 #helpBtn/#logBtn 同一类"页面初始化时绑一次"
 // 的静态入口,不需要每次重绘都重新赋值 onclick(重复赋值同一个函数本身无害,但没必要)。
@@ -439,12 +525,21 @@ function renderSeatCard(g, seat, isSelf){
   // "深色渐变垫底"这个新背景实测选的,不是沿用 cardFace 那套给浅色底设计的配色。
   const eq = p.equips || emptyEquips();
   const equipSlotsToShow = isSelf ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
+  // 内容密度分支(desktop-layout-8p 第5步):装备名文字本来就一直在渲染(不是这步新加的
+  // 文字节点),窄屏下靠 .erow 的 white-space:nowrap+ellipsis 截断长名字(如"雌雄双股剑"/
+  // "青龙偃月刀")。宽屏(isDesktopLayout())卡片更宽、且这是"内容密度分支"这个机制本身
+  // 要验证的地方,所以在这里读同一个已经维护好的开关(不新增基于 @media 的重复判断,
+  // 复用 render.js 顶部 checkLandscapeGate 同款写法引入的 isDesktopLayout()),给宽屏下
+  // 的这一行额外加 wide-name 这个 class,取消 ellipsis 截断、允许完整显示装备名
+  // (见 index.html 里 .seat-equip-bar .erow.wide-name 对应的纯 class 选择器,不建立新的
+  // @media 断点)。
+  const wideNameCls = isDesktopLayout() ? ' wide-name' : '';
   const equipRows = g.started ? equipSlotsToShow.map(s=>{
     const c = eq[s];
     const prefix = EQUIP_SLOT_ABBR[s];
     if(!c) return isSelf ? '<div class="erow empty-slot"><b>'+prefix+'</b> —</div>' : '';
     const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-    return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
+    return '<div class="erow filled'+wideNameCls+'" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
   }).join('') : '';
   // 装备条(文字列本身)只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块。
   const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
@@ -629,11 +724,13 @@ function render(g){
   if(!(g.pending && g.pending.seat===mySeat &&
        (g.pending.type==='huashenPick' || g.pending.type==='huashenChangePickStart' || g.pending.type==='huashenChangePickEnd'))) resetHuashenPick();
   const oppRowEl=document.getElementById('oppRow');
+  const oppTopRowEl=document.getElementById('oppTopRow');
   const meSeatEl=document.getElementById('meSeat');
   // 骨架级重建(landscape-ui 第1阶段):.opp-row/#meSeat 各自独立容器,不再共用一个
   // #seats 网格——#tableCard 这次已经不是它们的子元素(见 index.html 的说明),两个
   // 容器整体清空重建没有"常驻子节点被连带销毁"这个历史包袱,可以直接 innerHTML=''。
-  oppRowEl.innerHTML=''; meSeatEl.innerHTML='';
+  // #oppTopRow(宽屏桌面布局专用,装zone==='top'的座位卡)同样每次整体清空重建。
+  oppRowEl.innerHTML=''; if(oppTopRowEl) oppTopRowEl.innerHTML=''; meSeatEl.innerHTML='';
   const seatN=(g.players||[]).length;
   // 对手在行内的左右顺序:从"我"的下家开始按回合顺序排列,单独一整行的横排场景下比旧版
   // "回合顺序上离我近的分左右两侧"更直觉,也不需要为不同人数维护不同的分侧规则。
@@ -642,6 +739,20 @@ function render(g){
     for(let k=1;k<seatN;k++) oppOrder.push((mySeat+k)%seatN);
   } else {
     for(let k=0;k<seatN;k++) oppOrder.push(k); // mySeat 还未确定(理论边界):按原始顺序
+  }
+  // 宽屏桌面布局(desktop-layout-8p 第3步):只在 desktopLayoutActive 时才计算/写入
+  // data-zone,窄屏时完全不算(assignSeatZones 需要 mySeat 非 null,理论边界下也不算)。
+  // zoneIndexBySeat 按 assignSeatZones 内部同一套"绝对座位号从小到大"的顺序派生
+  // (不是按 oppOrder 的回合顺序派生),保证和 assignSeatZones 声明的区内顺序一致,
+  // 不会出现"两套顺序各算各的"这种潜在不一致。
+  const zones = (desktopLayoutActive && mySeat!==null) ? assignSeatZones(seatN, mySeat) : null;
+  const zoneIndexBySeat = {};
+  if(zones){
+    const counters = {top:0, left:0, right:0};
+    for(let s=0;s<seatN;s++){
+      const z = zones[s];
+      if(z==='top'||z==='left'||z==='right') zoneIndexBySeat[s]=counters[z]++;
+    }
   }
   // buildSeatDOM: 创建一个座位的完整 DOM 节点——视觉结构由 renderSeatCard 生成(纯粹
   // 描述"这张卡片长什么样"),随后接上目标选择/技能发动的交互逻辑(读一批客户端选牌/
@@ -654,6 +765,10 @@ function render(g){
     // 骨架级重建后不再用 seatSlot/slot-*；酒诗等翻面状态用 .flipped 标记
     d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+(p.faceup===false?' flipped':'');
     d.dataset.seat = i; // 供中央出牌区(renderTableCard)按座位号选中,高亮出牌方/目标座位用
+    if(zones){
+      d.dataset.zone = zones[i];
+      if(zoneIndexBySeat[i]!==undefined) d.dataset.zoneIndex = zoneIndexBySeat[i];
+    }
     d.innerHTML = renderSeatCard(g, i, i===mySeat);
     // targeting: clickable opponents when choosing a target card
     const meP=g.players[mySeat];
@@ -986,9 +1101,16 @@ function render(g){
     const meDOM = buildSeatDOM(mySeat);
     if(meDOM) meSeatEl.appendChild(meDOM);
   }
+  // 按zone分流挂载容器:zone==='top'时进#oppTopRow(宽屏专用,3张座位卡靠它自身的flex横排,
+  // 不再各自精确写grid-column/grid-row),其余(left/right,以及zones为null的窄屏/理论边界
+  // 情况)一律沿用原有的#oppRow(display:contents,靠座位卡自己的grid-column/grid-row精确
+  // 定位)。窄屏下zones恒为null,这个判断天然全部落到"其余"分支,和改动前的行为完全一致,
+  // 不会把任何座位误分流进#oppTopRow。
   oppOrder.forEach(i=>{
     const oppDOM = buildSeatDOM(i);
-    if(oppDOM) oppRowEl.appendChild(oppDOM);
+    if(!oppDOM) return;
+    if(zones && zones[i]==='top' && oppTopRowEl) oppTopRowEl.appendChild(oppDOM);
+    else oppRowEl.appendChild(oppDOM);
   });
   // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列。调用点必须放在
   // 座位卡片(.seat)全部重新创建完毕之后——曾经放在 render() 更靠前的位置(座位重绘之前),
@@ -998,6 +1120,10 @@ function render(g){
   // 这个顺序影响(它是持久节点,不会被座位重绘销毁),但它的目标座位高亮逻辑必须在这里、
   // 座位元素已经是"这一轮最终版本"之后执行。
   renderTableCard(g);
+  // 第8步:座位卡分流挂载(#oppTopRow/#oppRow)和#tableStrip内容(renderTableCard)都已经
+  // 是这一轮最终状态之后,才能测量出正确的"座位区+中央出牌区"实际渲染高度,所以放在这两者
+  // 之后执行,和上面renderTableCard必须晚于座位重绘同一个理由。
+  updateLogPanelHeight();
 
   // phase pill + deck info
   const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',shaOffsetChoice:'杀被抵消后的效果选择',mengjin:'猛进选择',zhijiChoice:'志继选择',tiaoxinChoice:'挑衅选择',tiaoxinDiscard:'挑衅弃牌',xunxunPick:'恂恂选择',wangxiAsk:'忘隙询问',over:'游戏结束'}[g.phase]||g.phase;
