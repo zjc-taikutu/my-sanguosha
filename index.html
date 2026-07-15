@@ -1135,6 +1135,15 @@
      但子孙节点(.seat[data-zone]/#meSeat/#hand)会直接以 #game 的 grid item 身份参与
      布局,而不是被"困"在各自父级的盒子里只能整体挪动。*/
   @media (min-width:1024px){
+    /* .wrap 的基础规则(见文件靠前的 .wrap{max-width:880px;...})是给竖排/窄屏内容设计的
+       宽度上限——桌面布局这套4列grid(座位区3列+日志专属1列)天然需要比880px更宽的空间
+       才能舒展,继续受这个上限约束会让#game被迫挤在一条880px的窄带里,座位区和视口边缘
+       之间留出大片空白,日志列也会被连带挤扁。这里用:has()按#game是否带desktop-layout
+       这个class判断(和上面@media(max-height:460px)里.wrap:has(#game:not(.hidden))
+       同一个既有写法,#game是.wrap的直接子元素,不需要新增JS/新增class去传递这个状态),
+       取消max-width限制,让.wrap(以及它唯一真正需要撑开的孙子#game)能撑满到接近整个
+       视口宽度(减去.wrap自身padding)。 */
+    .wrap:has(#game.desktop-layout){ max-width:none; }
     #game.desktop-layout{
       display:grid;
       /* 第4步新增第4列专门给日志面板——不和已经放 right 座位卡的第3列共用,
@@ -1280,16 +1289,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=150"></script>
-<script src="data.js?v=150"></script>
-<script src="room-lifecycle.js?v=150"></script>
-<script src="game.js?v=150"></script>
-<script src="weapons.js?v=150"></script>
-<script src="skills.js?v=150"></script>
-<script src="render.js?v=150"></script>
-<script src="render-table.js?v=150"></script>
-<script src="render-hand.js?v=150"></script>
-<script src="render-controls.js?v=150"></script>
-<script src="render-log.js?v=150"></script>
+<script src="config.js?v=151"></script>
+<script src="data.js?v=151"></script>
+<script src="room-lifecycle.js?v=151"></script>
+<script src="game.js?v=151"></script>
+<script src="weapons.js?v=151"></script>
+<script src="skills.js?v=151"></script>
+<script src="render.js?v=151"></script>
+<script src="render-table.js?v=151"></script>
+<script src="render-hand.js?v=151"></script>
+<script src="render-controls.js?v=151"></script>
+<script src="render-log.js?v=151"></script>
 </body>
 </html>
