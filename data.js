@@ -1,5 +1,7 @@
 // ---------- game constants ----------
-const SEATS = 3;        // 房间容量上限(满 3 不再加入)
+const SEATS = 8;        // 房间容量上限(desktop-layout-8p:开放到8人,支撑assignSeatZones的
+                         // top3+left2+right2满配;joinRoom里的人数上限检查直接读这个常量,
+                         // 不需要额外改逻辑)
 const MIN_PLAYERS = 2;  // 开始游戏的最低人数(2 或 3 人均可开始)
 const MAX_HP = 4; // 大厅占位 / 兜底默认体力上限
 const START_HAND = 4;
