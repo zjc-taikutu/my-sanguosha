@@ -449,6 +449,14 @@
   }
   .seat-equip-bar .erow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     color:var(--paper);}
+  /* 内容密度分支(desktop-layout-8p 第5步):装备名文字本来就一直在渲染,窄屏靠上面这条
+     nowrap+ellipsis 截断长名字("雌雄双股剑"/"青龙偃月刀"这类)。宽屏下 render.js 的
+     renderSeatCard 会读 isDesktopLayout()(不新增 @media 断点重复判断同一件事)给这一行
+     多加一个 wide-name class——这里只是纯 class 选择器(不带 @media),取消截断、允许
+     完整装备名换行显示,不撑破卡片(卡片本身 overflow:hidden,换行多出的高度会被这一层
+     裁掉而不是把布局撑破,已用真实浏览器截图验证过多件装备同时存在时不溢出/不重叠)。 */
+  .seat-equip-bar .erow.wide-name{white-space:normal;overflow:visible;text-overflow:clip;
+    overflow-wrap:anywhere;}
   .seat-equip-bar .erow b{color:var(--gold);font-weight:700;margin-right:.15em;} /* 类别首字:金色,和装备名区分;margin用em随字号缩放 */
   .seat-equip-bar .erow .efd{margin-right:.2em;} /* 花色点数:颜色由 render.js 的 seatEquipFace 按红/黑分别给 */
   .seat-equip-bar .erow.filled{cursor:pointer;}
@@ -1272,16 +1280,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=149"></script>
-<script src="data.js?v=149"></script>
-<script src="room-lifecycle.js?v=149"></script>
-<script src="game.js?v=149"></script>
-<script src="weapons.js?v=149"></script>
-<script src="skills.js?v=149"></script>
-<script src="render.js?v=149"></script>
-<script src="render-table.js?v=149"></script>
-<script src="render-hand.js?v=149"></script>
-<script src="render-controls.js?v=149"></script>
-<script src="render-log.js?v=149"></script>
+<script src="config.js?v=150"></script>
+<script src="data.js?v=150"></script>
+<script src="room-lifecycle.js?v=150"></script>
+<script src="game.js?v=150"></script>
+<script src="weapons.js?v=150"></script>
+<script src="skills.js?v=150"></script>
+<script src="render.js?v=150"></script>
+<script src="render-table.js?v=150"></script>
+<script src="render-hand.js?v=150"></script>
+<script src="render-controls.js?v=150"></script>
+<script src="render-log.js?v=150"></script>
 </body>
 </html>

@@ -490,12 +490,21 @@ function renderSeatCard(g, seat, isSelf){
   // "深色渐变垫底"这个新背景实测选的,不是沿用 cardFace 那套给浅色底设计的配色。
   const eq = p.equips || emptyEquips();
   const equipSlotsToShow = isSelf ? EQUIP_SLOTS : EQUIP_SLOTS.filter(s=>eq[s]);
+  // 内容密度分支(desktop-layout-8p 第5步):装备名文字本来就一直在渲染(不是这步新加的
+  // 文字节点),窄屏下靠 .erow 的 white-space:nowrap+ellipsis 截断长名字(如"雌雄双股剑"/
+  // "青龙偃月刀")。宽屏(isDesktopLayout())卡片更宽、且这是"内容密度分支"这个机制本身
+  // 要验证的地方,所以在这里读同一个已经维护好的开关(不新增基于 @media 的重复判断,
+  // 复用 render.js 顶部 checkLandscapeGate 同款写法引入的 isDesktopLayout()),给宽屏下
+  // 的这一行额外加 wide-name 这个 class,取消 ellipsis 截断、允许完整显示装备名
+  // (见 index.html 里 .seat-equip-bar .erow.wide-name 对应的纯 class 选择器,不建立新的
+  // @media 断点)。
+  const wideNameCls = isDesktopLayout() ? ' wide-name' : '';
   const equipRows = g.started ? equipSlotsToShow.map(s=>{
     const c = eq[s];
     const prefix = EQUIP_SLOT_ABBR[s];
     if(!c) return isSelf ? '<div class="erow empty-slot"><b>'+prefix+'</b> —</div>' : '';
     const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-    return '<div class="erow filled" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
+    return '<div class="erow filled'+wideNameCls+'" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
   }).join('') : '';
   // 装备条(文字列本身)只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块。
   const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
