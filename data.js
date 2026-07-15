@@ -350,7 +350,7 @@ const GENERALS = {
         const me = g.players[seat];
         // 旋风：失去装备区的牌后触发（回合内外都可以触发）
         // 注意：seat 是失去装备的玩家，当该玩家是凌统且存活时触发
-        if (generalHasCap(me, 'xuanfeng') && me.alive) {
+        if (hasCap(me, 'xuanfeng') && me.alive) {
           // 记录触发时的phase用于状态回滚
           const previousPhase = g.phase;
           
@@ -440,6 +440,14 @@ function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 // 项目当前无身份局/主公系统(CLAUDE.md 刘备条目已注明同类限制),妄尊没有可借用的实现,
 // 因此这里只收"同疾"一条,不为妄尊编造一个不存在的 cap。
 //
+// 【马谡"散谣"未纳入】masu 条目本该有"散谣"(caps:['sanyao'])+"制蛮"(caps:['zhimeng'])
+// 两条,这次审查 generalHasCap->hasCap 时核实发现:sanyao 这个 cap 从未被任何
+// hasCap/generalHasCap 查询过(发动函数 startSanyao 只检查 g.sanyaoUsed/g.phase,不检查
+// 是不是马谡),且 startSanyao 本身在全项目里没有任何调用点——散谣对马谡本体来说都是
+// 完全无法触发的死代码,不是"借了没生效"这么简单,是"压根没有能借的东西"。这里只保留
+// "制蛮"一条,等马谡本体的散谣补上真正的触发入口(见 CLAUDE.md「已知的待优化点」)后
+// 再考虑加回。
+//
 // 【限定技/主公技/觉醒技/获得技能——本表暂不做类型过滤】官方"化身"规则通常要求排除
 // 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(袁术妄尊/刘备激将/曹操护驾/
 // 孙策制霸——这几个因为项目无身份局系统压根没被写进GENERALS.caps,天然不会出现在
@@ -508,8 +516,14 @@ const HUASHEN_SKILL_TABLE = {
     { name:'连环', caps:['lianhuan'] },
     { name:'涅槃', caps:['niepan'] }
   ],
+  // 马谡【散谣】这次刻意不纳入可借用范围——核实发现 sanyao 这个 cap 从未被任何
+  // hasCap/generalHasCap 查询过(散谣的发动函数 startSanyao 只检查 g.sanyaoUsed/
+  // g.phase,不检查是不是马谡),且 startSanyao 本身在全项目里没有任何调用点(没有对应
+  // 的UI按钮/respond函数触发它)——散谣对马谡本体来说都是完全无法触发的死代码,不是
+  // "借了没生效"这么简单,是"压根没有能借的东西"。借一个连本体都触发不了的技能没有
+  // 意义,等马谡本体的散谣补上真正的触发入口之后再考虑加回这一条(该问题已单独记入
+  // CLAUDE.md「已知的待优化点」,不在这次改动范围内解决)。
   masu: [
-    { name:'散谣', caps:['sanyao'] },
     { name:'制蛮', caps:['zhimeng'] }
   ],
   machao: [
@@ -759,7 +773,7 @@ function hasCap(player, cap){
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
 function cardSuitForPlayer(player, card){
   if(!card) return undefined;
-  if(generalHasCap(player,'hongyan') && card.suit==='♠') return '♥';
+  if(hasCap(player,'hongyan') && card.suit==='♠') return '♥';
   return card.suit;
 }
 function isRed(card){ return !!(card && (card.suit==='♥'||card.suit==='♦')); }

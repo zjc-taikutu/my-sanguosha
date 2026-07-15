@@ -144,7 +144,7 @@ function respondQinglong(activate, cardIdx){
           const attacker = g.players[from];
           const target = g.players[targetSeat];
           return attacker && attacker.alive && target && target.alive && 
-                 generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
+                 hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
         }
         if(id === 'guanshifu') return maybeStartGuanshifu(g, from, targetSeat, sourceCard);
         return false;
@@ -228,7 +228,7 @@ function respondGuanshi(picks){
           const attacker = g.players[from];
           const target = g.players[to];
           return attacker && attacker.alive && target && target.alive && 
-                 generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
+                 hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
         }
         if(id === 'qinglong') return maybeStartQinglong(g, from, to);
         return false;
