@@ -716,14 +716,27 @@ function generalHasCap(player, cap){
   const gen = player && getGeneral(player.general);
   return !!(gen && gen.caps && gen.caps[cap]);
 }
-// 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;通用数值 seam,当前暂无武将/装备使用)
+// 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;
+// 周瑜【英姿】值为1、鲁肃【好施】值为2,两者共用同一个 cap key,见下方 huashenCapValue
+// 的架构说明)。自己的武将有这个数值就优先用自己的,没有再查化身借用的技能——和
+// huashenHasCap 接入 hasCap 时"自己优先、借用兜底"同一个优先级顺序。
 function generalCapValue(player, cap, fallback){
   if(player && (player.skillsLost || chanyuanLocksSkills(player))) return fallback;
   const gen = player && getGeneral(player.general);
   const v = gen && gen.caps && gen.caps[cap];
-  return (typeof v === 'number') ? v : fallback;
+  if(typeof v === 'number') return v;
+  return huashenCapValue(player, cap, fallback);
 }
+// generalGender: 左慈声明借用某个武将后,性别视为与该武将相同(desc里写的"性别视为与该
+// 武将相同"这句话由这里落地生效)——p.huashenGeneral 非 null 时查借用武将的性别,否则
+// 查自己(p.general)的性别。开局刚分配武将、还没走完huashenPick声明这一刻,
+// p.huashenGeneral 是 null(normalize 默认值),自然回退到查 p.general 本身,不会
+// 出现异常;getGeneral 查无对应武将(理论不该发生的脏数据)也安全回退到 'male'。
 function generalGender(player){
+  if(player && player.huashenGeneral!=null){
+    const borrowedGen = getGeneral(player.huashenGeneral);
+    if(borrowedGen) return borrowedGen.gender || 'male';
+  }
   const gen = player && getGeneral(player.general);
   return (gen && gen.gender) || 'male';
 }
@@ -752,6 +765,20 @@ function huashenSkillEntry(player){
 function huashenHasCap(player, cap){
   const entry = huashenSkillEntry(player);
   return !!(entry && Array.isArray(entry.caps) && entry.caps.includes(cap));
+}
+// huashenCapValue: 数值型cap的借用版本(如extraDrawPhase)——只记"借来的这个技能条目
+// 确实声明了这个cap key"(entry.caps数组里有没有这个名字),真正的数值现查
+// GENERALS[player.huashenGeneral].caps[cap],不复制到中间存储、不缓存。这是刻意
+// 的架构选择:周瑜【英姿】(值1)和鲁肃【好施(额外摸牌)】(值2)共用同一个
+// extraDrawPhase key,如果借用时把数值抄一份存进player自己的字段,后续"更改化身"
+// 换借另一个武将时容易忘记同步更新/清空这份抄本,而现查天然不会有这个问题——和
+// huashenHasCap的原则完全一致,只是这次是数值不是布尔。
+function huashenCapValue(player, cap, fallback){
+  const entry = huashenSkillEntry(player);
+  if(!entry || !Array.isArray(entry.caps) || !entry.caps.includes(cap)) return fallback;
+  const gen = getGeneral(player.huashenGeneral);
+  const v = gen && gen.caps && gen.caps[cap];
+  return (typeof v === 'number') ? v : fallback;
 }
 // huashenHasHook: 左慈借用的技能是否挂着某个触发型hook(HUASHEN_SKILL_TABLE条目里的
 // hook字段,如{name:'遗计',hook:'onDamaged'})——只记"这个技能对应哪个hook名字",
@@ -960,6 +987,6 @@ if (typeof module !== 'undefined' && module.exports) {
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
     canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap,
-    validateHuashenPick, huashenSkillEntry, huashenHasCap, huashenHasHook
+    validateHuashenPick, huashenSkillEntry, huashenHasCap, huashenCapValue, huashenHasHook
   };
 }
