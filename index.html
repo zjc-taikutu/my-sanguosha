@@ -1110,6 +1110,52 @@
     .card{width:44px;height:64px;--badge:12px;}
   }
 
+  /* ===== 宽屏桌面布局(feature/desktop-layout-8p 第3步骨架) =====
+     只处理"座位卡+中央出牌区怎么摆",信息条/手牌行这一步只给"各占一整行、按顺序往下排"
+     的兜底位置(不重叠即可)——具体怎么排布留给下一步(#4日志面板挪位置/#5内容密度分支)
+     专门处理,这里不深究。是否启用这套grid由 render.js 的 isDesktopLayout()/
+     updateDesktopLayoutFlag() 双重把关:JS 判断 window.innerWidth>=1024 才会给 #game
+     加上 desktop-layout 这个 class,这里的 @media(min-width:1024px) 是第二道保险,
+     两边都满足才真正生效(和 checkLandscapeGate() 的软引导一样,JS 判断负责动态响应
+     resize,不是只在页面加载那一刻算一次)。
+     #game 变成 grid 容器后,它原本的每一个直接子元素都会变成 grid item——为了不改动
+     #oppRow/.bottom-row 内部现有的 DOM 结构(座位卡仍然是 #oppRow 的子节点,#meSeat/
+     #hand 仍然是 .bottom-row 的子节点,不需要为宽屏布局单独维护一份不同的 DOM 树),
+     这两个容器在桌面模式下用 display:contents"打散"成透明壳——它们自己不再生成盒子,
+     但子孙节点(.seat[data-zone]/#meSeat/#hand)会直接以 #game 的 grid item 身份参与
+     布局,而不是被"困"在各自父级的盒子里只能整体挪动。*/
+  @media (min-width:1024px){
+    #game.desktop-layout{
+      display:grid;
+      grid-template-columns:minmax(100px,180px) 1fr minmax(100px,180px);
+      grid-template-rows:repeat(8,auto);
+      column-gap:12px; row-gap:8px;
+      align-items:start;
+    }
+    #game.desktop-layout #oppRow{ display:contents; }
+    #game.desktop-layout .bottom-row{ display:contents; }
+    /* top: 最多3个(assignSeatZones 的 topCount 上限),横排在第1行,各占一列 */
+    #game.desktop-layout .seat[data-zone="top"][data-zone-index="0"]{ grid-column:1; grid-row:1; }
+    #game.desktop-layout .seat[data-zone="top"][data-zone-index="1"]{ grid-column:2; grid-row:1; }
+    #game.desktop-layout .seat[data-zone="top"][data-zone-index="2"]{ grid-column:3; grid-row:1; }
+    /* left: 最多2个,纵向排在最左列的第2/3行 */
+    #game.desktop-layout .seat[data-zone="left"][data-zone-index="0"]{ grid-column:1; grid-row:2; }
+    #game.desktop-layout .seat[data-zone="left"][data-zone-index="1"]{ grid-column:1; grid-row:3; }
+    /* right: 最多2个,纵向排在最右列的第2/3行 */
+    #game.desktop-layout .seat[data-zone="right"][data-zone-index="0"]{ grid-column:3; grid-row:2; }
+    #game.desktop-layout .seat[data-zone="right"][data-zone-index="1"]{ grid-column:3; grid-row:3; }
+    /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块) */
+    #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:center; }
+    /* 我:固定在座位区正下方,占满整行宽度 */
+    #game.desktop-layout #meSeat{ grid-column:1 / -1; grid-row:4; justify-self:center; }
+    /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化
+       (信息条/手牌具体怎么摆留给下一步) */
+    #game.desktop-layout .panel.table{ grid-column:1 / -1; grid-row:5; }
+    #game.desktop-layout #myGeneral{ grid-column:1 / -1; grid-row:6; }
+    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / -1; grid-row:7; }
+    #game.desktop-layout #hand{ grid-column:1 / -1; grid-row:8; }
+  }
+
   .hidden{display:none!important;}
 </style>
 </head>
@@ -1195,16 +1241,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=147"></script>
-<script src="data.js?v=147"></script>
-<script src="room-lifecycle.js?v=147"></script>
-<script src="game.js?v=147"></script>
-<script src="weapons.js?v=147"></script>
-<script src="skills.js?v=147"></script>
-<script src="render.js?v=147"></script>
-<script src="render-table.js?v=147"></script>
-<script src="render-hand.js?v=147"></script>
-<script src="render-controls.js?v=147"></script>
-<script src="render-log.js?v=147"></script>
+<script src="config.js?v=148"></script>
+<script src="data.js?v=148"></script>
+<script src="room-lifecycle.js?v=148"></script>
+<script src="game.js?v=148"></script>
+<script src="weapons.js?v=148"></script>
+<script src="skills.js?v=148"></script>
+<script src="render.js?v=148"></script>
+<script src="render-table.js?v=148"></script>
+<script src="render-hand.js?v=148"></script>
+<script src="render-controls.js?v=148"></script>
+<script src="render-log.js?v=148"></script>
 </body>
 </html>

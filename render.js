@@ -244,6 +244,22 @@ function assignSeatZones(playerCount, mySeat){
   for(let k=0;k<rightCount;k++) zones[others[i++]] = 'right';
   return zones;
 }
+// isDesktopLayout(): 宽屏(>=1024px)专属"座位按上/左/右/我四区摆位"布局是否启用的唯一
+// 开关——和 isPortrait()/checkLandscapeGate() 同一套写法,页面加载后立即算一次+注册
+// resize 监听动态更新,不是只在加载那一刻判断一次。desktopLayoutActive 这个标志位供
+// render() 决定要不要计算/写入 data-zone,后续步骤(日志面板挪位置/内容密度分支)会
+// 复用同一个标志位,不重复判断。#game 上的 desktop-layout class 只是把这个 JS 判断结果
+// 同步给 CSS(CSS 自己的 @media(min-width:1024px) 断点是双重保险,两边同时满足才生效)。
+let desktopLayoutActive = false;
+function isDesktopLayout(){ return window.innerWidth >= 1024; }
+function updateDesktopLayoutFlag(){
+  desktopLayoutActive = isDesktopLayout();
+  const gameEl = document.getElementById('game');
+  if(gameEl) gameEl.classList.toggle('desktop-layout', desktopLayoutActive);
+}
+updateDesktopLayoutFlag();
+window.addEventListener('resize', updateDesktopLayoutFlag);
+
 // 常驻"关闭房间"按钮(cleanupRoom):只需要绑定一次,不放进render(g)里——这是一个固定
 // 挂在页面角落、不随游戏状态变化的元素,和 #helpBtn/#logBtn 同一类"页面初始化时绑一次"
 // 的静态入口,不需要每次重绘都重新赋值 onclick(重复赋值同一个函数本身无害,但没必要)。
@@ -678,6 +694,20 @@ function render(g){
   } else {
     for(let k=0;k<seatN;k++) oppOrder.push(k); // mySeat 还未确定(理论边界):按原始顺序
   }
+  // 宽屏桌面布局(desktop-layout-8p 第3步):只在 desktopLayoutActive 时才计算/写入
+  // data-zone,窄屏时完全不算(assignSeatZones 需要 mySeat 非 null,理论边界下也不算)。
+  // zoneIndexBySeat 按 assignSeatZones 内部同一套"绝对座位号从小到大"的顺序派生
+  // (不是按 oppOrder 的回合顺序派生),保证和 assignSeatZones 声明的区内顺序一致,
+  // 不会出现"两套顺序各算各的"这种潜在不一致。
+  const zones = (desktopLayoutActive && mySeat!==null) ? assignSeatZones(seatN, mySeat) : null;
+  const zoneIndexBySeat = {};
+  if(zones){
+    const counters = {top:0, left:0, right:0};
+    for(let s=0;s<seatN;s++){
+      const z = zones[s];
+      if(z==='top'||z==='left'||z==='right') zoneIndexBySeat[s]=counters[z]++;
+    }
+  }
   // buildSeatDOM: 创建一个座位的完整 DOM 节点——视觉结构由 renderSeatCard 生成(纯粹
   // 描述"这张卡片长什么样"),随后接上目标选择/技能发动的交互逻辑(读一批客户端选牌/
   // 选目标状态机变量,和 render-hand.js 拆分时"这批状态不是手牌专属、不搬"是同一个
@@ -689,6 +719,10 @@ function render(g){
     // 骨架级重建后不再用 seatSlot/slot-*；酒诗等翻面状态用 .flipped 标记
     d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+(p.faceup===false?' flipped':'');
     d.dataset.seat = i; // 供中央出牌区(renderTableCard)按座位号选中,高亮出牌方/目标座位用
+    if(zones){
+      d.dataset.zone = zones[i];
+      if(zoneIndexBySeat[i]!==undefined) d.dataset.zoneIndex = zoneIndexBySeat[i];
+    }
     d.innerHTML = renderSeatCard(g, i, i===mySeat);
     // targeting: clickable opponents when choosing a target card
     const meP=g.players[mySeat];
