@@ -739,6 +739,14 @@ function huashenHasCap(player, cap){
   const entry = huashenSkillEntry(player);
   return !!(entry && Array.isArray(entry.caps) && entry.caps.includes(cap));
 }
+// huashenHasHook: 左慈借用的技能是否挂着某个触发型hook(HUASHEN_SKILL_TABLE条目里的
+// hook字段,如{name:'遗计',hook:'onDamaged'})——只记"这个技能对应哪个hook名字",
+// 真正的函数体仍然去 GENERALS[player.huashenGeneral].hooks[hookName] 里取(见
+// triggerHook),表里不重复存函数,避免和GENERALS本体产生两份真相。
+function huashenHasHook(player, hookName){
+  const entry = huashenSkillEntry(player);
+  return !!(entry && entry.hook === hookName);
+}
 // 统一能力入口:武将 caps 或 装备 cap 或 化身借用的技能 任一提供即算拥有。实时查询无缓存
 // —— 卸下/替换装备、更改化身声明后自然失效。
 // player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
@@ -816,12 +824,34 @@ function findUsableAs(hand, player, role){
   return i;
 }
 // 触发型技能分发:查 seat 玩家武将的 hooks[hookName] 并执行(在调用方的 tx 内,直接改 g)。
+// triggerHook: 自己的hook先跑,借来的hook(左慈化身)后跑。两者都可能想给同一个seat开
+// 同一类pending(比如左慈自己的新生+借来的遗计都是onDamaged且都想问一次),不能无脑
+// 连续跑两次(第二次会覆盖第一次刚开的g.pending)——自己的hook跑完后,若g.pending真的
+// 变化了(说明它挂起了一个新pending,等玩家响应),且借来的技能也挂着同一个hookName,
+// 就把"借来的"这一份记进g.pendingHookQueue、这次直接return,交给
+// consumePendingHookQueue(见game.js,在resumeAfterInterrupt里接入)在第一个pending
+// 解决之后再执行。若自己没有这个hook、或自己的hook是即时效果(没开新pending,如
+// 反馈/奸雄直接拿牌不问人),借来的技能可以在同一次调用里紧接着跑,不需要排队。
 function triggerHook(g, seat, hookName, ctx){
   const p = g.players[seat];
   if(p && (p.skillsLost || chanyuanLocksSkills(p))) return; // 断肠/缠怨等:武将 hooks 一并失效
   const gen = p && getGeneral(p.general);
-  const fn = gen && gen.hooks && gen.hooks[hookName];
-  if(typeof fn === 'function') fn(g, seat, ctx);
+  const ownFn = gen && gen.hooks && gen.hooks[hookName];
+  if(typeof ownFn === 'function'){
+    const pendingBefore = g.pending;
+    ownFn(g, seat, ctx);
+    if(g.pending !== pendingBefore){
+      if(huashenHasHook(p, hookName)){
+        g.pendingHookQueue = { seat, hookName, ctx, source:'borrowed' };
+      }
+      return;
+    }
+  }
+  if(huashenHasHook(p, hookName)){
+    const borrowedGen = getGeneral(p.huashenGeneral);
+    const borrowedFn = borrowedGen && borrowedGen.hooks && borrowedGen.hooks[hookName];
+    if(typeof borrowedFn === 'function') borrowedFn(g, seat, ctx);
+  }
 }
 function randomGeneralId(){ return GENERAL_IDS[Math.floor(Math.random()*GENERAL_IDS.length)]; }
 // 取武将体力上限,任何异常(null/旧数据)都回退到 MAX_HP,绝不抛错
@@ -916,6 +946,6 @@ if (typeof module !== 'undefined' && module.exports) {
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
     canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap,
-    validateHuashenPick, huashenSkillEntry, huashenHasCap
+    validateHuashenPick, huashenSkillEntry, huashenHasCap, huashenHasHook
   };
 }

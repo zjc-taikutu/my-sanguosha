@@ -670,6 +670,16 @@ function normalize(g){
   // 于吉【蛊惑】:每回合限一次
   if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
+  // 左慈"自己的hook + 借来的hook都想开pending"的排队(见triggerHook/
+  // consumePendingHookQueue)——结构不完整/座位已失效就整体清空,不阻塞流程
+  // (和其它排队型字段同一处理原则)。
+  if(g.pendingHookQueue){
+    const q=g.pendingHookQueue;
+    if(typeof q.seat!=='number' || typeof q.hookName!=='string' || !q.ctx
+       || (q.source!=='own' && q.source!=='borrowed') || !g.players[q.seat] || !g.players[q.seat].alive){
+      g.pendingHookQueue=null;
+    }
+  }
   // 马谡【散谣】:出牌阶段限一次
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 曹彰【将驰】:本回合额外出杀次数剩余
@@ -3221,6 +3231,35 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
   });
 }
 
+// consumePendingHookQueue: 左慈"自己的hook + 借来的hook都想在同一次伤害上开pending"
+// 这个冲突的排队消费点,接在resumeAfterInterrupt里startNextWangxi检查之后(同一类
+// "还有一件排队的事没做完"的结构,但队列元素形状不同,见triggerHook的注释——不能
+// 和wangxiQueue共用同一个字段)。
+// 【关键点,推演天香/争义组合场景时发现的真实风险,不能省】:借来的hook(如遗计)自己
+// 会用ctx.srcType构建一份全新的g.pending.resume;但这次resumeAfterInterrupt收到的
+// resume可能早就被wrapPendingForTianxiang/wrapPendingForZhengyi包过一层(比如
+// "还没做完天香的摸牌,做完才能回到最初被打断的流程")。如果放任借来的hook用它自己
+// 建的那份干净resume,包过的那一层信息会被整个替换掉、永久丢失——所以这里跑完借来的
+// hook之后,如果它确实开出了新pending,要强制用外部传入的resume覆盖它自己建的那个,
+// 和startNextWangxi/wrapPendingForTianxiang"把外部resume原样接到新pending上"是同一
+// 个道理。
+function consumePendingHookQueue(g, resume){
+  if(!g.pendingHookQueue) return false;
+  const item = g.pendingHookQueue;
+  g.pendingHookQueue = null;
+  const p = g.players[item.seat];
+  if(!p || !p.alive) return false; // 座位已失效:安全丢弃这条排队,不阻塞流程
+  const borrowGen = item.source==='borrowed' ? getGeneral(p.huashenGeneral) : getGeneral(p.general);
+  const fn = borrowGen && borrowGen.hooks && borrowGen.hooks[item.hookName];
+  if(typeof fn !== 'function') return false;
+  const pendingBefore = g.pending;
+  fn(g, item.seat, item.ctx);
+  if(g.pending !== pendingBefore && g.pending){
+    g.pending.resume = resume;
+    return true; // 挂起了新pending,调用方要return,交给玩家响应
+  }
+  return false; // 即时效果(如反馈/奸雄),没有新pending,继续往下走原有resume分派
+}
 function enqueueWangxi(g, item){
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   g.wangxiQueue.push(item);
@@ -3820,6 +3859,7 @@ function respondWangxi(activate){
 // 也就是 resume.type==='sha'/'duel'/'aoe' 时这里需要的那个座位号)。
 function resumeAfterInterrupt(g, resume, seat){
   if(startNextWangxi(g, resume)) return;
+  if(consumePendingHookQueue(g, resume)) return;
   if(resume.type==='ganglie'){
     resumeAfterInterrupt(g, resume.resume, resume.seat);
   } else if(resume.type==='tianxiang'){
