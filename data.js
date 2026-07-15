@@ -350,7 +350,7 @@ const GENERALS = {
         const me = g.players[seat];
         // 旋风：失去装备区的牌后触发（回合内外都可以触发）
         // 注意：seat 是失去装备的玩家，当该玩家是凌统且存活时触发
-        if (generalHasCap(me, 'xuanfeng') && me.alive) {
+        if (hasCap(me, 'xuanfeng') && me.alive) {
           // 记录触发时的phase用于状态回滚
           const previousPhase = g.phase;
           
@@ -440,6 +440,14 @@ function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 // 项目当前无身份局/主公系统(CLAUDE.md 刘备条目已注明同类限制),妄尊没有可借用的实现,
 // 因此这里只收"同疾"一条,不为妄尊编造一个不存在的 cap。
 //
+// 【马谡"散谣"未纳入】masu 条目本该有"散谣"(caps:['sanyao'])+"制蛮"(caps:['zhimeng'])
+// 两条,这次审查 generalHasCap->hasCap 时核实发现:sanyao 这个 cap 从未被任何
+// hasCap/generalHasCap 查询过(发动函数 startSanyao 只检查 g.sanyaoUsed/g.phase,不检查
+// 是不是马谡),且 startSanyao 本身在全项目里没有任何调用点——散谣对马谡本体来说都是
+// 完全无法触发的死代码,不是"借了没生效"这么简单,是"压根没有能借的东西"。这里只保留
+// "制蛮"一条,等马谡本体的散谣补上真正的触发入口(见 CLAUDE.md「已知的待优化点」)后
+// 再考虑加回。
+//
 // 【限定技/主公技/觉醒技/获得技能——本表暂不做类型过滤】官方"化身"规则通常要求排除
 // 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(袁术妄尊/刘备激将/曹操护驾/
 // 孙策制霸——这几个因为项目无身份局系统压根没被写进GENERALS.caps,天然不会出现在
@@ -508,8 +516,14 @@ const HUASHEN_SKILL_TABLE = {
     { name:'连环', caps:['lianhuan'] },
     { name:'涅槃', caps:['niepan'] }
   ],
+  // 马谡【散谣】这次刻意不纳入可借用范围——核实发现 sanyao 这个 cap 从未被任何
+  // hasCap/generalHasCap 查询过(散谣的发动函数 startSanyao 只检查 g.sanyaoUsed/
+  // g.phase,不检查是不是马谡),且 startSanyao 本身在全项目里没有任何调用点(没有对应
+  // 的UI按钮/respond函数触发它)——散谣对马谡本体来说都是完全无法触发的死代码,不是
+  // "借了没生效"这么简单,是"压根没有能借的东西"。借一个连本体都触发不了的技能没有
+  // 意义,等马谡本体的散谣补上真正的触发入口之后再考虑加回这一条(该问题已单独记入
+  // CLAUDE.md「已知的待优化点」,不在这次改动范围内解决)。
   masu: [
-    { name:'散谣', caps:['sanyao'] },
     { name:'制蛮', caps:['zhimeng'] }
   ],
   machao: [
@@ -702,14 +716,27 @@ function generalHasCap(player, cap){
   const gen = player && getGeneral(player.general);
   return !!(gen && gen.caps && gen.caps[cap]);
 }
-// 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;通用数值 seam,当前暂无武将/装备使用)
+// 读取数值型被动能力的值(无则返回 fallback),如 extraDrawPhase(摸牌阶段多摸 N 张;
+// 周瑜【英姿】值为1、鲁肃【好施】值为2,两者共用同一个 cap key,见下方 huashenCapValue
+// 的架构说明)。自己的武将有这个数值就优先用自己的,没有再查化身借用的技能——和
+// huashenHasCap 接入 hasCap 时"自己优先、借用兜底"同一个优先级顺序。
 function generalCapValue(player, cap, fallback){
   if(player && (player.skillsLost || chanyuanLocksSkills(player))) return fallback;
   const gen = player && getGeneral(player.general);
   const v = gen && gen.caps && gen.caps[cap];
-  return (typeof v === 'number') ? v : fallback;
+  if(typeof v === 'number') return v;
+  return huashenCapValue(player, cap, fallback);
 }
+// generalGender: 左慈声明借用某个武将后,性别视为与该武将相同(desc里写的"性别视为与该
+// 武将相同"这句话由这里落地生效)——p.huashenGeneral 非 null 时查借用武将的性别,否则
+// 查自己(p.general)的性别。开局刚分配武将、还没走完huashenPick声明这一刻,
+// p.huashenGeneral 是 null(normalize 默认值),自然回退到查 p.general 本身,不会
+// 出现异常;getGeneral 查无对应武将(理论不该发生的脏数据)也安全回退到 'male'。
 function generalGender(player){
+  if(player && player.huashenGeneral!=null){
+    const borrowedGen = getGeneral(player.huashenGeneral);
+    if(borrowedGen) return borrowedGen.gender || 'male';
+  }
   const gen = player && getGeneral(player.general);
   return (gen && gen.gender) || 'male';
 }
@@ -739,6 +766,28 @@ function huashenHasCap(player, cap){
   const entry = huashenSkillEntry(player);
   return !!(entry && Array.isArray(entry.caps) && entry.caps.includes(cap));
 }
+// huashenCapValue: 数值型cap的借用版本(如extraDrawPhase)——只记"借来的这个技能条目
+// 确实声明了这个cap key"(entry.caps数组里有没有这个名字),真正的数值现查
+// GENERALS[player.huashenGeneral].caps[cap],不复制到中间存储、不缓存。这是刻意
+// 的架构选择:周瑜【英姿】(值1)和鲁肃【好施(额外摸牌)】(值2)共用同一个
+// extraDrawPhase key,如果借用时把数值抄一份存进player自己的字段,后续"更改化身"
+// 换借另一个武将时容易忘记同步更新/清空这份抄本,而现查天然不会有这个问题——和
+// huashenHasCap的原则完全一致,只是这次是数值不是布尔。
+function huashenCapValue(player, cap, fallback){
+  const entry = huashenSkillEntry(player);
+  if(!entry || !Array.isArray(entry.caps) || !entry.caps.includes(cap)) return fallback;
+  const gen = getGeneral(player.huashenGeneral);
+  const v = gen && gen.caps && gen.caps[cap];
+  return (typeof v === 'number') ? v : fallback;
+}
+// huashenHasHook: 左慈借用的技能是否挂着某个触发型hook(HUASHEN_SKILL_TABLE条目里的
+// hook字段,如{name:'遗计',hook:'onDamaged'})——只记"这个技能对应哪个hook名字",
+// 真正的函数体仍然去 GENERALS[player.huashenGeneral].hooks[hookName] 里取(见
+// triggerHook),表里不重复存函数,避免和GENERALS本体产生两份真相。
+function huashenHasHook(player, hookName){
+  const entry = huashenSkillEntry(player);
+  return !!(entry && entry.hook === hookName);
+}
 // 统一能力入口:武将 caps 或 装备 cap 或 化身借用的技能 任一提供即算拥有。实时查询无缓存
 // —— 卸下/替换装备、更改化身声明后自然失效。
 // player.caps 是运行时额外获得的武将侧能力(如志继觉醒获得观星);断肠后一并失效,装备 cap 不受影响。
@@ -751,7 +800,7 @@ function hasCap(player, cap){
 // 颜色由花色派生,统一走这些 seam,不到处硬判断花色。
 function cardSuitForPlayer(player, card){
   if(!card) return undefined;
-  if(generalHasCap(player,'hongyan') && card.suit==='♠') return '♥';
+  if(hasCap(player,'hongyan') && card.suit==='♠') return '♥';
   return card.suit;
 }
 function isRed(card){ return !!(card && (card.suit==='♥'||card.suit==='♦')); }
@@ -816,12 +865,34 @@ function findUsableAs(hand, player, role){
   return i;
 }
 // 触发型技能分发:查 seat 玩家武将的 hooks[hookName] 并执行(在调用方的 tx 内,直接改 g)。
+// triggerHook: 自己的hook先跑,借来的hook(左慈化身)后跑。两者都可能想给同一个seat开
+// 同一类pending(比如左慈自己的新生+借来的遗计都是onDamaged且都想问一次),不能无脑
+// 连续跑两次(第二次会覆盖第一次刚开的g.pending)——自己的hook跑完后,若g.pending真的
+// 变化了(说明它挂起了一个新pending,等玩家响应),且借来的技能也挂着同一个hookName,
+// 就把"借来的"这一份记进g.pendingHookQueue、这次直接return,交给
+// consumePendingHookQueue(见game.js,在resumeAfterInterrupt里接入)在第一个pending
+// 解决之后再执行。若自己没有这个hook、或自己的hook是即时效果(没开新pending,如
+// 反馈/奸雄直接拿牌不问人),借来的技能可以在同一次调用里紧接着跑,不需要排队。
 function triggerHook(g, seat, hookName, ctx){
   const p = g.players[seat];
   if(p && (p.skillsLost || chanyuanLocksSkills(p))) return; // 断肠/缠怨等:武将 hooks 一并失效
   const gen = p && getGeneral(p.general);
-  const fn = gen && gen.hooks && gen.hooks[hookName];
-  if(typeof fn === 'function') fn(g, seat, ctx);
+  const ownFn = gen && gen.hooks && gen.hooks[hookName];
+  if(typeof ownFn === 'function'){
+    const pendingBefore = g.pending;
+    ownFn(g, seat, ctx);
+    if(g.pending !== pendingBefore){
+      if(huashenHasHook(p, hookName)){
+        g.pendingHookQueue = { seat, hookName, ctx, source:'borrowed' };
+      }
+      return;
+    }
+  }
+  if(huashenHasHook(p, hookName)){
+    const borrowedGen = getGeneral(p.huashenGeneral);
+    const borrowedFn = borrowedGen && borrowedGen.hooks && borrowedGen.hooks[hookName];
+    if(typeof borrowedFn === 'function') borrowedFn(g, seat, ctx);
+  }
 }
 function randomGeneralId(){ return GENERAL_IDS[Math.floor(Math.random()*GENERAL_IDS.length)]; }
 // 取武将体力上限,任何异常(null/旧数据)都回退到 MAX_HP,绝不抛错
@@ -918,6 +989,6 @@ if (typeof module !== 'undefined' && module.exports) {
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
     canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap,
-    validateHuashenPick, huashenSkillEntry, huashenHasCap
+    validateHuashenPick, huashenSkillEntry, huashenHasCap, huashenCapValue, huashenHasHook
   };
 }

@@ -3516,14 +3516,14 @@ function renderControls(g){
     }
     
     // 丁奉【奋迅】:出牌阶段限一次,弃置一张牌后令与一名其他角色的距离视为1
-    if(noLocalMode && selectedCardIdx===null && generalHasCap(me,'fenxun') && !me.fenxunUsed && myTurn && (me.hand||[]).length > 0 && g.players.filter((p, i) => i !== mySeat && p && p.alive).length > 0){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'fenxun') && !me.fenxunUsed && myTurn && (me.hand||[]).length > 0 && g.players.filter((p, i) => i !== mySeat && p && p.alive).length > 0){
       const fb=document.createElement('button'); fb.className='ghost';
       fb.textContent='发动【奋迅】'; fb.onclick=()=>startFenxun(); c.appendChild(fb);
     }
     // 法正【眩惑】:出牌阶段限一次,交给一名其他角色一张♥手牌,然后获得其一张牌交给另一名角色
     const otherAliveCount = g.players.filter((p, i) => i !== mySeat && p && p.alive).length;
     const heartCards = (me.hand || []).filter(card => card.suit === '♥');
-    if(noLocalMode && selectedCardIdx===null && generalHasCap(me,'huanhuo') && !g.huanhuoUsed && myTurn && heartCards.length > 0 && otherAliveCount >= 2){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'huanhuo') && !g.huanhuoUsed && myTurn && heartCards.length > 0 && otherAliveCount >= 2){
       const hb=document.createElement('button'); hb.className='skill-btn'; hb.style.background='#4a90d9';
       hb.textContent='眩惑'; hb.onclick=()=>startHuanhuo(); c.appendChild(hb);
     }

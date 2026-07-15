@@ -380,7 +380,7 @@ function resolveGuhuoResponseTao(g, seat, actual, claimed){
   dyingP.hp++;
   g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+claimed.name+'】对 '+dyingP.name+' 使用,回复1点体力（体力'+dyingP.hp+'）');
   removeBuquCard(g, g.pending.seat);
-  if(generalHasCap(dyingP, 'enyuan') && seat!==g.pending.seat){
+  if(hasCap(dyingP, 'enyuan') && seat!==g.pending.seat){
     ensureDeck(g);
     drawN(g, seat, 1);
     g.log=pushLog(g.log, dyingP.name+' 回复1点体力,'+me.name+' 发动【恩怨】效果,摸一张牌');
@@ -1526,7 +1526,7 @@ function qingNang(cardIdx, targetSeat){
     tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【青囊】,令 '+tgt.name+' 回复1点体力');
     // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
-    if(generalHasCap(tgt, 'enyuan') && mySeat !== targetSeat) {
+    if(hasCap(tgt, 'enyuan') && mySeat !== targetSeat) {
       ensureDeck(g);
       drawN(g, mySeat, 1);
       g.log = pushLog(g.log, tgt.name + ' 回复1点体力,' + me.name + ' 发动【恩怨】效果,摸一张牌');
@@ -3669,7 +3669,7 @@ function respondJiangchi(optionId){
     if(g.phase!=='jiangchiAsk'||!g.pending||g.pending.type!=='jiangchiAsk') return g;
     if(g.pending.seat!==mySeat) return g;
     const me=g.players[mySeat];
-    if(!me||!me.alive||!generalHasCap(me,'jiangchi')) return g;
+    if(!me||!me.alive||!hasCap(me,'jiangchi')) return g;
     const base=Number.isInteger(g.pending.baseDraw) ? g.pending.baseDraw : drawPhaseCount(g, mySeat);
     g.pending=null;
     if(optionId==='more'){
@@ -3713,7 +3713,7 @@ function maybeStartLuoying(g, fromSeat, cards, reason, resume){
     const i=(fromSeat+1+k)%g.players.length;
     if(i===fromSeat) continue;
     const p=g.players[i];
-    if(!p||!p.alive||!generalHasCap(p,'luoying')) continue;
+    if(!p||!p.alive||!hasCap(p,'luoying')) continue;
     g.pending={
       type:'luoyingAsk',
       seat:i,

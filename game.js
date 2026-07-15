@@ -680,6 +680,16 @@ function normalize(g){
   if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
   if(typeof g.jiuUsed!=='boolean') g.jiuUsed=false;
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
+  // 左慈"自己的hook + 借来的hook都想开pending"的排队(见triggerHook/
+  // consumePendingHookQueue)——结构不完整/座位已失效就整体清空,不阻塞流程
+  // (和其它排队型字段同一处理原则)。
+  if(g.pendingHookQueue){
+    const q=g.pendingHookQueue;
+    if(typeof q.seat!=='number' || typeof q.hookName!=='string' || !q.ctx
+       || (q.source!=='own' && q.source!=='borrowed') || !g.players[q.seat] || !g.players[q.seat].alive){
+      g.pendingHookQueue=null;
+    }
+  }
   // 马谡【散谣】:出牌阶段限一次
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 曹彰【将驰】:本回合额外出杀次数剩余
@@ -1270,7 +1280,7 @@ function finishDrawPhase(g, seat, n){
   
   // 鲁肃【好施】:摸牌后若手牌数>5,需将一半手牌交给手牌最少的其他角色
   const p = g.players[seat];
-  if(p && p.alive && generalHasCap(p, 'haoshi') && (p.hand || []).length > 5){
+  if(p && p.alive && hasCap(p, 'haoshi') && (p.hand || []).length > 5){
     const half = Math.floor(p.hand.length / 2);
     if(half > 0){
       // 找手牌最少的其他存活角色
@@ -1833,7 +1843,7 @@ function maybeStartShaOffsetEffects(g, from, to, sourceCard){
   const target = g.players[to];
   
   // 检查猛进
-  if(attacker && attacker.alive && target && target.alive && generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0){
+  if(attacker && attacker.alive && target && target.alive && hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0){
     available.push('mengjin');
   }
   
@@ -1953,7 +1963,7 @@ function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
   const validAvailable = remainingAvailable.filter(id => {
     if(id === 'mengjin') {
       return attacker && attacker.alive && target && target.alive && 
-             generalHasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
+             hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
     } else if(id === 'qinglong') {
       return canStartQinglong(g, from);
     } else if(id === 'guanshifu') {
@@ -2276,7 +2286,7 @@ const CARD_PLAYS = {
       triggerJiangOnTarget(g, mySeat, targetSeat, 'sha', isRed(card));
       
       // 丁奉【短兵】:检查是否有短兵技能，并筛选距离为1的额外目标
-      if (generalHasCap(me, 'duanbing') && g.phase === 'play' && g.turn === mySeat) {
+      if (hasCap(me, 'duanbing') && g.phase === 'play' && g.turn === mySeat) {
         // 筛选距离为1的其他角色（排除自己和当前目标）
         const aliveSeats = [];
         for (let i = 0; i < g.players.length; i++) {
@@ -3252,7 +3262,7 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
       
       // 法正【恩怨】：当其他角色令你回复1点体力后，其摸一张牌
       // 每回复1点体力触发一次
-      if (source && sourceSeat !== targetSeat && generalHasCap(target, 'enyuan')) {
+      if (source && sourceSeat !== targetSeat && hasCap(target, 'enyuan')) {
         for (let i = 0; i < actualRecovered; i++) {
           ensureDeck(g);
           drawN(g, sourceSeat, 1);
@@ -3264,6 +3274,35 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
   });
 }
 
+// consumePendingHookQueue: 左慈"自己的hook + 借来的hook都想在同一次伤害上开pending"
+// 这个冲突的排队消费点,接在resumeAfterInterrupt里startNextWangxi检查之后(同一类
+// "还有一件排队的事没做完"的结构,但队列元素形状不同,见triggerHook的注释——不能
+// 和wangxiQueue共用同一个字段)。
+// 【关键点,推演天香/争义组合场景时发现的真实风险,不能省】:借来的hook(如遗计)自己
+// 会用ctx.srcType构建一份全新的g.pending.resume;但这次resumeAfterInterrupt收到的
+// resume可能早就被wrapPendingForTianxiang/wrapPendingForZhengyi包过一层(比如
+// "还没做完天香的摸牌,做完才能回到最初被打断的流程")。如果放任借来的hook用它自己
+// 建的那份干净resume,包过的那一层信息会被整个替换掉、永久丢失——所以这里跑完借来的
+// hook之后,如果它确实开出了新pending,要强制用外部传入的resume覆盖它自己建的那个,
+// 和startNextWangxi/wrapPendingForTianxiang"把外部resume原样接到新pending上"是同一
+// 个道理。
+function consumePendingHookQueue(g, resume){
+  if(!g.pendingHookQueue) return false;
+  const item = g.pendingHookQueue;
+  g.pendingHookQueue = null;
+  const p = g.players[item.seat];
+  if(!p || !p.alive) return false; // 座位已失效:安全丢弃这条排队,不阻塞流程
+  const borrowGen = item.source==='borrowed' ? getGeneral(p.huashenGeneral) : getGeneral(p.general);
+  const fn = borrowGen && borrowGen.hooks && borrowGen.hooks[item.hookName];
+  if(typeof fn !== 'function') return false;
+  const pendingBefore = g.pending;
+  fn(g, item.seat, item.ctx);
+  if(g.pending !== pendingBefore && g.pending){
+    g.pending.resume = resume;
+    return true; // 挂起了新pending,调用方要return,交给玩家响应
+  }
+  return false; // 即时效果(如反馈/奸雄),没有新pending,继续往下走原有resume分派
+}
 function enqueueWangxi(g, item){
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   g.wangxiQueue.push(item);
@@ -3298,12 +3337,12 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   if(amount > 0 && sourceCard && isTrickCardName(sourceCard.name)){
     const src = (typeof sourceSeat === 'number') ? g.players[sourceSeat] : null;
     const tgt = g.players[seat];
-    if(src && src.alive && generalHasCap(src, 'wuyan')){
+    if(src && src.alive && hasCap(src, 'wuyan')){
       g.log = pushLog(g.log, src.name + ' 发动【无言】,防止其锦囊造成的伤害');
       markSkillSound(g, '无言');
       return false;
     }
-    if(tgt && tgt.alive && generalHasCap(tgt, 'wuyan')){
+    if(tgt && tgt.alive && hasCap(tgt, 'wuyan')){
       g.log = pushLog(g.log, tgt.name + ' 发动【无言】,防止锦囊伤害');
       markSkillSound(g, '无言');
       return false;
@@ -3329,7 +3368,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   if(amount > 0 && typeof sourceSeat === 'number' && sourceSeat !== seat 
      && sourceSeat >= 0 && sourceSeat < g.players.length) {
     const attacker = g.players[sourceSeat];
-    if(attacker && attacker.alive && generalHasCap(attacker, 'kuanggu')){
+    if(attacker && attacker.alive && hasCap(attacker, 'kuanggu')){
       kuangguDist = distance(g, sourceSeat, seat);
     }
   }
@@ -3341,7 +3380,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     for (let i = 0; i < g.players.length; i++) {
       if(skipped.includes(i)) continue;
       const candidate = g.players[i];
-      if (i !== seat && candidate && candidate.alive && generalHasCap(candidate, 'renxin')) {
+      if (i !== seat && candidate && candidate.alive && hasCap(candidate, 'renxin')) {
         // 真实装备区是 equips 四槽对象,不是数组
         const equipSlots = EQUIP_SLOTS.filter(s => candidate.equips && candidate.equips[s]);
         if (equipSlots.length > 0) {
@@ -3368,7 +3407,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
 
   // 陈宫【智迟】：回合外受伤后立即标记(锁定技,不挂起)
-  if (amount > 0 && p && p.alive && generalHasCap(p, 'zhichi') && g.turn !== seat) {
+  if (amount > 0 && p && p.alive && hasCap(p, 'zhichi') && g.turn !== seat) {
     g.zhichiImmunity = {
       seat: seat,
       turn: g.turn
@@ -3407,7 +3446,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(typeof sourceSeat==='number' && sourceSeat !== seat && sourceSeat < g.players.length){
       const other = g.players[sourceSeat];
       // 受伤侧:受害者是李典
-      if(p && p.alive && generalHasCap(p, 'wangxi') && other && other.alive){
+      if(p && p.alive && hasCap(p, 'wangxi') && other && other.alive){
         enqueueWangxi(g, {
           seat: seat,
           otherSeat: sourceSeat,
@@ -3416,7 +3455,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
         });
       }
       // 造成侧:攻击者是李典
-      if(other && other.alive && p && p.alive && generalHasCap(other, 'wangxi')){
+      if(other && other.alive && p && p.alive && hasCap(other, 'wangxi')){
         enqueueWangxi(g, {
           seat: sourceSeat,
           otherSeat: seat,
@@ -3446,7 +3485,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
 
     // 法正【恩怨】:受到其他角色伤害后,伤害来源交♥或失去1体力
-    if (p && p.alive && generalHasCap(p, 'enyuan') &&
+    if (p && p.alive && hasCap(p, 'enyuan') &&
         typeof sourceSeat === 'number' && sourceSeat !== seat) {
       const damager = g.players[sourceSeat];
       if(damager && damager.alive) {
@@ -3471,7 +3510,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if(g.pending !== pendingBefore) return true;
 
     // 曹植【酒诗②】:受伤时背面且当前仍背面,可翻回正面
-    if(p.alive && generalHasCap(p, 'jiushi') && jiushiFacedownAtDamage && p.faceup === false){
+    if(p.alive && hasCap(p, 'jiushi') && jiushiFacedownAtDamage && p.faceup === false){
       g.pending = {
         type: 'jiushiFlipAsk',
         seat,
@@ -3484,7 +3523,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
     
     // 曹冲【称象】
-    if(p && p.alive && generalHasCap(p, 'chengxiang')) {
+    if(p && p.alive && hasCap(p, 'chengxiang')) {
       g.pending = {
         type: 'chengxiangAsk',
         seat: seat,
@@ -3500,7 +3539,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     if (reason && reason.includes('【杀】') && p && p.alive) {
       for (let i = 0; i < g.players.length; i++) {
         const beigeP = g.players[i];
-        if (beigeP && beigeP.alive && generalHasCap(beigeP, 'beige') && i !== seat) {
+        if (beigeP && beigeP.alive && hasCap(beigeP, 'beige') && i !== seat) {
           g.pending = {
             type: 'beigeChoose',
             sourceSeat: i,
@@ -3633,7 +3672,7 @@ function respondDying(useTao, jijiuChoice){
       // 周泰【不屈】:回复体力时移除一张不屈牌
       removeBuquCard(g, g.pending.seat);
       // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
-      if(generalHasCap(dyingP, 'enyuan') && mySeat !== g.pending.seat) {
+      if(hasCap(dyingP, 'enyuan') && mySeat !== g.pending.seat) {
         // me 是使用桃的角色，dyingP 是法正
         ensureDeck(g);
         drawN(g, mySeat, 1);
@@ -3815,7 +3854,7 @@ function finishDying(g, actuallyDied){
     // 蔡文姬【断肠】：杀死你的角色失去所有武将技能(锁定技)
     // 技能查询走 getGeneral(player.general).caps,必须置 skillsLost 让 generalHasCap/hasCap/triggerHook 失效
     const killerSeat = resume.sourceSeat;
-    if (generalHasCap(p, 'duanchang') && typeof killerSeat === 'number' && g.players[killerSeat]) {
+    if (hasCap(p, 'duanchang') && typeof killerSeat === 'number' && g.players[killerSeat]) {
       const killer = g.players[killerSeat];
       if (killer && killer.alive) {
         killer.skillsLost = true;
@@ -3829,7 +3868,7 @@ function finishDying(g, actuallyDied){
     // 李典【忘隙】致死造成侧：若 sourceSeat 是李典且 amount>0，在死亡结算后挂起 wangxiAsk
     if(typeof resume.sourceSeat==='number' && typeof resume.amount==='number' && resume.amount>0){
       const sourceP = g.players[resume.sourceSeat];
-      if(sourceP && sourceP.alive && generalHasCap(sourceP, 'wangxi') && resume.sourceSeat !== seat){
+      if(sourceP && sourceP.alive && hasCap(sourceP, 'wangxi') && resume.sourceSeat !== seat){
         g.pending = { 
           type:'wangxiAsk', 
           seat: resume.sourceSeat,  // 李典是攻击者
@@ -3905,6 +3944,7 @@ function respondWangxi(activate){
 // 也就是 resume.type==='sha'/'duel'/'aoe' 时这里需要的那个座位号)。
 function resumeAfterInterrupt(g, resume, seat){
   if(startNextWangxi(g, resume)) return;
+  if(consumePendingHookQueue(g, resume)) return;
   if(resume.type==='ganglie'){
     resumeAfterInterrupt(g, resume.resume, resume.seat);
   } else if(resume.type==='tianxiang'){
@@ -4339,7 +4379,7 @@ function finishTaoyuanTarget(g, info, blocked){
     target.hp++;
     removeBuquCard(g, info.to);
     g.log=pushLog(g.log, target.name+' 受【桃园结义】影响,回复1点体力');
-    if(source && info.to!==info.from && generalHasCap(target, 'enyuan')){
+    if(source && info.to!==info.from && hasCap(target, 'enyuan')){
       ensureDeck(g);
       drawN(g, info.from, 1);
       g.log=pushLog(g.log, target.name+' 回复1点体力,'+source.name+' 发动【恩怨】效果,摸一张牌');
@@ -4599,7 +4639,7 @@ function aoeAdvance(g, prevSeat){
   // 祸首：南蛮入侵对孟获无效
   if(next!==null && g.aoe.trick==='南蛮入侵'){
     const nextPlayer=g.players[next];
-    if(nextPlayer && nextPlayer.alive && generalHasCap(nextPlayer,'huoshou')){
+    if(nextPlayer && nextPlayer.alive && hasCap(nextPlayer,'huoshou')){
       g.log=pushLog(g.log, nextPlayer.name+'【祸首】发动，南蛮入侵对其无效');
       return aoeAdvance(g, next);
     }
@@ -4608,7 +4648,7 @@ function aoeAdvance(g, prevSeat){
   // 巨象：南蛮入侵对祝融无效
   if(next!==null && g.aoe.trick==='南蛮入侵'){
     const nextPlayer=g.players[next];
-    if(nextPlayer && nextPlayer.alive && generalHasCap(nextPlayer,'juxiang')){
+    if(nextPlayer && nextPlayer.alive && hasCap(nextPlayer,'juxiang')){
       g.log=pushLog(g.log, nextPlayer.name+'【巨象】发动，南蛮入侵对其无效');
       return aoeAdvance(g, next);
     }
@@ -4617,12 +4657,12 @@ function aoeAdvance(g, prevSeat){
   if(next===null){
     // 巨象效果②：其他角色使用南蛮入侵结算结束后，所有祝融获得该锦囊牌
     if(g.aoe.trick==='南蛮入侵' && g.aoe.from !== null && g.players[g.aoe.from]){
-      const isFromZhurong = generalHasCap(g.players[g.aoe.from], 'juxiang');
+      const isFromZhurong = hasCap(g.players[g.aoe.from], 'juxiang');
       if(!isFromZhurong){ // 只有其他角色使用的南蛮入侵才会触发
         // 寻找场上所有祝融
         const zhurongSeats = [];
         for(let i=0; i<g.players.length; i++){
-          if(g.players[i] && g.players[i].alive && generalHasCap(g.players[i], 'juxiang')){
+          if(g.players[i] && g.players[i].alive && hasCap(g.players[i], 'juxiang')){
             zhurongSeats.push(i);
           }
         }
@@ -4708,7 +4748,7 @@ function aoeRespond(useCard){
     
     // 祸首：若锦囊是南蛮入侵且场上有孟获（非当前目标），则孟获成为伤害来源
     if(g.aoe.trick==='南蛮入侵'){
-      const huoshouSeat = g.players.findIndex(p => p && p.alive && generalHasCap(p, 'huoshou') && p !== me);
+      const huoshouSeat = g.players.findIndex(p => p && p.alive && hasCap(p, 'huoshou') && p !== me);
       if(huoshouSeat !== -1){
         actualSourceSeat = huoshouSeat;
         g.log = pushLog(g.log, g.players[huoshouSeat].name + '【祸首】发动，成为南蛮入侵的伤害来源');
@@ -5112,7 +5152,7 @@ function continueEndPhaseAfterXiaoguo(g, endingSeat){
     return;
   }
   // 凌统【旋风】：弃牌阶段弃置过至少两张牌时触发
-  if (generalHasCap(me, 'xuanfeng') && me.alive && !g.xuanfengDiscardUsed) {
+  if (hasCap(me, 'xuanfeng') && me.alive && !g.xuanfengDiscardUsed) {
     const discardCount = g.discardedThisPhase || 0;
     if (discardCount >= 2) {
       g.pending = {
@@ -5141,7 +5181,7 @@ function continueEndPhaseAfterXuanfeng(g, endingSeat){
     return;
   }
   // 徐庶【举荐】
-  if (generalHasCap(me, 'jujian') && me.alive && !me.jujianUsed) {
+  if (hasCap(me, 'jujian') && me.alive && !me.jujianUsed) {
     const hasNonBasic = (me.hand || []).some(c => c && c.name && !BASIC_CARDS.includes(c.name));
     const hasOther = g.players.some((p, i) => i !== endingSeat && p && p.alive);
     if (hasNonBasic && hasOther) {
@@ -5152,7 +5192,7 @@ function continueEndPhaseAfterXuanfeng(g, endingSeat){
     }
   }
   // 曹仁【据守】
-  if (generalHasCap(me, 'jushou') && me.alive && me.faceup !== false) {
+  if (hasCap(me, 'jushou') && me.alive && me.faceup !== false) {
     g.pending = { type: 'jushouChoose', seat: endingSeat };
     g.phase = 'jushouChoose';
     g.log = pushLog(g.log, me.name + ' 可以发动【据守】,是否摸三张牌并翻面?');
@@ -5547,7 +5587,7 @@ function findPlayerWithCap(g, cap) {
   if (!g || !g.players || !Array.isArray(g.players)) return null;
   for (let i = 0; i < g.players.length; i++) {
     const player = g.players[i];
-    if (player && player.alive && generalHasCap(player, cap)) {
+    if (player && player.alive && hasCap(player, cap)) {
       return i;
     }
   }
@@ -5891,7 +5931,7 @@ function startFenxun() {
     const me = g.players[mySeat];
     if (!me || !me.alive) return g;
     
-    if (!generalHasCap(me, "fenxun") || me.fenxunUsed) return g;
+    if (!hasCap(me, "fenxun") || me.fenxunUsed) return g;
     
     const hand = me.hand || [];
     if (hand.length === 0) {
