@@ -1193,6 +1193,20 @@
        分别落在各自固定的列里,不再需要justify-self这个居中手段。 */
     #game.desktop-layout #meSeat{ grid-column:1; grid-row:7; }
     #game.desktop-layout #hand{ grid-column:2 / 4; grid-row:7; }
+    /* 第9步修复:.seat.me 的基础规则(见文件靠前的 .seat.me{width:220px;max-width:260px})
+       是给窄屏/flex布局场景设计的——.opp-row 用 flex,对手数量少时 flex:1 会把单个对手撑到
+       200px 上限,"我"的座位卡如果还是 180px 反而比对手更窄,和"更大、更醒目"的设计意图
+       矛盾,所以显式定死 220px(Playwright 实测抓到的真实问题,见那条注释)。但这次 me
+       座位卡改用 grid-column:1 后,分到的是这条列轨道 minmax(100px,180px) 的宽度,220px
+       会直接超出这个空间、溢出到 grid-column:2/4 (#hand 所在的列),和手牌区域产生真实
+       重叠(实测过:me 宽度220px、和 #hand 之间 gap 为负值)。"对手行flex撑宽"这个原始
+       问题在这里不成立——desktop 布局下 me 和对手的列宽都是 grid 固定分配、互不影响,
+       不存在"对手被撑宽导致我显得更窄"这回事,所以这里安全地把宽度收窄回和 grid-column:1
+       一致的180px,不影响.seat.me基础规则本身(那条220px仍然只在窄屏/flex模式下生效),
+       也不碰 left/right 座位卡(选择器只限定 .seat.me,不会命中它们)。写法参照上面
+       .wrap:has(#game.desktop-layout) 这条"用desktop-layout作用域覆盖旧规则"的既有模式,
+       保持风格一致。 */
+    #game.desktop-layout .seat.me{ width:180px; max-width:180px; }
     /* 第4步:日志面板挪到独立的第4列;第8步收紧成grid-row:1 / span 3——只覆盖座位区
        (top/left/right)+中央出牌区这3行,不再一路占满到底(原来是1/-1占满全部7行,
        会一路盖到"我+手牌"合并后的那一行)。用span而不是写死结束行号(比如1/4),
@@ -1316,16 +1330,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=153"></script>
-<script src="data.js?v=153"></script>
-<script src="room-lifecycle.js?v=153"></script>
-<script src="game.js?v=153"></script>
-<script src="weapons.js?v=153"></script>
-<script src="skills.js?v=153"></script>
-<script src="render.js?v=153"></script>
-<script src="render-table.js?v=153"></script>
-<script src="render-hand.js?v=153"></script>
-<script src="render-controls.js?v=153"></script>
-<script src="render-log.js?v=153"></script>
+<script src="config.js?v=154"></script>
+<script src="data.js?v=154"></script>
+<script src="room-lifecycle.js?v=154"></script>
+<script src="game.js?v=154"></script>
+<script src="weapons.js?v=154"></script>
+<script src="skills.js?v=154"></script>
+<script src="render.js?v=154"></script>
+<script src="render-table.js?v=154"></script>
+<script src="render-hand.js?v=154"></script>
+<script src="render-controls.js?v=154"></script>
+<script src="render-log.js?v=154"></script>
 </body>
 </html>
