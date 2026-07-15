@@ -689,11 +689,13 @@ function render(g){
   if(!(g.pending && g.pending.seat===mySeat &&
        (g.pending.type==='huashenPick' || g.pending.type==='huashenChangePickStart' || g.pending.type==='huashenChangePickEnd'))) resetHuashenPick();
   const oppRowEl=document.getElementById('oppRow');
+  const oppTopRowEl=document.getElementById('oppTopRow');
   const meSeatEl=document.getElementById('meSeat');
   // 骨架级重建(landscape-ui 第1阶段):.opp-row/#meSeat 各自独立容器,不再共用一个
   // #seats 网格——#tableCard 这次已经不是它们的子元素(见 index.html 的说明),两个
   // 容器整体清空重建没有"常驻子节点被连带销毁"这个历史包袱,可以直接 innerHTML=''。
-  oppRowEl.innerHTML=''; meSeatEl.innerHTML='';
+  // #oppTopRow(宽屏桌面布局专用,装zone==='top'的座位卡)同样每次整体清空重建。
+  oppRowEl.innerHTML=''; if(oppTopRowEl) oppTopRowEl.innerHTML=''; meSeatEl.innerHTML='';
   const seatN=(g.players||[]).length;
   // 对手在行内的左右顺序:从"我"的下家开始按回合顺序排列,单独一整行的横排场景下比旧版
   // "回合顺序上离我近的分左右两侧"更直觉,也不需要为不同人数维护不同的分侧规则。
@@ -1064,9 +1066,16 @@ function render(g){
     const meDOM = buildSeatDOM(mySeat);
     if(meDOM) meSeatEl.appendChild(meDOM);
   }
+  // 按zone分流挂载容器:zone==='top'时进#oppTopRow(宽屏专用,3张座位卡靠它自身的flex横排,
+  // 不再各自精确写grid-column/grid-row),其余(left/right,以及zones为null的窄屏/理论边界
+  // 情况)一律沿用原有的#oppRow(display:contents,靠座位卡自己的grid-column/grid-row精确
+  // 定位)。窄屏下zones恒为null,这个判断天然全部落到"其余"分支,和改动前的行为完全一致,
+  // 不会把任何座位误分流进#oppTopRow。
   oppOrder.forEach(i=>{
     const oppDOM = buildSeatDOM(i);
-    if(oppDOM) oppRowEl.appendChild(oppDOM);
+    if(!oppDOM) return;
+    if(zones && zones[i]==='top' && oppTopRowEl) oppTopRowEl.appendChild(oppDOM);
+    else oppRowEl.appendChild(oppDOM);
   });
   // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列。调用点必须放在
   // 座位卡片(.seat)全部重新创建完毕之后——曾经放在 render() 更靠前的位置(座位重绘之前),

@@ -1156,10 +1156,19 @@
     }
     #game.desktop-layout #oppRow{ display:contents; }
     #game.desktop-layout .bottom-row{ display:contents; }
-    /* top: 最多3个(assignSeatZones 的 topCount 上限),横排在第1行,各占一列 */
-    #game.desktop-layout .seat[data-zone="top"][data-zone-index="0"]{ grid-column:1; grid-row:1; }
-    #game.desktop-layout .seat[data-zone="top"][data-zone-index="1"]{ grid-column:2; grid-row:1; }
-    #game.desktop-layout .seat[data-zone="top"][data-zone-index="2"]{ grid-column:3; grid-row:1; }
+    /* top: 最多3个(assignSeatZones 的 topCount 上限)——Grid 原生不支持"多个item共享同一
+       grid-area 时自动横向排开"(同区域内的item默认会叠在一起),之前给每张top座位卡各自
+       精确写 grid-column:1/2/3 是绕开这个限制的权宜写法,但那要求"每个座位卡都是#game这个
+       grid的直接item"这个前提——一旦引入#oppTopRow这个真实的flex容器,top座位卡就不再是
+       #game的直接item了,不需要也不能再各自精确定位。改成#oppTopRow整体占据grid-column:
+       1/4(横跨left到right三列的宽度)+grid-row:1这一个区域,内部用display:flex让最多3张
+       座位卡自然横向排开、不重叠——它不像#oppRow那样用display:contents打散,而是一个
+       真实的flex容器,因为它需要自己的flex布局上下文来排布top这几张卡片。gap/padding
+       比照.opp-row的既有数值,保持视觉一致。 */
+    #game.desktop-layout #oppTopRow{
+      grid-column:1 / 4; grid-row:1;
+      display:flex; justify-content:center; gap:8px; padding:8px 8px 4px;
+    }
     /* left: 最多2个,纵向排在最左列的第2/3行 */
     #game.desktop-layout .seat[data-zone="left"][data-zone-index="0"]{ grid-column:1; grid-row:2; }
     #game.desktop-layout .seat[data-zone="left"][data-zone-index="1"]{ grid-column:1; grid-row:3; }
@@ -1252,6 +1261,12 @@
        淡入淡出)+信息面板(阶段3会改造成独立信息条)+自己座位卡(#meSeat)+手牌行,
        取代旧版 #seats 网格环绕布局。 -->
   <div id="game" class="hidden">
+    <!-- #oppTopRow 只在宽屏桌面布局(.desktop-layout)下才会被使用(装zone==='top'的座位卡),
+         窄屏下永远是空的、没有任何CSS属性的占位元素(不挂.opp-row这类会带来无条件基础样式
+         的class)——render.js只有desktopLayoutActive为真时才会把座位分流进来,窄屏下
+         zones本身就是null,不存在"这个座位归哪个zone"这个概念,天然不会分流任何座位进来,
+         详见render.js里buildSeatDOM调用点的说明。 -->
+    <div id="oppTopRow"></div>
     <div class="opp-row" id="oppRow"></div>
     <div class="table-strip" id="tableStrip">
       <div id="tableCard" class="table-card"></div>
@@ -1289,16 +1304,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=151"></script>
-<script src="data.js?v=151"></script>
-<script src="room-lifecycle.js?v=151"></script>
-<script src="game.js?v=151"></script>
-<script src="weapons.js?v=151"></script>
-<script src="skills.js?v=151"></script>
-<script src="render.js?v=151"></script>
-<script src="render-table.js?v=151"></script>
-<script src="render-hand.js?v=151"></script>
-<script src="render-controls.js?v=151"></script>
-<script src="render-log.js?v=151"></script>
+<script src="config.js?v=152"></script>
+<script src="data.js?v=152"></script>
+<script src="room-lifecycle.js?v=152"></script>
+<script src="game.js?v=152"></script>
+<script src="weapons.js?v=152"></script>
+<script src="skills.js?v=152"></script>
+<script src="render.js?v=152"></script>
+<script src="render-table.js?v=152"></script>
+<script src="render-hand.js?v=152"></script>
+<script src="render-controls.js?v=152"></script>
+<script src="render-log.js?v=152"></script>
 </body>
 </html>
