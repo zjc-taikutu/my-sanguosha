@@ -1150,7 +1150,10 @@
          座位/中央出牌区/信息条/手牌这些原有内容一律收在前3列(见下面各条
          grid-column 从 1/-1 改成 1/4),第4列从第1行到最后一行整列只属于日志面板。 */
       grid-template-columns:minmax(100px,180px) 1fr minmax(100px,180px) minmax(220px,300px);
-      grid-template-rows:repeat(8,auto);
+      /* 第8步:me+手牌合并进同一行后,总行数从8收紧到7(座位区3行+信息条/武将名/手牌标签
+         各1行+合并后的me+手牌1行),没有空行,不会因为"预留了一行却没人占用"而多出一段
+         意外的行间距(row-gap 对每条相邻track都生效,哪怕某条track是空的)。 */
+      grid-template-rows:repeat(7,auto);
       column-gap:12px; row-gap:8px;
       align-items:start;
     }
@@ -1177,15 +1180,24 @@
     #game.desktop-layout .seat[data-zone="right"][data-zone-index="1"]{ grid-column:3; grid-row:3; }
     /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块) */
     #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:center; }
-    /* 我:固定在座位区正下方,占满前3列宽度(不侵入第4列日志专属列) */
-    #game.desktop-layout #meSeat{ grid-column:1 / 4; grid-row:4; justify-self:center; }
-    /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化
-       (信息条/手牌具体怎么摆留给下一步);同样限定在前3列,不侵入第4列。 */
-    #game.desktop-layout .panel.table{ grid-column:1 / 4; grid-row:5; }
-    #game.desktop-layout #myGeneral{ grid-column:1 / 4; grid-row:6; }
-    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / 4; grid-row:7; }
-    #game.desktop-layout #hand{ grid-column:1 / 4; grid-row:8; }
-    /* 第4步:日志面板挪到独立的第4列,纵向占满整个网格的高度(第1行到最后一行)——
+    /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化;
+       同样限定在前3列,不侵入第4列。行号相应从原来的5/6/7上移一行(第8步me+手牌
+       合并后腾出了原来me单独占用的那一行)。 */
+    #game.desktop-layout .panel.table{ grid-column:1 / 4; grid-row:4; }
+    #game.desktop-layout #myGeneral{ grid-column:1 / 4; grid-row:5; }
+    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / 4; grid-row:6; }
+    /* 第8步:我的座位卡+手牌合并成同一行——me固定用第1列(和left/right座位卡共用
+       同一条列轨道,宽度天然保持一致,不需要另外定义一组新的列宽),手牌占第2~3列
+       (剩余宽度,即中央+right那两条列轨道合起来的宽度)。原来两者各自占一整行、
+       me还用justify-self:center让自己在1/4这个跨列范围内居中——现在两者在同一行
+       分别落在各自固定的列里,不再需要justify-self这个居中手段。 */
+    #game.desktop-layout #meSeat{ grid-column:1; grid-row:7; }
+    #game.desktop-layout #hand{ grid-column:2 / 4; grid-row:7; }
+    /* 第4步:日志面板挪到独立的第4列;第8步收紧成grid-row:1 / span 3——只覆盖座位区
+       (top/left/right)+中央出牌区这3行,不再一路占满到底(原来是1/-1占满全部7行,
+       会一路盖到"我+手牌"合并后的那一行)。用span而不是写死结束行号(比如1/4),
+       是为了以后座位区行数变化(或者日志下面要插入别的内容,比如聊天框)时,只需要
+       改这里的span数字,不用重新计算"到底该到第几行"这个绝对行号。
        它是独立于座位区域的常驻信息区,不需要跟着座位卡的行高走,内容多了自己滚动
        (overflow-y:auto 是 .log-panel 基础规则里本来就有的)。
        #game.desktop-layout{align-items:start} 这条父级设置会让网格项默认按内容
@@ -1200,7 +1212,7 @@
        特异性天然高于 900px 断点那条纯 class 选择器,不依赖源码顺序也能赢,但仍然按
        约定写在源码更后面。 */
     #game.desktop-layout .log-panel{
-      grid-column:4; grid-row:1 / -1;
+      grid-column:4; grid-row:1 / span 3;
       position:static; align-self:stretch;
       max-height:none; height:100%;
       margin-top:0;
@@ -1304,16 +1316,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=152"></script>
-<script src="data.js?v=152"></script>
-<script src="room-lifecycle.js?v=152"></script>
-<script src="game.js?v=152"></script>
-<script src="weapons.js?v=152"></script>
-<script src="skills.js?v=152"></script>
-<script src="render.js?v=152"></script>
-<script src="render-table.js?v=152"></script>
-<script src="render-hand.js?v=152"></script>
-<script src="render-controls.js?v=152"></script>
-<script src="render-log.js?v=152"></script>
+<script src="config.js?v=153"></script>
+<script src="data.js?v=153"></script>
+<script src="room-lifecycle.js?v=153"></script>
+<script src="game.js?v=153"></script>
+<script src="weapons.js?v=153"></script>
+<script src="skills.js?v=153"></script>
+<script src="render.js?v=153"></script>
+<script src="render-table.js?v=153"></script>
+<script src="render-hand.js?v=153"></script>
+<script src="render-controls.js?v=153"></script>
+<script src="render-log.js?v=153"></script>
 </body>
 </html>

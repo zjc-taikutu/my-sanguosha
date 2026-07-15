@@ -258,7 +258,42 @@ function updateDesktopLayoutFlag(){
   if(gameEl) gameEl.classList.toggle('desktop-layout', desktopLayoutActive);
 }
 updateDesktopLayoutFlag();
-window.addEventListener('resize', updateDesktopLayoutFlag);
+// updateLogPanelHeight(): 第8步——日志面板的高度不能靠纯CSS的grid-row:span N声明
+// (最初的实现方式),因为"座位区+中央出牌区"这个组合的真实渲染底边,在不同人数/座位
+// 组合下,既可能比#tableStrip自身的渲染框更低(#tableStrip用align-self:center只占
+// 约64px、被更高的座位卡挤在中间时——8人局left/right都占满的场景),也可能反过来
+// (5人局这类left/right没坐满、tableStrip自身的最小高度反而撑出了原本没有座位卡的
+// 那一行,导致按grid行数对齐会比座位卡实际渲染的位置多出一截)。两个方向都可能出问题,
+// 靠纯CSS写死"跨几行"算不出正确结果,只能在JS里动态测量实际渲染出来的位置:取
+// "#oppTopRow/#oppRow 内所有座位卡的底边"(注意排除#meSeat——那是"我"的座位卡,
+// 已经合并到手牌那一行,不属于"座位区+中央出牌区"这个范围,如果不排除会把日志面板
+// 撑到页面最下面)和"#tableStrip自身底边"两者中更靠下(视口坐标更大)的那一个,减去
+// 日志面板自身的顶边,换算成一个具体像素高度,直接用内联style覆盖掉CSS里那份声明
+// (那份CSS的grid-row:1/span 3依然保留在index.html里,是这个JS计算失效时的兜底,
+// 比如极端边界下座位/tableStrip都不存在时这个函数会直接不设置任何内联高度)。
+function updateLogPanelHeight(){
+  const logEl = document.getElementById('logPanel');
+  if(!logEl) return;
+  if(!desktopLayoutActive){
+    logEl.style.height=''; // 窄屏下清掉可能残留的内联高度,让窄屏自己的CSS(max-height:132px等)重新生效
+    return;
+  }
+  let maxBottom = -Infinity;
+  document.querySelectorAll('#oppTopRow .seat, #oppRow .seat').forEach(el=>{
+    const r=el.getBoundingClientRect();
+    if(r.bottom>maxBottom) maxBottom=r.bottom;
+  });
+  const tableStripEl=document.getElementById('tableStrip');
+  if(tableStripEl){
+    const r=tableStripEl.getBoundingClientRect();
+    if(r.bottom>maxBottom) maxBottom=r.bottom;
+  }
+  if(maxBottom===-Infinity) return; // 理论边界:座位卡和tableStrip都不存在(尚未开局等),不设置,交给CSS兜底
+  const logTop = logEl.getBoundingClientRect().top;
+  const height = maxBottom - logTop;
+  if(height>0) logEl.style.height = height+'px';
+}
+window.addEventListener('resize', () => { updateDesktopLayoutFlag(); updateLogPanelHeight(); });
 
 // 常驻"关闭房间"按钮(cleanupRoom):只需要绑定一次,不放进render(g)里——这是一个固定
 // 挂在页面角落、不随游戏状态变化的元素,和 #helpBtn/#logBtn 同一类"页面初始化时绑一次"
@@ -1085,6 +1120,10 @@ function render(g){
   // 这个顺序影响(它是持久节点,不会被座位重绘销毁),但它的目标座位高亮逻辑必须在这里、
   // 座位元素已经是"这一轮最终版本"之后执行。
   renderTableCard(g);
+  // 第8步:座位卡分流挂载(#oppTopRow/#oppRow)和#tableStrip内容(renderTableCard)都已经
+  // 是这一轮最终状态之后,才能测量出正确的"座位区+中央出牌区"实际渲染高度,所以放在这两者
+  // 之后执行,和上面renderTableCard必须晚于座位重绘同一个理由。
+  updateLogPanelHeight();
 
   // phase pill + deck info
   const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',shaOffsetChoice:'杀被抵消后的效果选择',mengjin:'猛进选择',zhijiChoice:'志继选择',tiaoxinChoice:'挑衅选择',tiaoxinDiscard:'挑衅弃牌',xunxunPick:'恂恂选择',wangxiAsk:'忘隙询问',over:'游戏结束'}[g.phase]||g.phase;
