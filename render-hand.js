@@ -207,17 +207,28 @@ function renderHand(g){
         render(g);
       };
     } else if(g.phase==='play'&&myTurn){
-      // 武圣类(目前只有关羽):红色装备牌同时"有自己独立入口(装备)"和"能当杀使用"——resolveActionId 的固定
-      // 优先级会让"装备"100%胜出,玩家永远点不到"当杀"。把选择权交还给玩家(见 confirmEquipOrSha),
-      // 不再走下面单一路径的 resolveActionId。范围显式限定 !!getEquip(card.name)(必须是装备牌)——
-      // 延时锦囊(闪电/乐不思蜀/兵粮寸断)同样满足"有独立入口+能当杀"这个通用条件,但它的own用法
-      // 也需要选目标,和杀的选目标会互相竞争,UI形状和这个"立即3选1"弹窗不一样,这次刻意不处理,
-      // 必须显式排除、维持现状不变(见 confirmEquipOrSha 函数注释,以后单独修延时锦囊时对照这里)。
-      const isEquipCardForChoice = !!getEquip(card.name);
-      const needsEquipShaChoice = isEquipCardForChoice && CARD_PLAYS['杀'].canPlay(g, me, card) && canUseAs(me, card, '杀');
-      if(needsEquipShaChoice){
+      // 武圣类(目前只有关羽):这张牌同时"有自己的独立入口"和"能当杀使用"时,resolveActionId 的固定
+      // 优先级会让它自己的效果100%胜出、玩家永远点不到"当杀"。把选择权交还给玩家(见 confirmOwnOrSha)。
+      //
+      // gate 是结构化判断,不硬编码牌名、也不查 getEquip(遵循规则5,以后新增同型牌零改动):
+      //   ownSpec 存在 + 它自己不需要选目标(target:false) + 它此刻真的能按自己的效果打出 + 也能当杀。
+      // 覆盖装备牌 + 6张 target:false 的普通红牌(桃♥8/无中生有♥4/五谷丰登♥2/酒♦1/万箭齐发♥1/桃园结义♥1)。
+      // target:true 的9张红牌(乐不思蜀/闪电/决斗/顺手牵羊/过河拆桥/火攻)两种用法都要选目标、必须同屏
+      // 共存,走 render.js 座位循环里的"武圣:杀"独立按钮,不走这个弹窗——两套机制共用同一个触发判据,
+      // 只按 spec.target 分流,天然互斥不重叠。
+      //
+      // 【ownSpec.canPlay 这一项不能省】装备的 equipPlay.canPlay 恒真,所以早期只做装备时漏掉它没
+      // 暴露问题;但【桃】(me.hp<me.maxHp)和【酒】(!g.jiuUsed)的 canPlay 是状态相关的。带上这一项后:
+      // 它自己此刻打不出(满血的桃/已用过的酒) → 不弹窗,resolveActionId 自然落到'杀'、直接当杀(行为不变);
+      // 打得出 → 弹窗二选一。这同时消掉了"满血能当杀、受伤反而不能"那个反直觉的翻转——不是为桃/酒
+      // 写特例,是这条通用条件的自然结果。
+      const ownSpec = CARD_PLAYS[card.name];
+      const needsShaChoice = !!ownSpec && !ownSpec.target
+        && ownSpec.canPlay(g, me, card)
+        && CARD_PLAYS['杀'].canPlay(g, me, card);
+      if(needsShaChoice){
         usable = true;
-        onClick = () => confirmEquipOrSha(card, idx);
+        onClick = () => confirmOwnOrSha(card, idx);
       } else {
       // actionId:优先这张牌自己的效果,没有独立入口(如闪)才转化为杀;查 CARD_PLAYS 决定可用性与点击行为
       const actionId = resolveActionId(g, me, card);

@@ -349,7 +349,7 @@ function showConfirm(message, onOk, onCancel){
   m.onclick=(e)=>{ if(e.target===m){ hide(); onCancel(); } };
 }
 // resetSelectionState: 从 confirmAndPlay 原来的内部私有闭包 cleanup 提取出来的独立函数——
-// 纯提取重构,行为零变化,只是让 confirmEquipOrSha(装备/当杀二选一弹窗)也能调用同一份
+// 纯提取重构,行为零变化,只是让 confirmOwnOrSha(按原效果用/当杀 二选一弹窗)也能调用同一份
 // "清空全部客户端选牌/选目标状态"逻辑,不用另外复制一份 reset* 列表。
 function resetSelectionState(){
   selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng();
@@ -367,7 +367,7 @@ function confirmAndPlay(message, actionFn){
     ()=>{ resetSelectionState(); render(currentG); });
 }
 // forcedShaCardId: 武圣类(目前只有关羽)"这张牌自己有独立入口、但也能当杀使用"场景下,玩家在
-// confirmEquipOrSha 弹窗里明确选择"当杀"后记录的那张牌的 id(用 id 不用下标,避免手牌
+// confirmOwnOrSha 弹窗里明确选择"当杀"后记录的那张牌的 id(用 id 不用下标,避免手牌
 // 数组变动导致下标错位)。只在这一种场景下被设置,和 selectedCardIdx 同步在
 // resetSelectionState 里清空,不持久化(不进 g,纯客户端本地状态)。
 let forcedShaCardId = null;
@@ -383,7 +383,7 @@ let forcedShaCardId = null;
 // 这类被动响应场景依然直接用 canUseAs/findUsableAs 找"任意能顶替用的牌",不经过这个函数,
 // 武圣/倾国/龙胆在那些场景的转化能力完全不受影响(那正是这些技能的核心用途)。
 //
-// forcedShaCardId 覆盖:装备牌(见 confirmEquipOrSha)这类"自己有独立入口、同时也能当杀"的牌,
+// forcedShaCardId 覆盖:装备牌/target:false 的红牌(见 confirmOwnOrSha)这类"自己有独立入口、同时也能当杀"的牌,
 // 原本的优先级规则会让"自己的入口"100%胜出,玩家永远点不到"当杀"这个选项——一旦玩家在
 // 二选一弹窗里明确选了"当杀",这里在最前面加一行判断直接返回'杀',后续座位点击/目标高亮/
 // playCard 的 actionId 等所有重新调用 resolveActionId 的地方(render.js 座位循环3处、
@@ -396,29 +396,41 @@ function resolveActionId(g, me, card){
   if(canUseAs(me, card, '杀')) return '杀';
   return card.name;
 }
-// confirmEquipOrSha: 武圣类(目前只有关羽)"这张牌自己有独立入口(装备)、但也能当杀使用"的二选一弹窗——
+// confirmOwnOrSha: 武圣类(目前只有关羽)"这张牌自己有独立入口、但也能当杀使用"的二选一弹窗——
 // 复用 showConfirm 同一个 #confirmModal 容器,但不走 showConfirm/confirmAndPlay 固定的
-// 2按钮(确定/取消)语义,自己渲染3个按钮(装备/当杀/取消),故意不改 showConfirm/confirmAndPlay
+// 2按钮(确定/取消)语义,自己渲染3个按钮(按原效果用/当杀/取消),故意不改 showConfirm/confirmAndPlay
 // 本身的签名或既有调用点行为。
 //
-// 【范围限定,务必只在装备牌上触发】这个函数只处理"装备"这一种"自己有独立入口"的牌——
-// 调用方在决定要不要弹这个二选一之前,除了 needsChoice(hasOwnEntry && alsoAsSha)这个通用
-// 条件,还必须显式再确认 !!getEquip(card.name)(这张牌真的是装备牌,不是别的"自己有独立
-// 入口"的牌)。延时锦囊(闪电/乐不思蜀/兵粮寸断)同样满足 needsChoice,但它的own用法也需要
-// 选目标,和杀的选目标会互相竞争,UI 形状和这个"立即3选1"弹窗不一样(更适合仿双雄那样在每个
-// 目标座位上加一个独立按钮),这次刻意不处理,维持现状(见 CLAUDE.md 记录)。这行注释和调用方
-// 那行显式的 getEquip 判断,是防止以后单独修延时锦囊时忘了这里已经有一份耦合逻辑的双重提醒。
-function confirmEquipOrSha(card, idx){
+// 【适用范围:target:false 的牌】这个弹窗处理的是"这张牌自己的用法不需要选目标"的情况——
+// 装备牌(equipPlay,target:false)+ 6 张 target:false 的普通红牌(桃/无中生有/五谷丰登/桃园结义/
+// 酒/万箭齐发)。它们点击即出、没有目标选择流程要保护,所以"立即3选1"这个形状合适。
+// 调用方的 gate 见 render-hand.js:结构化判断 ownSpec && !ownSpec.target && ownSpec.canPlay(...)
+// && CARD_PLAYS['杀'].canPlay(...),不硬编码牌名、不查 getEquip(遵循规则5),以后新增同型牌零改动。
+//
+// 【和座位按钮的分工】target:true 的牌(乐不思蜀/闪电/决斗/顺手牵羊/过河拆桥/火攻 共9张红牌)
+// 两种用法都要选目标、必须同屏共存,走的是 render.js 座位循环里的"武圣:杀"独立按钮,不走这里
+// ——两套机制共用同一个触发判据,只按 spec.target 分流,天然互斥不重叠。
+//
+// 【文案不逐牌适配】第一个按钮/描述里的动词由 ownSpec.noDiscard 派生(noDiscard 是项目里既有的
+// "这是装备牌"统一标志,playConfirmMsg 也是这么用的、注释明写"不硬编码牌名"),装备→"直接装备/装备",
+// 其余→"按原本的效果使用/使用【X】"。装备牌的文案和改动前逐字一致。
+function confirmOwnOrSha(card, idx){
+  const ownSpec = CARD_PLAYS[card.name];
+  const isEquip = !!(ownSpec && ownSpec.noDiscard);
+  const ownVerb = isEquip ? '直接装备' : '按原本的效果使用';
+  const ownBtn  = isEquip ? '装备' : '使用【'+escapeHtml(card.name)+'】';
   const m=document.getElementById('confirmModal');
-  m.innerHTML='<div class="confirm-panel"><div class="confirm-msg">【'+escapeHtml(card.name)+'】可以直接装备,也可以当【杀】使用,请选择：</div>'
-    +'<div class="confirm-btns"><button class="ghost" id="confirmCancelEq">取消</button>'
+  m.innerHTML='<div class="confirm-panel"><div class="confirm-msg">【'+escapeHtml(card.name)+'】可以'+ownVerb+',也可以当【杀】使用,请选择：</div>'
+    +'<div class="confirm-btns"><button class="ghost" id="confirmCancelOwn">取消</button>'
     +'<button class="primary" id="confirmAsSha">当【杀】使用</button>'
-    +'<button class="primary" id="confirmAsEquip">装备</button></div></div>';
+    +'<button class="primary" id="confirmAsOwn">'+ownBtn+'</button></div></div>';
   m.classList.remove('hidden');
   const hide=()=>{ m.classList.add('hidden'); m.innerHTML=''; };
-  m.querySelector('#confirmAsEquip').onclick=()=>{ hide(); resetSelectionState(); render(currentG); playCard(idx, card.name); };
+  // 这两个分支都是牌种类无关的,不需要按牌种类各自路由:playCard 内部自己查 CARD_PLAYS[actionId]
+  // 分派(装备拿到 equipPlay、桃拿到 CARD_PLAYS['桃']),分派本来就在 playCard 里、不在这里。
+  m.querySelector('#confirmAsOwn').onclick=()=>{ hide(); resetSelectionState(); render(currentG); playCard(idx, card.name); };
   m.querySelector('#confirmAsSha').onclick=()=>{ hide(); selectedCardIdx=idx; forcedShaCardId=card.id; render(currentG); };
-  m.querySelector('#confirmCancelEq').onclick=()=>{ hide(); };
+  m.querySelector('#confirmCancelOwn').onclick=()=>{ hide(); };
   m.onclick=(e)=>{ if(e.target===m){ hide(); } };
 }
 function canShuangxiongDuelCard(player, card){
