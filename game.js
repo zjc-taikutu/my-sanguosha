@@ -2745,7 +2745,7 @@ function respondLiegong(activate){
 // 但故意不设 g.shaUsed——这张"借来的杀"不占用任何人(包括 A 自己、当前回合玩家)的次数限制,
 // 也不重复校验距离(B 是否在 A 范围内,已经在 jieDaoShaRen 选目标那一步校验过)。
 // 选弃武器:弃置 A 当前装备的武器(不是使用者选的牌),触发 onLoseEquip(孙尚香会摸两张)。
-function respondJiedao(useSha){
+function respondJiedao(useSha, cardIdx){
   tx(g=>{
     if(g.phase!=='jiedaoChoice'||!g.pending||g.pending.type!=='jiedaoChoice'||g.pending.seatA!==mySeat) return g;
     const seatB=g.pending.seatB;
@@ -2753,7 +2753,10 @@ function respondJiedao(useSha){
     if(useSha){
       // 曹彰【将驰】选项1:本回合不能打出杀
       if(A.jiangchiNoSlash) return g;
-      const idx=findUsableAs(A.hand, A, '杀');
+      // cardIdx 是客户端"多候选选牌"传来的具体下标(可选):传了且服务端复核确实能当杀才采信,
+      // 不合法就当没传、回退 findUsableAs——不盲信客户端下标(和 respondShan 同一套写法)。
+      const specifiedCard = (typeof cardIdx==='number') ? (A.hand||[])[cardIdx] : null;
+      const idx = (specifiedCard && canUseAs(A, specifiedCard, '杀')) ? cardIdx : findUsableAs(A.hand, A, '杀');
       if(idx<0) return g; // 没有可用的杀:不生效(按钮本就不该渲染)
       const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
       g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(isShaName(card.name)?'【'+card.name+'】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
@@ -4203,7 +4206,7 @@ function checkWin(g){
 // "决斗双方有没有人是吕布",必须看"当前正要出杀的这个人(mySeat)是不是吕布本人":
 // 是吕布本人 -> 恒为1;不是吕布本人、且这场决斗的对方是吕布 -> 2;都不是吕布 -> 1。
 // g.pending.shaCount 记这一轮已出几张,换人时归零重新计数。选择认输就按原逻辑直接受伤,已出的杀不退回。
-function duelResponse(useSha){
+function duelResponse(useSha, cardIdx){
   tx(g=>{
     if(g.phase!=='duel'||!g.pending||g.pending.active!==mySeat) return g;
     const me=g.players[mySeat];
@@ -4212,7 +4215,10 @@ function duelResponse(useSha){
     if(useSha){
       // 曹彰【将驰】选项1:本回合不能打出杀
       if(me.jiangchiNoSlash) return g;
-      const idx=findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
+      // cardIdx 是客户端"多候选选牌"传来的具体下标(可选):传了且服务端复核确实能当杀才采信,
+      // 不合法就当没传、回退 findUsableAs——不盲信客户端下标(和 respondShan 同一套写法)。
+      const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
+      const idx = (specifiedCard && canUseAs(me, specifiedCard, '杀')) ? cardIdx : findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
       const played=(g.pending.shaCount||0)+1;

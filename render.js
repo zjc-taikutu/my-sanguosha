@@ -727,10 +727,14 @@ function render(g){
   // 不会执行到,必须放在这个不受myTurn限制的单点兜底里才能真正覆盖"换到别人回合"这个最
   // 常见的离开discard阶段的场景)。
   if(!(g.started && g.phase==='discard' && g.turn===mySeat)) resetDiscardSelected();
-  // 同款兜底:一旦不在"轮到自己响应出闪(respond)"或"轮到自己响应南蛮/万箭(aoeResp)"这两个
-  // 状态,清空多候选选牌状态(selectedResponseCardIdx),不留残留到下一次响应场景。
+  // 同款兜底:一旦不在任何一个"轮到自己响应、需要多候选选牌"的状态,清空多候选选牌状态
+  // (selectedResponseCardIdx),不留残留到下一次响应场景。五个场景共用同一个状态,所以这里
+  // 必须把五个 phase 全部列全——漏掉任何一个,那个场景选中的牌会残留到下一次响应(规则14)。
   if(!(g.phase==='respond' && g.pending && g.pending.to===mySeat) &&
-     !(g.phase==='aoeResp' && g.pending && g.pending.type==='aoeResp' && g.pending.to===mySeat)) resetSelectedResponseCard();
+     !(g.phase==='aoeResp' && g.pending && g.pending.type==='aoeResp' && g.pending.to===mySeat) &&
+     !(g.phase==='duel' && g.pending && g.pending.active===mySeat) &&
+     !(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat) &&
+     !(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat)) resetSelectedResponseCard();
   // 同款兜底:一旦不在"轮到自己响应鬼才改判"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat)) resetGuicai();
   // 同款兜底:只要不在「自己的恂恂选择阶段」,就退出恂恂选牌模式。

@@ -2355,14 +2355,23 @@ function renderControls(g){
   }
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat){
     const A=g.players[mySeat], B=g.players[g.pending.seatB], askerName=g.players[g.pending.from].name;
-    const canSha = findUsableAs(A.hand, A, '杀')>=0;
-    if(canSha){
+    const shaCandidates = (A.hand||[]).filter(card=>canUseAs(A, card, '杀'));
+    const canSha = shaCandidates.length>0;
+    // 候选>1时先在手牌区点选一张再出现按钮(和respondShan同一风格);候选<=1时行为不变。
+    const shaNeedsPick = canSha && shaCandidates.length>1 && !A.jiangchiNoSlash;
+    if(canSha && (!shaNeedsPick || selectedResponseCardIdx!==null)){
+      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='对 '+B.name+' 使用【杀】'; b1.onclick=()=>respondJiedao(true); c.appendChild(b1);
+      b1.textContent='对 '+B.name+' 使用【杀】';
+      // 提交后立刻清空选中状态:下标是"这一刻手牌数组的下标",牌一旦离手数组就 splice 了,
+      // 留着会指向另一张牌(见 duelResponse 那处的详细说明)。chosenIdx 已在上面冻结,先清空再提交是安全的。
+      b1.onclick = shaNeedsPick ? (()=>{ resetSelectedResponseCard(); respondJiedao(true, chosenIdx); }) : (()=>respondJiedao(true));
+      c.appendChild(b1);
     }
     const b2=document.createElement('button');
     b2.textContent='弃置武器【'+A.equips.weapon.name+'】'; b2.onclick=()=>respondJiedao(false); c.appendChild(b2);
-    setBanner(escapeHtml(askerName)+' 对你使用【借刀杀人】,目标 '+escapeHtml(B.name)+',请选择:对其使用【杀】,或弃置你的武器。');
+    const jiedaoPickHint = (shaNeedsPick && selectedResponseCardIdx===null) ? '你有多张牌可以当【杀】使用,请先在手牌区选择一张。' : '';
+    setBanner(escapeHtml(askerName)+' 对你使用【借刀杀人】,目标 '+escapeHtml(B.name)+',请选择:对其使用【杀】,或弃置你的武器。'+jiedaoPickHint);
     return;
   }
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice'){
@@ -2388,14 +2397,22 @@ function renderControls(g){
   // 姜维【挑衅】:目标角色选择如何响应
   if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat){
     const from=g.players[g.pending.from].name, to=g.players[mySeat].name;
-    const canSha=findUsableAs(me.hand, me, '杀')>=0 && canReachSha(g, mySeat, g.pending.from);
-    if(canSha){
+    const shaCandidates=(me.hand||[]).filter(card=>canUseAs(me, card, '杀'));
+    const canSha=shaCandidates.length>0 && canReachSha(g, mySeat, g.pending.from);
+    // 候选>1时先在手牌区点选一张再出现按钮(和respondShan同一风格);候选<=1时行为不变。
+    const shaNeedsPick = canSha && shaCandidates.length>1;
+    if(canSha && (!shaNeedsPick || selectedResponseCardIdx!==null)){
+      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='对其使用【杀】'; b1.onclick=()=>respondTiaoxinChoice(true); c.appendChild(b1);
+      b1.textContent='对其使用【杀】';
+      // 提交后立刻清空选中状态(理由同 duelResponse 那处)
+      b1.onclick = shaNeedsPick ? (()=>{ resetSelectedResponseCard(); respondTiaoxinChoice(true, chosenIdx); }) : (()=>respondTiaoxinChoice(true));
+      c.appendChild(b1);
     }
     const b2=document.createElement('button');
     b2.textContent='被弃置一张牌'; b2.onclick=()=>respondTiaoxinChoice(false); c.appendChild(b2);
-    setBanner(escapeHtml(from)+' 发动【挑衅】,'+(canSha?'请选择:对其使用一张【杀】,或被弃置一张牌。':'你没有可用的【杀】,只能选择被弃置一张牌。'));
+    const tiaoxinPickHint = (shaNeedsPick && selectedResponseCardIdx===null) ? '你有多张牌可以当【杀】使用,请先在手牌区选择一张。' : '';
+    setBanner(escapeHtml(from)+' 发动【挑衅】,'+(canSha?'请选择:对其使用一张【杀】,或被弃置一张牌。'+tiaoxinPickHint:'你没有可用的【杀】,只能选择被弃置一张牌。'));
     return;
   }
   if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice'){
@@ -2556,7 +2573,9 @@ function renderControls(g){
       const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
       b1.textContent='出【闪】';
-      b1.onclick = shanNeedsPick ? (()=>respondShan(true, chosenIdx)) : (()=>respondShan(true));
+      // 提交后立刻清空选中状态(理由同 duelResponse 那处:吕布【无双】要连续两张闪,打出第一张后
+      // pending 仍停在同一个人身上,兜底清理不会触发,残留的旧下标会指向另一张牌)
+      b1.onclick = shanNeedsPick ? (()=>{ resetSelectedResponseCard(); respondShan(true, chosenIdx); }) : (()=>respondShan(true));
       c.appendChild(b1);
     }
     const guhuoShanCount = !g.pending.noShan ? addGuhuoResponseButtons(c, g, me, '闪') : 0;
@@ -2589,10 +2608,25 @@ function renderControls(g){
     return;
   }
   if(g.phase==='duel' && g.pending && g.pending.active===mySeat){
-    const hasSha=me.hand.some(card=>canUseAs(me,card,'杀'));
-    if(hasSha){
+    const shaCandidates=me.hand.filter(card=>canUseAs(me,card,'杀'));
+    const hasSha=shaCandidates.length>0;
+    // 候选>1(真实杀+龙胆/武圣转化)时需要先在手牌区点选具体一张(见render-hand.js),这里只有
+    // 已经选中时才渲染"打出【杀】"按钮(和respondShan同一风格,不渲染禁用态按钮);候选<=1时
+    // 维持原有"按钮直接生效"行为,不强迫多点一步。曹彰【将驰】禁杀时手牌区不给点选,
+    // shaNeedsPick 也不成立,按钮维持原有行为(服务端仍会拒绝)。
+    const shaNeedsPick = hasSha && shaCandidates.length>1 && !me.jiangchiNoSlash;
+    if(hasSha && (!shaNeedsPick || selectedResponseCardIdx!==null)){
+      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='打出【杀】'; b1.onclick=()=>duelResponse(true);
+      b1.textContent='打出【杀】';
+      // 提交后立刻清空选中状态。selectedResponseCardIdx 是"这一刻手牌数组的下标",牌一旦
+      // 离手,数组就 splice 了、后面的牌下标全部前移,同一个数字指向的已经是另一张牌。
+      // 平时靠 render() 的兜底清理(离开这个 phase 就清空)覆盖,但吕布【无双】要连续两张杀:
+      // 打出第一张后 pending 仍停在同一个人身上(phase/active 都不变),兜底条件不成立、不会
+      // 清空,残留的旧下标如果恰好还指向另一张能当杀的牌,第二次点按钮就会静默打出玩家这一轮
+      // 并没有选过的那张牌。所以必须在提交这一刻自己清掉,让每一轮都重新选(遵循CLAUDE.md规则14
+      // "确认类操作点确定后也应立即清理,别让旧状态留到下一次交互")。chosenIdx 已冻结,先清空再提交是安全的。
+      b1.onclick = shaNeedsPick ? (()=>{ resetSelectedResponseCard(); duelResponse(true, chosenIdx); }) : (()=>duelResponse(true));
       c.appendChild(b1);
     }
     addGuhuoResponseButtons(c, g, me, '杀');
@@ -2605,6 +2639,7 @@ function renderControls(g){
     const shaNeeded = (!hasCap(me,'wushuang') && hasCap(g.players[oppSeat],'wushuang')) ? 2 : 1;
     let tail;
     if(!hasSha) tail='你没有【杀】,只能受到伤害。';
+    else if(shaNeedsPick && selectedResponseCardIdx===null) tail='你有多张牌可以当【杀】使用,请先在手牌区选择一张。';
     else if(shaNeeded>1 && g.pending.shaCount>0) tail='决斗涉及吕布【无双】,这一轮已打出'+g.pending.shaCount+'/'+shaNeeded+'张【杀】,还需再打出一张!';
     else if(shaNeeded>1) tail='决斗涉及吕布【无双】,这一轮需要连续打出2张【杀】。';
     else tail='是否打出【杀】?';
@@ -2821,7 +2856,8 @@ function renderControls(g){
       const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
       b1.textContent='打出【'+need+'】';
-      b1.onclick = aoeNeedsPick ? (()=>aoeRespond(true, chosenIdx)) : (()=>aoeRespond(true));
+      // 提交后立刻清空选中状态(理由同 duelResponse 那处)
+      b1.onclick = aoeNeedsPick ? (()=>{ resetSelectedResponseCard(); aoeRespond(true, chosenIdx); }) : (()=>aoeRespond(true));
       c.appendChild(b1);
     }
     const guhuoAoeCount = addGuhuoResponseButtons(c, g, me, need);

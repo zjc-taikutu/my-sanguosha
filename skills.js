@@ -1749,17 +1749,21 @@ function respondTiaoxin(targetSeat){
 
 // respondTiaoxinChoice: 挑衅目标的选择
 // target 选择: true=使用杀, false=被弃置一张牌
-function respondTiaoxinChoice(useSha){
+function respondTiaoxinChoice(useSha, cardIdx){
   tx(g=>{
     if(g.phase!=='tiaoxinChoice'||!g.pending||g.pending.type!=='tiaoxinChoice') return g;
     const from=g.pending.from, to=g.pending.to;
     const target=g.players[to];
     const asker=g.players[from];
-    
+
     if(useSha){
       // 目标选择对挑衅者使用一张杀
       // 检查目标是否能出杀
-      const shaIdx = findUsableAs(target.hand, target, '杀');
+      // cardIdx 是客户端"多候选选牌"传来的具体下标(可选):传了且服务端复核确实能当杀才采信,
+      // 不合法就当没传、回退 findUsableAs——不盲信客户端下标(和 respondShan 同一套写法)。
+      // 注意这里的响应者是 target(g.pending.to),不是 mySeat,所以复核的是 target 的手牌。
+      const specifiedCard = (typeof cardIdx==='number') ? (target.hand||[])[cardIdx] : null;
+      const shaIdx = (specifiedCard && canUseAs(target, specifiedCard, '杀')) ? cardIdx : findUsableAs(target.hand, target, '杀');
       if(shaIdx>=0 && canReachSha(g, to, from)){
         const card=target.hand.splice(shaIdx,1)[0];
         g.discard.push(card);

@@ -64,10 +64,12 @@ function renderHand(g){
   myGenEl.innerHTML = myGen
     ? '你的武将：'+escapeHtml(myGen.name)+' · '+escapeHtml(myGen.skill)+'<span style="color:var(--paper-dim)">（'+escapeHtml(myGen.desc)+'）</span>'
     : '';
-  // 响应阶段"多候选可选"判断(respondShan出闪/aoeRespond南蛮万箭响应):这一轮渲染需要的角色
-  // (role)和候选数量在循环外算一次,不必每张手牌各自重算一遍。只有候选>1(真实牌+龙胆/武圣/
-  // 倾国转化)才需要玩家先点选具体一张;候选<=1时维持原有"手牌不可点、按钮直接生效"的简化
-  // 体验,不强迫多点一步(和之前respondShan/aoeRespond只有唯一候选时的行为完全一致)。
+  // 响应阶段"多候选可选"判断:这一轮渲染需要的角色(role)和候选数量在循环外算一次,不必每张
+  // 手牌各自重算一遍。只有候选>1(真实牌+龙胆/武圣/倾国转化)才需要玩家先点选具体一张;候选
+  // <=1时维持原有"手牌不可点、按钮直接生效"的简化体验,不强迫多点一步。
+  // 五个响应场景共用这同一套状态(selectedResponseCardIdx)和交互,不各自另起一套:
+  // respond(出闪)/aoeResp(南蛮万箭)/duel(决斗出杀)/jiedaoChoice(借刀杀人A出杀)/
+  // tiaoxinChoice(挑衅目标出杀)。
   let respondRole = null, respondCandidateCount = 0;
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
     respondRole = '闪';
@@ -75,6 +77,17 @@ function renderHand(g){
   } else if(g.phase==='aoeResp' && g.pending && g.pending.type==='aoeResp' && g.pending.to===mySeat && g.aoe){
     respondRole = g.pending.need;
     respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,respondRole)).length;
+  } else if(g.phase==='duel' && g.pending && g.pending.active===mySeat && !me.jiangchiNoSlash){
+    // 曹彰【将驰】禁杀时服务端会拒绝,这里也不给点选(否则选了也没用)
+    respondRole = '杀';
+    respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,'杀')).length;
+  } else if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat && !me.jiangchiNoSlash){
+    respondRole = '杀';
+    respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,'杀')).length;
+  } else if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat && canReachSha(g, mySeat, g.pending.from)){
+    // 挑衅:够不到挑衅者时这张杀根本用不出去(服务端同样要求 canReachSha),不给点选
+    respondRole = '杀';
+    respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,'杀')).length;
   }
   (me.hand||[]).forEach((card,idx)=>{
     const el=document.createElement('div');
@@ -239,9 +252,9 @@ function renderHand(g){
         render(g);
       };
     } else if(respondRole && canUseAs(me, card, respondRole)){
-      // 出闪/南蛮万箭响应:候选>1时(真实牌+龙胆/武圣/倾国转化)才需要玩家先点选具体一张——
-      // 点选只是切换 selectedResponseCardIdx(纯客户端状态,不入库),真正响应仍由旁边"出
-      // 【闪/杀】"按钮触发、读取这个下标传给 respondShan/aoeRespond。候选<=1时这里不设
+      // 五个响应场景(出闪/南蛮万箭/决斗/借刀杀人/挑衅):候选>1时(真实牌+龙胆/武圣/倾国转化)
+      // 才需要玩家先点选具体一张——点选只是切换 selectedResponseCardIdx(纯客户端状态,不入库),
+      // 真正响应仍由旁边"出【闪/杀】"按钮触发、读取这个下标传给对应的 respond* 函数。候选<=1时这里不设
       // onClick,维持原有"手牌不可点、按钮直接生效"的简化体验(respondCandidateCount 在
       // 循环外已经算好,和之前"handled via button, leave card non-clickable"的注释描述的
       // 是同一种"唯一候选"场景,只是现在多了">1时可点选"这个新分支)。
