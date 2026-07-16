@@ -4735,7 +4735,10 @@ function startAoeRespond(g, target){
   g.log=pushLog(g.log, '要求 '+g.players[target].name+' 打出【'+g.aoe.need+'】');
 }
 // aoeRespond: 仅 pending.to 可响应;出 need 牌则抵消,否则受1点伤害(可能阵亡)。出杀不碰 shaUsed。
-function aoeRespond(useCard){
+// cardIdx(可选):玩家在"有多个候选牌可当need"时(真实牌+龙胆/武圣转化)明确选中的那一张手牌
+// 下标。不传(或非法)就回退 findUsableAs 自动挑,完全向后兼容,服务端同样要复核 canUseAs
+// 合法性,见 respondShan 同款注释。
+function aoeRespond(useCard, cardIdx){
   tx(g=>{
     if(g.phase!=='aoeResp'||!g.pending||g.pending.type!=='aoeResp'||!g.aoe) return g;
     const me=g.players[mySeat];
@@ -4744,7 +4747,8 @@ function aoeRespond(useCard){
     if(useCard){
       // 曹彰【将驰】选项1:本回合不能打出杀(南蛮响应)
       if(need==='杀' && me.jiangchiNoSlash) return g;
-      const idx=findUsableAs(me.hand,me,need); // 龙胆:杀/闪可互转,优先用本名牌
+      const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
+      const idx = (specifiedCard && canUseAs(me, specifiedCard, need)) ? cardIdx : findUsableAs(me.hand,me,need); // 龙胆:杀/闪可互转,优先用本名牌
       if(idx<0) return g; // 没牌:界面按钮保留,等其改点"不出"
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
       const label = card.name===need ? '打出【'+need+'】' : '打出【'+card.name+'】当【'+need+'】';
@@ -4780,14 +4784,19 @@ function aoeRespond(useCard){
 // respondShan: 出闪响应。吕布【无双】(锁定技):攻击者是吕布时,needed=2——打出一张闪不够,
 // g.pending.shanCount 记差几张,留在 respond 阶段原样再问一次(按钮/阶段都不变,只是 hint
 // 文案会提示"还差几张");不选择继续出闪就按原逻辑直接受伤,已打出的闪不退回、只扣1点血。
-function respondShan(useShan){
+// cardIdx(可选):玩家在"有多个候选牌可当闪"时(真实闪+龙胆转化的杀)明确选中的那一张手牌下标。
+// 不传(或非法)就回退 findUsableAs 自动挑第一张,完全向后兼容——候选只有1张时客户端不需要
+// 传这个参数。服务端必须对传入的下标做 canUseAs 合法性复核,不能盲信客户端("UI 漏判也拦得住"
+// 的既有原则),下标不合法时静默按"没传"处理,不能让非法输入直接导致状态异常或被拒绝卡死。
+function respondShan(useShan, cardIdx){
   tx(g=>{
     if(g.phase!=='respond'||!g.pending||g.pending.to!==mySeat) return g;
     const me=g.players[mySeat]; const attacker=g.players[g.pending.from];
     const needed = hasCap(attacker,'wushuang') ? 2 : 1;
     if(useShan){
       if(g.pending.noShan) return g; // 马超【铁骑】判红:此杀不可被闪抵消,服务端兜底(UI 本就不该渲染这个按钮)
-      const idx=findUsableAs(me.hand,me,'闪'); // 龙胆:杀可当闪,优先用本名闪
+      const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
+      const idx = (specifiedCard && canUseAs(me, specifiedCard, '闪')) ? cardIdx : findUsableAs(me.hand,me,'闪'); // 龙胆:杀可当闪,优先用本名闪
       if(idx<0) return g;
       const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
       const played=(g.pending.shanCount||0)+1;

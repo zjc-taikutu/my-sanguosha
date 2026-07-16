@@ -44,6 +44,12 @@ function hasWeaponToDiscard(player) {
 
 // ---------- targeting UI state ----------
 let selectedCardIdx = null;
+// 响应阶段"多候选可选"(respondShan出闪/aoeRespond南蛮万箭响应):候选>1(真实牌+龙胆/武圣/
+// 倾国转化)时,玩家先点选具体一张手牌,记下标;候选<=1时不使用这个变量,维持原有"按钮直接
+// 生效"的简化体验(见 render-hand.js 的 respondRole/respondCandidateCount 判断)。纯客户端
+// 状态,不入库,和 selectedCardIdx 同款同步在离开对应 phase 时清空(见 render.js 的单点兜底)。
+let selectedResponseCardIdx = null;
+function resetSelectedResponseCard(){ selectedResponseCardIdx = null; }
 // 弃牌阶段:已勾选待弃置的手牌下标集合,纯客户端状态,不提交服务端直到点"确认弃牌"
 // (多选后统一确认,和之前"点一张立即弃一张"的旧交互不同,见discardCards)。
 let discardSelectedSet = new Set();
@@ -2540,10 +2546,17 @@ function renderControls(g){
   }
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
     // 马超【铁骑】判红:此杀不可被闪抵消,连按钮都不给("没有可用手段就不渲染"的一贯风格)
-    const hasShan = !g.pending.noShan && me.hand.some(card=>canUseAs(me,card,'闪'));
-    if(hasShan){
+    const shanCandidates = me.hand.filter(card=>canUseAs(me,card,'闪'));
+    const hasShan = !g.pending.noShan && shanCandidates.length>0;
+    // 候选>1(真实闪+龙胆/倾国转化)时需要先在手牌区点选具体一张(见render-hand.js),这里只有
+    // 已经选中时才渲染"出【闪】"按钮(和guanshi/tuxi等"选够条件才出现确认按钮"同一风格,不
+    // 渲染禁用态按钮);候选<=1时维持原有"按钮直接生效"行为,不强迫多点一步。
+    const shanNeedsPick = hasShan && shanCandidates.length>1;
+    if(hasShan && (!shanNeedsPick || selectedResponseCardIdx!==null)){
+      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='出【闪】'; b1.onclick=()=>respondShan(true);
+      b1.textContent='出【闪】';
+      b1.onclick = shanNeedsPick ? (()=>respondShan(true, chosenIdx)) : (()=>respondShan(true));
       c.appendChild(b1);
     }
     const guhuoShanCount = !g.pending.noShan ? addGuhuoResponseButtons(c, g, me, '闪') : 0;
@@ -2558,6 +2571,7 @@ function renderControls(g){
     if(g.pending.noShan) tail='对方发动了【铁骑】且判定为红,此杀不可被闪抵消,只能受到伤害。';
     else if(!hasShan && guhuoShanCount===0) tail='你没有【闪】,只能受到伤害。';
     else if(!hasShan) tail='你没有【闪】,可以发动【蛊惑】声明【闪】,或选择受到伤害。';
+    else if(shanNeedsPick && selectedResponseCardIdx===null) tail='你有多张牌可以当【闪】使用,请先在手牌区选择一张。';
     else if(shanNeeded>1 && g.pending.shanCount>0) tail='对方是吕布【无双】,已打出'+g.pending.shanCount+'/'+shanNeeded+'张【闪】,还需再打出一张才能抵消!';
     else if(shanNeeded>1) tail='对方是吕布【无双】,需要连续打出2张【闪】才能抵消。';
     else tail='是否打出【闪】?';
@@ -2798,10 +2812,16 @@ function renderControls(g){
   }
   if(g.phase==='aoeResp' && g.pending && g.pending.to===mySeat){
     const need=g.pending.need;
-    const hasCard=me.hand.some(card=>canUseAs(me,card,need));
-    if(hasCard){
+    const aoeCandidates = me.hand.filter(card=>canUseAs(me,card,need));
+    const hasCard = aoeCandidates.length>0;
+    // 候选>1(真实牌+龙胆/武圣转化)时需要先在手牌区点选具体一张(见render-hand.js),这里只有
+    // 已经选中时才渲染"打出【need】"按钮(和respondShan同一风格);候选<=1时行为不变。
+    const aoeNeedsPick = hasCard && aoeCandidates.length>1;
+    if(hasCard && (!aoeNeedsPick || selectedResponseCardIdx!==null)){
+      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='打出【'+need+'】'; b1.onclick=()=>aoeRespond(true);
+      b1.textContent='打出【'+need+'】';
+      b1.onclick = aoeNeedsPick ? (()=>aoeRespond(true, chosenIdx)) : (()=>aoeRespond(true));
       c.appendChild(b1);
     }
     const guhuoAoeCount = addGuhuoResponseButtons(c, g, me, need);
@@ -2809,7 +2829,8 @@ function renderControls(g){
     b2.textContent='不出（受伤）'; b2.onclick=()=>aoeRespond(false);
     c.appendChild(b2);
     const trick = g.aoe ? g.aoe.trick : need;
-    setBanner('【'+escapeHtml(trick)+'】要求你打出【'+escapeHtml(need)+'】。'+((hasCard||guhuoAoeCount>0)?'':'你没有【'+escapeHtml(need)+'】,只能受到伤害。'));
+    const pickHint = (aoeNeedsPick && selectedResponseCardIdx===null) ? '你有多张牌可以当【'+escapeHtml(need)+'】使用,请先在手牌区选择一张。' : '';
+    setBanner('【'+escapeHtml(trick)+'】要求你打出【'+escapeHtml(need)+'】。'+(pickHint || ((hasCard||guhuoAoeCount>0)?'':'你没有【'+escapeHtml(need)+'】,只能受到伤害。')));
     return;
   }
   if(g.phase==='aoeResp' && g.pending){

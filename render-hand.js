@@ -64,6 +64,18 @@ function renderHand(g){
   myGenEl.innerHTML = myGen
     ? '你的武将：'+escapeHtml(myGen.name)+' · '+escapeHtml(myGen.skill)+'<span style="color:var(--paper-dim)">（'+escapeHtml(myGen.desc)+'）</span>'
     : '';
+  // 响应阶段"多候选可选"判断(respondShan出闪/aoeRespond南蛮万箭响应):这一轮渲染需要的角色
+  // (role)和候选数量在循环外算一次,不必每张手牌各自重算一遍。只有候选>1(真实牌+龙胆/武圣/
+  // 倾国转化)才需要玩家先点选具体一张;候选<=1时维持原有"手牌不可点、按钮直接生效"的简化
+  // 体验,不强迫多点一步(和之前respondShan/aoeRespond只有唯一候选时的行为完全一致)。
+  let respondRole = null, respondCandidateCount = 0;
+  if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
+    respondRole = '闪';
+    respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,'闪')).length;
+  } else if(g.phase==='aoeResp' && g.pending && g.pending.type==='aoeResp' && g.pending.to===mySeat && g.aoe){
+    respondRole = g.pending.need;
+    respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,respondRole)).length;
+  }
   (me.hand||[]).forEach((card,idx)=>{
     const el=document.createElement('div');
     const cls = isShaName(card.name)?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':card.name==='顺手牵羊'?'steal':'trick';
@@ -79,7 +91,8 @@ function renderHand(g){
     const zhihengPicked = zhihengMode && zhihengPicks.includes(idx);
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
     const discardPicked = discardSelectedSet.has(idx);
-    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked||discardPicked)?' selected':'')+(discardPicked?' discard-selected':'');
+    const responsePicked = respondRole && selectedResponseCardIdx===idx;
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked||discardPicked||responsePicked)?' selected':'')+(discardPicked?' discard-selected':'');
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
@@ -225,8 +238,17 @@ function renderHand(g){
         else discardSelectedSet.add(idx);
         render(g);
       };
-    } else if(g.phase==='respond'&&g.pending&&g.pending.to===mySeat&&card.name==='闪'){
-      // handled via button; leave card non-clickable
+    } else if(respondRole && canUseAs(me, card, respondRole)){
+      // 出闪/南蛮万箭响应:候选>1时(真实牌+龙胆/武圣/倾国转化)才需要玩家先点选具体一张——
+      // 点选只是切换 selectedResponseCardIdx(纯客户端状态,不入库),真正响应仍由旁边"出
+      // 【闪/杀】"按钮触发、读取这个下标传给 respondShan/aoeRespond。候选<=1时这里不设
+      // onClick,维持原有"手牌不可点、按钮直接生效"的简化体验(respondCandidateCount 在
+      // 循环外已经算好,和之前"handled via button, leave card non-clickable"的注释描述的
+      // 是同一种"唯一候选"场景,只是现在多了">1时可点选"这个新分支)。
+      if(respondCandidateCount>1){
+        usable=true;
+        onClick=()=>{ selectedResponseCardIdx = (selectedResponseCardIdx===idx?null:idx); render(g); };
+      }
     }
     if(!usable) el.classList.add('disabled');
     if(onClick) el.onclick=onClick;
