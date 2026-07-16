@@ -1752,6 +1752,15 @@ function respondTiaoxin(targetSeat){
 function respondTiaoxinChoice(useSha, cardIdx){
   tx(g=>{
     if(g.phase!=='tiaoxinChoice'||!g.pending||g.pending.type!=='tiaoxinChoice') return g;
+    // 调用者身份守卫:只有被挑衅的目标本人(g.pending.to)能替自己做这个选择。
+    // 和项目里其它响应函数同一范式(respondShan/aoeRespond 也是 g.pending.to!==mySeat;
+    // duelResponse 是 active、respondJiedao 是 seatA——字段名各自不同,别抄错)。
+    // 这一句以前漏了:函数体内部一律用 g.pending.to 取响应者,所以效果不会算错人,但没有
+    // 任何一句把 mySeat 和 g.pending.to 对上,导致任何在场客户端(包括挑衅发起者自己)都能
+    // 在这个 phase 内代替目标做选择——已实测复现:座位2(无关第三方)和座位0(发起者)都能
+    // 强行让目标打出手里的杀、或替目标选择被弃牌。UI 侧虽然有 g.pending.to===mySeat 判断
+    // 点不到别人的按钮,但按"服务端级兜底,UI 漏判也拦得住"的一贯原则,不能只靠 UI 拦。
+    if(g.pending.to!==mySeat) return g;
     const from=g.pending.from, to=g.pending.to;
     const target=g.players[to];
     const asker=g.players[from];
