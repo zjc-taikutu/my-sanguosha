@@ -3246,32 +3246,38 @@ function qiaobianDeclare(cardIdx, phaseChoice){
 }
 
 // heal: 通用体力回复函数，支持恩怨等触发
+// heal(g, ...):被外层 tx 回调直接调用的辅助函数(目前唯一调用点在
+// processBeigeJudgeResult 的红桃分支,而 processBeigeJudgeResult 本身又是被
+// doBeigeJudge 的 tx 回调直接调用——两层都已经身处一次 tx 事务里),不该再自己开 tx。
+// 和 finishBaguaColor/finishGuicai/finishDying/processBeigeJudgeResult 同一约定：
+// 只有被客户端直接调用的入口函数才该调 tx,被 tx 回调内部调用的辅助函数直接操作
+// 传入的 g。这是本项目第二次踩到同一类"辅助函数自己嵌套开 tx"的问题(第一次是
+// processBeigeJudgeResult),新增任何类似的辅助函数时都要先确认它是不是已经在
+// 某个 tx 回调内部被调用,是的话就不要再包一层 tx。
 function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
-  tx(g => {
-    const target = g.players[targetSeat];
-    if(!target || !target.alive) return g;
-    
-    const source = sourceSeat !== null && sourceSeat !== undefined ? g.players[sourceSeat] : null;
-    const originalHp = target.hp || 0;
-    target.hp = Math.min(target.maxHp || target.hp || 0, (target.hp || 0) + amount);
-    const actualRecovered = (target.hp || 0) - originalHp;
-    
-    if(actualRecovered > 0) {
-      const natureText = reason ? '(' + reason + ')' : '';
-      g.log = pushLog(g.log, target.name + ' 回复' + actualRecovered + '点体力' + natureText + '（体力' + target.hp + '）');
-      
-      // 法正【恩怨】：当其他角色令你回复1点体力后，其摸一张牌
-      // 每回复1点体力触发一次
-      if (source && sourceSeat !== targetSeat && hasCap(target, 'enyuan')) {
-        for (let i = 0; i < actualRecovered; i++) {
-          ensureDeck(g);
-          drawN(g, sourceSeat, 1);
-          g.log = pushLog(g.log, target.name + ' 回复1点体力,' + source.name + ' 发动【恩怨】效果,摸一张牌');
-        }
+  const target = g.players[targetSeat];
+  if(!target || !target.alive) return g;
+
+  const source = sourceSeat !== null && sourceSeat !== undefined ? g.players[sourceSeat] : null;
+  const originalHp = target.hp || 0;
+  target.hp = Math.min(target.maxHp || target.hp || 0, (target.hp || 0) + amount);
+  const actualRecovered = (target.hp || 0) - originalHp;
+
+  if(actualRecovered > 0) {
+    const natureText = reason ? '(' + reason + ')' : '';
+    g.log = pushLog(g.log, target.name + ' 回复' + actualRecovered + '点体力' + natureText + '（体力' + target.hp + '）');
+
+    // 法正【恩怨】：当其他角色令你回复1点体力后，其摸一张牌
+    // 每回复1点体力触发一次
+    if (source && sourceSeat !== targetSeat && hasCap(target, 'enyuan')) {
+      for (let i = 0; i < actualRecovered; i++) {
+        ensureDeck(g);
+        drawN(g, sourceSeat, 1);
+        g.log = pushLog(g.log, target.name + ' 回复1点体力,' + source.name + ' 发动【恩怨】效果,摸一张牌');
       }
     }
-    return g;
-  });
+  }
+  return g;
 }
 
 // consumePendingHookQueue: 左慈"自己的hook + 借来的hook都想在同一次伤害上开pending"
