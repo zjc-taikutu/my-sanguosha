@@ -1096,6 +1096,39 @@ function render(g){
         d.appendChild(db);
       }
     }
+    // 关羽【武圣】:选中一张"自己有独立效果、但也能当【杀】使用"的红色牌后,可明确选择"当【杀】"使用。
+    // 和双雄同一个思路:用座位上的独立按钮,不覆盖这张牌原本自己的出牌效果——两种解读同屏共存,
+    // 常用路径(按这张牌自己的效果用)零额外点击。刻意不走 forcedShaCardId 那套 flag:那是给装备牌
+    // (target:false、选了"当杀"就等于彻底放弃装备)设计的"替换"语义,一旦置了 flag,座位高亮(它自己
+    // 就读 resolveActionId)会立刻整体变成杀的目标集,这张牌自己的目标选择当场消失,和"两种用法要
+    // 同时可选"这个需求直接冲突。
+    //
+    // isWushengShaSel 的判断刻意不写死牌名、也不查 DELAY_TRICKS:条件就是"这张牌此刻正被按它自己的
+    // 效果解读(resolveActionId!=='杀'),但它同时也能当杀打出"。这一条通用条件天然覆盖全部9张红色
+    // target:true 牌(乐不思蜀♥6/闪电♥12/决斗♥1/过河拆桥♥1/顺手牵羊♥2/火攻♥3;兵粮寸断/借刀杀人/
+    // 铁索连环在牌堆里没有红色副本,永远进不来)。target:false 的红牌(桃/无中生有/五谷/桃园/酒/万箭)
+    // 天然被 selectedCardIdx!==null 挡在外面——它们点击即走 confirmAndPlay、根本不会进入"选中"状态
+    // (见 render-hand.js 那处 spec.target 分支),这次不处理,见 CLAUDE.md 待优化点。
+    //
+    // 【目标校验必须和服务端逐项对齐,不要手写简化版】playCard 对 target 牌的校验是三件事:
+    // ①非自己(除非 spec.allowSelf,杀没有) ②目标存活 ③spec.canTarget——这里必须同样调用真正的
+    // CARD_PLAYS['杀'].canTarget(而不是自己重算一遍 canReachSha),否则杀日后新增任何目标限制
+    // (智迟/帷幕这类)这个按钮都不会跟着变,会渲染在服务端必然拒绝的座位上、点了没反应。
+    // 双雄那个按钮就是手写了简化版(只查了空城,漏了 isZhichiImmune/weimu),已记进 CLAUDE.md
+    // 待优化点,新代码不要重蹈覆辙。
+    const isWushengShaSel = !!(selCard && resolveActionId(g, meP, selCard)!=='杀'
+      && CARD_PLAYS['杀'].canPlay(g, meP, selCard));
+    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && isWushengShaSel
+       && i!==mySeat && p.alive && CARD_PLAYS['杀'].canTarget(g, meP, selCard, i)){
+      const idx=selectedCardIdx;
+      const targetSeat=i;
+      const wb=document.createElement('button');
+      wb.className='ghost';
+      wb.textContent='武圣:杀';
+      wb.style.margin='6px 14px 0';
+      wb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌当【杀】对 '+g.players[targetSeat].name+' 使用,发动【武圣】？', ()=>playCard(idx, '杀', targetSeat)); };
+      d.appendChild(wb);
+    }
     // 借刀杀人:选中这张牌后走专属两步流程——先选 A(有武器),再选 B(A 攻击范围内的其他角色)。
     if(isJiedaoSel && g.phase==='play' && g.turn===mySeat){
       if(jiedaoSeatA===null){
