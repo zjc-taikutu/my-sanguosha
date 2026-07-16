@@ -3536,7 +3536,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
     
     // 蔡文姬【悲歌】:【杀】伤害后,其他有悲歌者可弃牌令其判定
-    if (reason && reason.includes('【杀】') && p && p.alive) {
+    if (srcType === 'sha' && p && p.alive) {
       for (let i = 0; i < g.players.length; i++) {
         const beigeP = g.players[i];
         if (beigeP && beigeP.alive && hasCap(beigeP, 'beige') && i !== seat) {
