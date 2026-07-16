@@ -1791,6 +1791,14 @@ function finishGuicai(g, finalCard){
     finishShuangxiongJudge(g, resume.seat, finalCard);
     return;
   }
+  // 蔡文姬【悲歌】判定阶段:doBeigeJudge 调用 maybeGuicai 时传的 resume 是
+  // {kind:'beigeJudge', sourceSeat, damagedSeat, damageSource}——鬼才改判后用最终判定牌
+  // (finalCard)代替原判定牌,重新调用悲歌自己的结算函数,不能漏掉这一支落到下面的
+  // bagua 兜底(那会把悲歌的判定结果错误地当成八卦阵的红黑判定处理)。
+  if(resume.kind==='beigeJudge'){
+    processBeigeJudgeResult(g, finalCard, resume.sourceSeat, resume.damagedSeat, resume.damageSource);
+    return;
+  }
   // 许褚【裸衣】摸牌阶段询问:seat 应是当前回合玩家且存活。
   if(g.pending && g.pending.type==='luoyiAsk'){
     const d=g.pending;
