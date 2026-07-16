@@ -556,9 +556,13 @@ function renderControls(g){
     return;
   }
   
-  // 翻面状态提示
+  // 翻面状态提示——只在"不是我当前回合"时短路(此时反正也没有别的操作可做,提示"下次轮到你
+  // 会被跳过"无害)。若是我自己当前回合(myTurn===true),即使中途被翻面(悲歌黑桃/酒诗任一条
+  // 代码路径/仁心都可能中途把当前回合玩家自己翻成背面),也不能短路掉这个阶段正常的出牌/
+  // 结束回合等控制逻辑——"翻面跳过回合"只在 startTurn 里、新回合开始那一刻结算一次,和
+  // "回合进行到一半才被翻面"是两回事,后者本回合应该照常打完。
   const faceupHtml = renderFaceupStatus(g);
-  if(faceupHtml) {
+  if(faceupHtml && !myTurn) {
     c.innerHTML = faceupHtml;
     return;
   }
