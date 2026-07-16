@@ -181,6 +181,18 @@ function renderHand(g){
         render(g);
       };
     } else if(g.phase==='play'&&myTurn){
+      // 武圣类(目前只有关羽):红色装备牌同时"有自己独立入口(装备)"和"能当杀使用"——resolveActionId 的固定
+      // 优先级会让"装备"100%胜出,玩家永远点不到"当杀"。把选择权交还给玩家(见 confirmEquipOrSha),
+      // 不再走下面单一路径的 resolveActionId。范围显式限定 !!getEquip(card.name)(必须是装备牌)——
+      // 延时锦囊(闪电/乐不思蜀/兵粮寸断)同样满足"有独立入口+能当杀"这个通用条件,但它的own用法
+      // 也需要选目标,和杀的选目标会互相竞争,UI形状和这个"立即3选1"弹窗不一样,这次刻意不处理,
+      // 必须显式排除、维持现状不变(见 confirmEquipOrSha 函数注释,以后单独修延时锦囊时对照这里)。
+      const isEquipCardForChoice = !!getEquip(card.name);
+      const needsEquipShaChoice = isEquipCardForChoice && CARD_PLAYS['杀'].canPlay(g, me, card) && canUseAs(me, card, '杀');
+      if(needsEquipShaChoice){
+        usable = true;
+        onClick = () => confirmEquipOrSha(card, idx);
+      } else {
       // actionId:优先这张牌自己的效果,没有独立入口(如闪)才转化为杀;查 CARD_PLAYS 决定可用性与点击行为
       const actionId = resolveActionId(g, me, card);
       const spec = CARD_PLAYS[actionId];
@@ -202,6 +214,7 @@ function renderHand(g){
         // 刘备【仁德】可交出任意手牌;颜良文丑【双雄】可把异色手牌当【决斗】使用;于吉【蛊惑】可扣置任意手牌声明合法牌名。
         usable=true;
         onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g); };
+      }
       }
     } else if(g.phase==='discard'&&myTurn&&me.hand.length>me.hp){
       // 多选后统一确认:点击只是切换勾选状态(discardSelectedSet),不立刻提交——真正弃牌

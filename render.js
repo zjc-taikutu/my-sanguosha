@@ -348,19 +348,29 @@ function showConfirm(message, onOk, onCancel){
   m.querySelector('#confirmCancel').onclick=()=>{ hide(); onCancel(); };
   m.onclick=(e)=>{ if(e.target===m){ hide(); onCancel(); } };
 }
+// resetSelectionState: 从 confirmAndPlay 原来的内部私有闭包 cleanup 提取出来的独立函数——
+// 纯提取重构,行为零变化,只是让 confirmEquipOrSha(装备/当杀二选一弹窗)也能调用同一份
+// "清空全部客户端选牌/选目标状态"逻辑,不用另外复制一份 reset* 列表。
+function resetSelectionState(){
+  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng();
+}
 // confirmAndPlay: 出牌四类触发点(选目标/不选目标/丈八两张当杀)统一委托的包装——
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
-  const cleanup=()=>{ selectedCardIdx=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); };
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。
     // 立即重绘让"选目标"相关的 onclick 不再被挂上(selectedCardIdx 已是 null),防止这段
     // 等待期内误触第二下(常见于手机网络延迟)。
-    ()=>{ cleanup(); render(currentG); actionFn(); },
-    ()=>{ cleanup(); render(currentG); });
+    ()=>{ resetSelectionState(); render(currentG); actionFn(); },
+    ()=>{ resetSelectionState(); render(currentG); });
 }
+// forcedShaCardId: 武圣类(目前只有关羽)"这张牌自己有独立入口、但也能当杀使用"场景下,玩家在
+// confirmEquipOrSha 弹窗里明确选择"当杀"后记录的那张牌的 id(用 id 不用下标,避免手牌
+// 数组变动导致下标错位)。只在这一种场景下被设置,和 selectedCardIdx 同步在
+// resetSelectionState 里清空,不持久化(不进 g,纯客户端本地状态)。
+let forcedShaCardId = null;
 // resolveActionId: 点一张手牌该按"它自己的牌名"结算,还是按"当杀"结算(赵云龙胆/关羽武圣)——
 // 优先它自己的 CARD_PLAYS 入口:只要这张牌本身就是一张能主动出的牌(CARD_PLAYS[card.name] 存在
 // 且此刻 canPlay),就按它自己的效果走,"点哪张牌就是哪张牌的效果",符合直觉。只有这张牌本身
@@ -372,11 +382,44 @@ function confirmAndPlay(message, actionFn){
 // 注意:这只管"主动点一张牌该按什么结算"这一层客户端判断——决斗出杀/濒死出桃/打闪/万箭出闪
 // 这类被动响应场景依然直接用 canUseAs/findUsableAs 找"任意能顶替用的牌",不经过这个函数,
 // 武圣/倾国/龙胆在那些场景的转化能力完全不受影响(那正是这些技能的核心用途)。
+//
+// forcedShaCardId 覆盖:装备牌(见 confirmEquipOrSha)这类"自己有独立入口、同时也能当杀"的牌,
+// 原本的优先级规则会让"自己的入口"100%胜出,玩家永远点不到"当杀"这个选项——一旦玩家在
+// 二选一弹窗里明确选了"当杀",这里在最前面加一行判断直接返回'杀',后续座位点击/目标高亮/
+// playCard 的 actionId 等所有重新调用 resolveActionId 的地方(render.js 座位循环3处、
+// render-controls.js 选中面板1处)天然全部尊重这次选择,不需要各处分别打补丁。对
+// card.id!==forcedShaCardId 的绝大多数调用(99.99%的场景),这一行恒假,不影响原有逻辑。
 function resolveActionId(g, me, card){
+  if(card && forcedShaCardId!==null && card.id===forcedShaCardId) return '杀';
   const ownSpec = CARD_PLAYS[card.name];
   if(ownSpec && ownSpec.canPlay(g, me, card)) return card.name;
   if(canUseAs(me, card, '杀')) return '杀';
   return card.name;
+}
+// confirmEquipOrSha: 武圣类(目前只有关羽)"这张牌自己有独立入口(装备)、但也能当杀使用"的二选一弹窗——
+// 复用 showConfirm 同一个 #confirmModal 容器,但不走 showConfirm/confirmAndPlay 固定的
+// 2按钮(确定/取消)语义,自己渲染3个按钮(装备/当杀/取消),故意不改 showConfirm/confirmAndPlay
+// 本身的签名或既有调用点行为。
+//
+// 【范围限定,务必只在装备牌上触发】这个函数只处理"装备"这一种"自己有独立入口"的牌——
+// 调用方在决定要不要弹这个二选一之前,除了 needsChoice(hasOwnEntry && alsoAsSha)这个通用
+// 条件,还必须显式再确认 !!getEquip(card.name)(这张牌真的是装备牌,不是别的"自己有独立
+// 入口"的牌)。延时锦囊(闪电/乐不思蜀/兵粮寸断)同样满足 needsChoice,但它的own用法也需要
+// 选目标,和杀的选目标会互相竞争,UI 形状和这个"立即3选1"弹窗不一样(更适合仿双雄那样在每个
+// 目标座位上加一个独立按钮),这次刻意不处理,维持现状(见 CLAUDE.md 记录)。这行注释和调用方
+// 那行显式的 getEquip 判断,是防止以后单独修延时锦囊时忘了这里已经有一份耦合逻辑的双重提醒。
+function confirmEquipOrSha(card, idx){
+  const m=document.getElementById('confirmModal');
+  m.innerHTML='<div class="confirm-panel"><div class="confirm-msg">【'+escapeHtml(card.name)+'】可以直接装备,也可以当【杀】使用,请选择：</div>'
+    +'<div class="confirm-btns"><button class="ghost" id="confirmCancelEq">取消</button>'
+    +'<button class="primary" id="confirmAsSha">当【杀】使用</button>'
+    +'<button class="primary" id="confirmAsEquip">装备</button></div></div>';
+  m.classList.remove('hidden');
+  const hide=()=>{ m.classList.add('hidden'); m.innerHTML=''; };
+  m.querySelector('#confirmAsEquip').onclick=()=>{ hide(); resetSelectionState(); render(currentG); playCard(idx, card.name); };
+  m.querySelector('#confirmAsSha').onclick=()=>{ hide(); selectedCardIdx=idx; forcedShaCardId=card.id; render(currentG); };
+  m.querySelector('#confirmCancelEq').onclick=()=>{ hide(); };
+  m.onclick=(e)=>{ if(e.target===m){ hide(); } };
 }
 function canShuangxiongDuelCard(player, card){
   return !!(player && card && hasCap(player,'shuangxiong') && player.shuangxiongColor
