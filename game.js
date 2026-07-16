@@ -5797,74 +5797,79 @@ function doBeigeJudge() {
   });
 }
 
-// 处理悲歌判定结果
+// 处理悲歌判定结果——注意:这个函数被 doBeigeJudge 自己的 tx 回调内部直接调用
+// （`return processBeigeJudgeResult(g, ...)`），不是客户端直接调用的入口，所以不应该
+// 再自己包一层 tx(...)。和 finishBaguaColor/finishGuicai/finishDying 同一约定：只有
+// 被客户端直接调用的入口函数才该调 tx，被 tx 回调内部调用的收尾/辅助函数直接操作
+// 传入的 g、不再嵌套开 tx。嵌套 tx 会触发 Firebase transaction 的重试机制，导致外层
+// doBeigeJudge 的整个 tx 回调被反复重新执行，每次重执行都会重新调用一次 judge(g)
+// （真实从牌堆 pop 一张、写一条判定日志）——这正是"连续判定好几张牌才最终生效一次"
+// 这个 bug 的成因。
 function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSource) {
-  tx(g => {
-    const damaged = g.players[damagedSeat];
-    
-    if (!damaged || !damaged.alive) {
-      g.pending = null;
-      g.phase = 'play';
-      return g;
-    }
-    
-    // 根据花色执行不同效果
-    switch(judgeCard.suit) {
-      case '♥': // 红桃 - 受伤角色回复1点体力
-        heal(g, damagedSeat, 1, sourceSeat, '悲歌');
-        g.log = pushLog(g.log, damaged.name + ' 回复1点体力');
-        break;
-        
-      case '♦': // 方块 - 受伤角色摸两张牌
-        drawN(g, damagedSeat, 2);
-        g.log = pushLog(g.log, damaged.name + ' 摸两张牌');
-        break;
-        
-      case '♣': // 梅花 - 伤害来源弃置两张牌
-        if (damageSource !== null && typeof damageSource === 'number' && g.players[damageSource] && g.players[damageSource].alive) {
-          const sourcePlayer = g.players[damageSource];
-          const cardsToDiscard = [];
-          
-          // 先弃置手牌
-          if (sourcePlayer.hand && sourcePlayer.hand.length > 0) {
-            const discardCount = Math.min(2, sourcePlayer.hand.length);
-            for (let i = 0; i < discardCount; i++) {
-              cardsToDiscard.push(sourcePlayer.hand.shift());
-            }
-          }
-          
-          // 如果手牌不足2张，继续弃置装备
-          if (cardsToDiscard.length < 2 && sourcePlayer.equips) {
-            const equipSlots = ['weapon', 'armor', 'plus1', 'minus1'];
-            for (const eqType of equipSlots) {
-              if (cardsToDiscard.length >= 2) break;
-              if (sourcePlayer.equips[eqType] !== null) {
-                cardsToDiscard.push(sourcePlayer.equips[eqType]);
-                sourcePlayer.equips[eqType] = null;
-              }
-            }
-          }
-          
-          g.discard.push(...cardsToDiscard);
-          g.log = pushLog(g.log, sourcePlayer.name + ' 弃置了' + cardsToDiscard.length + '张牌');
-        }
-        break;
-        
-      case '♠': // 黑桃 - 伤害来源翻面
-        if (damageSource !== null && typeof damageSource === 'number' && g.players[damageSource] && g.players[damageSource].alive) {
-          const sourcePlayer = g.players[damageSource];
-          sourcePlayer.faceup = !sourcePlayer.faceup;
-          g.log = pushLog(g.log, sourcePlayer.name + ' 翻面');
-        }
-        break;
-    }
-    
-    // 清理状态
+  const damaged = g.players[damagedSeat];
+
+  if (!damaged || !damaged.alive) {
     g.pending = null;
     g.phase = 'play';
-    
     return g;
-  });
+  }
+
+  // 根据花色执行不同效果
+  switch(judgeCard.suit) {
+    case '♥': // 红桃 - 受伤角色回复1点体力
+      heal(g, damagedSeat, 1, sourceSeat, '悲歌');
+      g.log = pushLog(g.log, damaged.name + ' 回复1点体力');
+      break;
+
+    case '♦': // 方块 - 受伤角色摸两张牌
+      drawN(g, damagedSeat, 2);
+      g.log = pushLog(g.log, damaged.name + ' 摸两张牌');
+      break;
+
+    case '♣': // 梅花 - 伤害来源弃置两张牌
+      if (damageSource !== null && typeof damageSource === 'number' && g.players[damageSource] && g.players[damageSource].alive) {
+        const sourcePlayer = g.players[damageSource];
+        const cardsToDiscard = [];
+
+        // 先弃置手牌
+        if (sourcePlayer.hand && sourcePlayer.hand.length > 0) {
+          const discardCount = Math.min(2, sourcePlayer.hand.length);
+          for (let i = 0; i < discardCount; i++) {
+            cardsToDiscard.push(sourcePlayer.hand.shift());
+          }
+        }
+
+        // 如果手牌不足2张，继续弃置装备
+        if (cardsToDiscard.length < 2 && sourcePlayer.equips) {
+          const equipSlots = ['weapon', 'armor', 'plus1', 'minus1'];
+          for (const eqType of equipSlots) {
+            if (cardsToDiscard.length >= 2) break;
+            if (sourcePlayer.equips[eqType] !== null) {
+              cardsToDiscard.push(sourcePlayer.equips[eqType]);
+              sourcePlayer.equips[eqType] = null;
+            }
+          }
+        }
+
+        g.discard.push(...cardsToDiscard);
+        g.log = pushLog(g.log, sourcePlayer.name + ' 弃置了' + cardsToDiscard.length + '张牌');
+      }
+      break;
+
+    case '♠': // 黑桃 - 伤害来源翻面
+      if (damageSource !== null && typeof damageSource === 'number' && g.players[damageSource] && g.players[damageSource].alive) {
+        const sourcePlayer = g.players[damageSource];
+        sourcePlayer.faceup = !sourcePlayer.faceup;
+        g.log = pushLog(g.log, sourcePlayer.name + ' 翻面');
+      }
+      break;
+  }
+
+  // 清理状态
+  g.pending = null;
+  g.phase = 'play';
+
+  return g;
 }
 
 // 取消悲歌
