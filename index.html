@@ -177,7 +177,25 @@
      只覆盖尺寸——比手牌小一号,不需要手牌那套按视口自适应字号的逻辑(中央区没有标题栏文字,
      牌名已经单独用 .table-card-name 显示在上方)。cursor:default 且不绑定 onclick,纯展示。 */
   .table-card-mini{width:64px;height:88px;cursor:default;margin:0 auto;}
-  .table-card-mini .corner{transform:scale(.75);transform-origin:top left;}
+  /* 中央出牌区的角标必须自带不透明底衬,手牌区不需要——这不是重复保险,是两者结构不同:
+     手牌 .card 里 .corner(top:0;left:0)正好压在 .card-title 上,而 .card-title 是
+     rgba(0,0,0,.15) 叠在 .card 的 #f1ead9 奶白底上(仍是浅色),所以 cardFace 的深色花色
+     (黑#3a2f28/红#b33,本来就是为奶白卡面设计的)在手牌上清晰可读(实测黑10.8)。
+     但 tableCardFaceHtml 产出的 mini 卡【没有 .card-title】(牌名单独用 .table-card-name
+     显示在卡片上方),角标于是直接压在暗色插画上 —— 实测8张卡面黑/红两色对比度只有
+     1.07~2.51,全部远低于 WCAG AA 的 4.5,肉眼看就是"只有图片、没有花色"。
+     底衬必须【不透明】:半透明底衬的对比度会随背后插画明暗漂移,这个坑本项目在座位卡
+     血量胶囊上已经踩过一次(rgba(...,.42)在最亮立绘上只有2.30、最暗立绘上4.60),
+     教训是"保证对比度的那一层必须不透明,背后是什么图就与它无关"。取 #f1ead9(=.card
+     自己的底色),视觉上像卡纸透出来、和手牌区观感一致,不额外引入新颜色。
+     实测(8张卡面×红黑双色,底衬亮度恒为0.8256、完全不随插画变化):黑10.83 / 红4.82,
+     全部≥4.5。红色余量较小(4.82)但仍达标,且明显优于手牌区红花色的现状(3.43,压在
+     .card-title 上,一直如此、从未有人反馈过可读性问题)——cardFace 的红黑配色是共用的,
+     这次不动它(保留花色颜色这个规则相关信息)。
+     不加 border-radius:.card 自己有 border-radius:10px + overflow:hidden,外侧圆角已经
+     被卡片裁掉了;若在这里再加圆角,圆角外会漏出暗插画(实测会把角标区域的像素采样污染,
+     一度把红色对比度误测成12.33)。 */
+  .table-card-mini .corner{transform:scale(.75);transform-origin:top left;background:#f1ead9;}
   .exchange-card .table-card-mini{width:52px;height:72px;}
   /* 飞牌动画的临时元素(feature/table-ui 第4步):position:absolute 相对 #seats(已加
      position:relative)定位,left/top 由 render.js 运行时用 getBoundingClientRect 算好的
@@ -1330,16 +1348,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=165"></script>
-<script src="data.js?v=165"></script>
-<script src="room-lifecycle.js?v=165"></script>
-<script src="game.js?v=165"></script>
-<script src="weapons.js?v=165"></script>
-<script src="skills.js?v=165"></script>
-<script src="render.js?v=165"></script>
-<script src="render-table.js?v=165"></script>
-<script src="render-hand.js?v=165"></script>
-<script src="render-controls.js?v=165"></script>
-<script src="render-log.js?v=165"></script>
+<script src="config.js?v=166"></script>
+<script src="data.js?v=166"></script>
+<script src="room-lifecycle.js?v=166"></script>
+<script src="game.js?v=166"></script>
+<script src="weapons.js?v=166"></script>
+<script src="skills.js?v=166"></script>
+<script src="render.js?v=166"></script>
+<script src="render-table.js?v=166"></script>
+<script src="render-hand.js?v=166"></script>
+<script src="render-controls.js?v=166"></script>
+<script src="render-log.js?v=166"></script>
 </body>
 </html>
