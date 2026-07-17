@@ -2973,7 +2973,9 @@ function renderControls(g){
       if(zaiqiAvailable){
         const zb=document.createElement('button'); zb.className='ghost';
         zb.textContent='发动【再起】';
-        zb.title = `亮出牌堆顶${me.maxHp - me.hp}张牌,每张红桃回复1点体力`;
+        // 张数口径必须和 respondZaiqi 里的 lostHp 完全一致(hp 可以为负,见 dealDamage 注释),
+        // 否则 hp<0 时提示会承诺一个和实际不符的张数。
+        zb.title = `亮出牌堆顶${me.maxHp - Math.max(0, me.hp)}张牌,每张红桃回复1点体力`;
         zb.onclick=()=>respondZaiqi();
         c.appendChild(zb);
       }

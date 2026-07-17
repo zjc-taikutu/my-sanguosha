@@ -3419,7 +3419,16 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
   }
 
-  p.hp = Math.max(0, p.hp - amount);
+  // 【体力值可以为负,这是有意为之,不要再在这里加 Math.max(0,...)】
+  // 官方规则:伤害超过剩余体力时体力真的变成负数(1血挨闪电3点 -> -2),濒死救援要把体力
+  // 补回 1 以上才能脱离,所以 -2 需要连续 3 个【桃】。曾经这里写的是 Math.max(0, p.hp-amount),
+  // 是 d55d82c 为了修一个【显示】bug(血格公式 maxHp-hp 在 hp 为负时算出比满血还多的空血格)
+  // 而加的——修在了错误的层:数据层被钳死在 0 之后,1血挨3点变成 0,一个桃 ++ 到 1 就脱离濒死,
+  // 把规则整个改掉了(而且不是闪电特有,任何 amount>剩余hp 的伤害都中招)。
+  // 现在的原则是【数据层说真话、渲染层负责好看】:这里保留真实的负数,显示钳制放在 render.js
+  // 的血格公式里。凡是消费 hp 的地方(尤其是任何 maxHp-hp 形式的"已损失体力值")都必须自己
+  // 考虑 hp<0 会让结果膨胀——完整点位清单见 CLAUDE.md。
+  p.hp = p.hp - amount;
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
 

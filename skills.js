@@ -894,7 +894,9 @@ function maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceC
 function finishTianxiangTransfer(g, originalResume, originalSeat, drawSeat){
   const target=g.players[drawSeat];
   if(target && target.alive){
-    const lost=Math.max(0, target.maxHp-target.hp);
+    // hp 可以为负(见 dealDamage 的注释),所以"已损失体力值"不能直接写 maxHp-hp:
+    // hp=-2/maxHp=4 时会算出 6、比体力上限还多,承伤者会多摸 2 张。先把 hp 钳进可用区间再相减。
+    const lost=Math.max(0, target.maxHp - Math.max(0, target.hp));
     if(lost>0){
       drawN(g, drawSeat, lost);
       g.log=pushLog(g.log, target.name+' 因【天香】摸'+lost+'张牌');
@@ -1911,8 +1913,10 @@ function respondZaiqi() {
     if (me.hp >= me.maxHp) return g;
     if (!hasCap(me, 'zaiqi')) return g;
     
-    // 计算 X = 已损失体力值
-    const lostHp = me.maxHp - me.hp;
+    // 计算 X = 已损失体力值。hp 可以为负(见 dealDamage 的注释),不能直接 maxHp-hp,否则
+    // hp<0 时会翻出比体力上限还多的张数。再起在摸牌阶段发动、濒死者进不到这里,现实中
+    // hp<0 到不了这一步,这里是防御性对齐(和天香/血格显示同一套口径),不是已知会触发的路径。
+    const lostHp = me.maxHp - Math.max(0, me.hp);
     
     // 亮出牌堆顶 X 张牌
     const cards = revealPool(g, lostHp);

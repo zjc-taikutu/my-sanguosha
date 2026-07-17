@@ -565,7 +565,16 @@ function renderSeatCard(g, seat, isSelf){
   // 大厅(未开局)不显示具体血条格数,避免"占位4格→开局3格"的误导跳变。
   let heartsHtml;
   if(g.started){
-    const filled = Math.max(0,p.hp), empty = Math.max(0,p.maxHp-p.hp);
+    // 血格显示:先把 hp 钳进 [0, maxHp] 这个"可显示区间",再由它派生实心/空心格数——
+    // 这里(渲染层)才是钳制该待的地方,数据层的 p.hp 保留真实值(可以为负,见 dealDamage 的注释)。
+    // 四种情况都必须对(总格数恒等于 maxHp):
+    //   hp=-2/maxHp=4(濒死欠血) -> shown=0 -> 0实心+4空心   ← 曾经的 bug:empty 直接用
+    //       maxHp-hp 算成 6,4血角色显示6个空格(Math.max(0,...) 防的是反方向、挡不住这个)
+    //   hp=0  -> 0实心+4空心
+    //   hp=3  -> 3实心+1空心
+    //   hp=5/maxHp=4(理论超上限) -> shown=4 -> 4实心+0空心(旧写法这里会画5个实心)
+    const shownHp = Math.min(Math.max(0, p.hp), p.maxHp);
+    const filled = shownHp, empty = Math.max(0, p.maxHp - shownHp);
     heartsHtml = '<div class="seat-hp-col">'
       + '❤'.repeat(filled).split('').map(c=>'<div>'+c+'</div>').join('')
       + '♡'.repeat(empty).split('').map(c=>'<div class="empty">'+c+'</div>').join('')
