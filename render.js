@@ -560,6 +560,17 @@ function renderSeatCard(g, seat, isSelf){
   // 不是 fitFontSize 那套动态测量——武将名长度上限被 GENERALS 表本身锁定(已核实最长是
   // "颜良文丑"4字),固定字号配合对这个具体worst case的真实测量验证即可。
   const genNameVert = (g.started && gen) ? escapeHtml(gen.name) : '';
+  // 势力标识:不透明色块+白字单字(魏/蜀/吴/群/晋)。势力值走 generalFaction(p)——它跟随
+  // 左慈【化身】(借了别人的武将,势力也跟着变,和上面 avatarGen 跟随化身表现一致)。
+  // 显示条件和头像/武将名同一个 avatarReady(g.started && gen):三选一选将阶段选完但未正式
+  // 开局前仍是隐藏信息,不能提前泄露势力(和头像那次修过的信息泄露bug同一条件)。
+  // 不透明色块:对比度恒定、不随背后立绘明暗漂移(中央区角标那次的教训)。class 里的
+  // faction-<势力> 决定色块颜色(见 index.html)。FACTION_LABEL 缺失时兜底不渲染,不崩。
+  const FACTION_LABEL = { wei:'魏', shu:'蜀', wu:'吴', qun:'群', jin:'晋' };
+  const factionKey = avatarReady ? generalFaction(p) : null;
+  const factionBadge = (factionKey && FACTION_LABEL[factionKey])
+    ? '<div class="seat-faction faction-'+factionKey+'">'+FACTION_LABEL[factionKey]+'</div>'
+    : '<div class="seat-faction"></div>'; // 未开局/无将:保持原空壳(不可见),不占视觉
   // 血量:纵向堆叠,每颗心一个独立的 div(不能用 repeat 拼一整串字符串,那样只是一行文字
   // 里连续的字符、不会各自换行;必须逐个包成块级元素配合 flex-direction:column)。
   // 大厅(未开局)不显示具体血条格数,避免"占位4格→开局3格"的误导跳变。
@@ -692,7 +703,7 @@ function renderSeatCard(g, seat, isSelf){
     // 字数怎么变都不会撞车,也不需要任何"武将名大概多高"的魔数——和 .seat-bottom
     // (判定区+装备行)当初用同一套办法解决同一类问题。
     + '<div class="seat-left">'
-      + '<div class="seat-faction"></div>'
+      + factionBadge
       + '<div class="seat-gen-name">'+genNameVert+'</div>'
       + heartsHtml
     + '</div>'

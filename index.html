@@ -343,15 +343,28 @@
     position:absolute;top:20px;left:4px;
     display:flex;flex-direction:column;align-items:flex-start;gap:2px;
   }
-  /* .seat-faction 是"武将所属(魏/蜀/吴/群)"的占位。**这个字段游戏数据模型里还没有**
-     (和身份局系统一样未实现),这里只预留空间、**不造假数据**,所以现在是一个不可见的
-     空壳(不画背景/边框——在立绘上凭空多一个色块只是噪点,不传达任何信息)。
-     **回填内容时必须补上不透明底衬**:它的位置落在顶部遮罩已经明显变淡的区域,按本方案
-     的硬要求(见血量胶囊那条的教训:半透明底衬在最亮立绘上对比度只有 2.30),届时不能
-     只靠 text-shadow 或半透明色块顶上去。 */
+  /* .seat-faction 是"武将所属势力"(魏/蜀/吴/群/晋)标识,第2步已回填内容。
+     有内容时(class 带 faction-xxx)= 不透明色块 + 白字单字;无内容时(空 div)= 不可见空壳
+     (大厅/选将未开局阶段,内容为空,不占视觉)。
+     **色块不透明是硬要求**:它落在顶部遮罩已经变淡的区域,实测该位置背景亮度在不同立绘上
+     会漂移(最亮machao 0.025 / 最暗simayi 0.0006),半透明色块的对比度会跟着漂(血量胶囊
+     那次的教训:.42 半透明在最亮立绘上只有2.30)。不透明色块的白字对比度恒定、和背后立绘
+     无关(实测已证明色块亮度跨立绘零差异)。文字白色,配色见 .faction-* 各势力。 */
   .seat-faction{
-    width:14px;height:14px;flex:none;   /* 预留出位置,内容为空时不可见 */
+    width:14px;height:14px;flex:none;
+    display:flex;align-items:center;justify-content:center;
+    border-radius:3px; color:#fff; font-weight:700;
+    font-size:10px; line-height:1;  /* 单个汉字,约色块×0.72;各断点色块缩小时字号同步缩,见下 */
   }
+  .seat-faction:empty{ background:none; }  /* 空壳(未开局/无将):不画色块,维持不可见 */
+  /* 五势力配色(A方案,统一白字,均实测白字对比≥4.5):
+     蜀红/吴绿直接复用调色板 --cinnabar/--jade;魏蓝新增;群金加深到 #7d5f2a(--gold 原色
+     #b08d4f 白字只有3.10不达标);晋深紫(当前0武将,框架预留,比座位紫 #8B5FBF 更深、不撞)。 */
+  .faction-wei{ background:#3a5f8a; }  /* 魏·蓝  白字6.60 */
+  .faction-shu{ background:var(--cinnabar); }  /* 蜀·朱红 白字6.15 */
+  .faction-wu{ background:#5f7a5a; }  /* 吴·玉绿(=--jade) 白字4.75 */
+  .faction-qun{ background:#7d5f2a; }  /* 群·加深金 白字5.93 */
+  .faction-jin{ background:#5a3a7a; }  /* 晋·深紫 白字9.05(预留) */
   /* 武将名竖排:writing-mode:vertical-rl 让字符纵向堆叠,text-orientation:upright
      保证汉字保持正常朝向(不随竖排旋转90度)。现在是 .seat-left 这个 flex 列里的一项
      (排在势力占位之下、血量之上),不再自己写绝对定位。固定字号(非动态测量)——武将名
@@ -523,7 +536,7 @@
   /* "我"的卡更大,左侧一列和右上这一套占位/"?"跟着放大、并按更高的标题栏往下让位。
      (.seat-left 是 flex 列,里面各项不再需要各自的 top/left,只调尺寸即可。) */
   .seat.me .seat-left{top:28px;left:6px;gap:3px;}
-  .seat.me .seat-faction{width:18px;height:18px;}
+  .seat.me .seat-faction{width:18px;height:18px;font-size:13px;}
   .seat.me .seat-gen-name{font-size:13px;}
   .seat.me .seat-identity{top:28px;right:6px;width:22px;height:22px;}
   .seat.me .seat-info-badge{top:54px;right:6px;width:18px;height:18px;font-size:11px;}
@@ -551,7 +564,7 @@
      ——和本文件里 .info-badge 那个坑是同一类问题,这里再次踩到。 */
   @container (max-width:150px){
     .seat-left{top:17px;gap:1px;}
-    .seat-faction{width:11px;height:11px;}
+    .seat-faction{width:11px;height:11px;font-size:8px;}
     .seat-gen-name{font-size:9px;letter-spacing:0;}
     .seat-hp-col{font-size:9px;padding:2px;}
     .seat-identity{top:17px;width:13px;height:13px;}
@@ -559,7 +572,7 @@
   }
   @container (max-width:115px){
     .seat-left{top:15px;gap:0;}
-    .seat-faction{width:9px;height:9px;}
+    .seat-faction{width:9px;height:9px;font-size:7px;}
     .seat-gen-name{font-size:8px;letter-spacing:0;}
     .seat-hp-col{font-size:8px;padding:1px 2px;}
     .seat-identity{top:15px;width:11px;height:11px;}
@@ -573,7 +586,7 @@
      115px 那档(它仍然服务于"按宽度分档"的老场景,数值不变)。 */
   @container (max-width:85px){
     .seat-left{top:11px;gap:0;}
-    .seat-faction{width:8px;height:8px;}
+    .seat-faction{width:8px;height:8px;font-size:6px;}
     .seat-gen-name{font-size:7px;letter-spacing:-.5px;}
     .seat-hp-col{font-size:7px;padding:1px 1px;}
     .seat-identity{top:11px;width:10px;height:10px;}
@@ -897,7 +910,7 @@
        "?"的选择器同样要带 .seat 前缀提高优先级,否则会被靠后的通用 .info-badge 基础
        规则(22px)按源码顺序盖掉(见上面 .seat .seat-info-badge 的说明)。 */
     .seat-left{top:17px;}
-    .seat-faction{width:12px;height:12px;}
+    .seat-faction{width:12px;height:12px;font-size:9px;}
     .seat-gen-name{font-size:10px;}
     .seat-identity{top:17px;width:13px;height:13px;}
     .seat .seat-info-badge{top:33px;width:12px;height:12px;font-size:8px;}
@@ -919,7 +932,7 @@
     .table-card-face{font-size:12px;}
     .seat-title{font-size:9px;}
     .seat-left{top:15px;}
-    .seat-faction{width:11px;height:11px;}
+    .seat-faction{width:11px;height:11px;font-size:8px;}
     .seat-gen-name{font-size:9px;}
     .seat-identity{top:15px;width:12px;height:12px;}
     .seat .seat-info-badge{top:29px;width:11px;height:11px;font-size:7px;}
@@ -1348,16 +1361,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=168"></script>
-<script src="data.js?v=168"></script>
-<script src="room-lifecycle.js?v=168"></script>
-<script src="game.js?v=168"></script>
-<script src="weapons.js?v=168"></script>
-<script src="skills.js?v=168"></script>
-<script src="render.js?v=168"></script>
-<script src="render-table.js?v=168"></script>
-<script src="render-hand.js?v=168"></script>
-<script src="render-controls.js?v=168"></script>
-<script src="render-log.js?v=168"></script>
+<script src="config.js?v=169"></script>
+<script src="data.js?v=169"></script>
+<script src="room-lifecycle.js?v=169"></script>
+<script src="game.js?v=169"></script>
+<script src="weapons.js?v=169"></script>
+<script src="skills.js?v=169"></script>
+<script src="render.js?v=169"></script>
+<script src="render-table.js?v=169"></script>
+<script src="render-hand.js?v=169"></script>
+<script src="render-controls.js?v=169"></script>
+<script src="render-log.js?v=169"></script>
 </body>
 </html>
