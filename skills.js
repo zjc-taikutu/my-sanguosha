@@ -2006,6 +2006,10 @@ function startSanyao(g, seat) {
 function respondSanyao(cardType, cardIdxOrSlot) {
   tx(g => {
     if(!g.pending || g.pending.type !== 'sanyao' || g.phase !== 'sanyao') return g;
+    // 调用者身份守卫:只有发动散谣的马谡本人(g.pending.from)能替自己选弃哪张牌。
+    // 函数体内部一律用 g.pending.from 取当事人(不是 to,散谣里响应者字段是 from),
+    // 和 respondTiaoxinChoice 同一范式,字段名按本函数实际读取的对象来定,别照抄挑衅的 to。
+    if(g.pending.from !== mySeat) return g;
     const p = g.players[g.pending.from];
     if(!p || !p.alive) return g;
     const targetSeat = g.pending.target;
@@ -2049,7 +2053,9 @@ function respondSanyao(cardType, cardIdxOrSlot) {
 // 响应散谣目标选择
 function respondSanyaoTarget(targetSeat) {
   tx(g => {
-    if(g.phase !== 'sanyaoChooseTarget') return g;
+    if(g.phase !== 'sanyaoChooseTarget' || !g.pending) return g;
+    // 调用者身份守卫:同 respondSanyao,只有发动散谣的马谡本人(g.pending.from)能选目标。
+    if(g.pending.from !== mySeat) return g;
     if(!g.pending.candidates.includes(targetSeat)) return g;
     g.pending = { type: 'sanyao', from: g.pending.from, target: targetSeat };
     g.phase = 'sanyao';
