@@ -294,15 +294,17 @@ function respondPickLordGeneral(generalId){
     const lord = getLordSeat(g);
     if(lord!==mySeat) return g;
     const me = g.players[mySeat];
-    if(!me || me.general || !Array.isArray(me.generalChoices) || !me.generalChoices.includes(generalId)) return g;
+    if(!me || me.general) return g;
     if(!GENERALS[generalId]) return g;
+    // 正式 UI 只点候选;调试入口可传池外 id(与 debugPickGeneral 同策略)
     me.general = generalId;
     me.generalChoices = null;
     // 主公武将对全场立刻可见,日志可写武将名
     g.log = pushLog(g.log, me.name+' 选择了武将【'+GENERALS[generalId].name+'】');
     const pool5 = Array.isArray(g.lordGeneralPool) ? g.lordGeneralPool : [];
+    // 池外调试选将:剩余池 = 全部武将去掉已选
     const leftover = pool5.filter(id=>id!==generalId);
-    const unused = Object.keys(GENERALS).filter(id=>!pool5.includes(id));
+    const unused = Object.keys(GENERALS).filter(id=>id!==generalId && !pool5.includes(id));
     const rest = [...leftover, ...unused].sort(()=>Math.random()-0.5);
     const OTHER_PICK = 3;
     let k = 0;
