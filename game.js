@@ -1659,10 +1659,15 @@ function askNextGuidu(g, currentReplaceCard = null) {
       g.pending = null;
       return finishGuidu(g, pending.judgedSeat, currentReplaceCard, pending.resume);
     } else {
-      // 无人发动鬼道
+      // 无人发动鬼道:必须用原判定牌(pending.judgeCard,从未被替换过)接回原判定的收尾流程——
+      // 和 respondGuicai 找不到下一个鬼才候选人时 finishGuicai(g, g.pending.judgeCard) 同一
+      // 处理方式,不能直接清空 pending/phase 了事。这里曾经就是直接清空,导致任何判定(八卦阵/
+      // 延时锦囊/铁骑/洛神/双雄/刚烈/悲歌/雷击等,只要走 maybeGuidu 这个统一入口的判定类型)
+      // 只要被问过"是否发动鬼道"、最终没有人真的换牌,原判定就会被整个静默吞掉——牌从判定区
+      // 消失、效果完全不执行,还不报错也不卡死,表现为"看起来正常但效果凭空消失"。这是系统级
+      // 缺陷,影响面覆盖全部判定类型,不止张角自己的雷击。
       g.pending = null;
-      g.phase = 'play';
-      return g;
+      return finishGuidu(g, pending.judgedSeat, pending.judgeCard, pending.resume);
     }
   });
 }
