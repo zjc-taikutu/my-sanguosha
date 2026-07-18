@@ -365,6 +365,14 @@
   .faction-wu{ background:#5f7a5a; }  /* 吴·玉绿(=--jade) 白字4.75 */
   .faction-qun{ background:#7d5f2a; }  /* 群·加深金 白字5.93 */
   .faction-jin{ background:#5a3a7a; }  /* 晋·深紫 白字9.05(预留) */
+  /* .inline-faction(第3步·3a/3b):势力小色块,和 .seat-faction 共用 .faction-* 配色/对比度,
+     但用于文字行内联展示(#myGeneral、说明弹窗),不是卡片绝对定位——尺寸按行内文字调小,
+     margin 撑开与相邻文字的间距,vertical-align 让色块和同一行的汉字基线对齐不错位。 */
+  .inline-faction{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:1.35em; height:1.35em; border-radius:3px; color:#fff; font-weight:700;
+    font-size:.72em; line-height:1; vertical-align:-.15em; margin:0 3px;
+  }
   /* 武将名竖排:writing-mode:vertical-rl 让字符纵向堆叠,text-orientation:upright
      保证汉字保持正常朝向(不随竖排旋转90度)。现在是 .seat-left 这个 flex 列里的一项
      (排在势力占位之下、血量之上),不再自己写绝对定位。固定字号(非动态测量)——武将名
@@ -998,6 +1006,7 @@
     max-height:82vh;overflow:auto;padding:18px 18px 22px;position:relative;color:var(--paper);}
   .info-panel h3{color:var(--gold);margin:0 0 10px;font-size:20px;padding-right:36px;}
   .info-panel .info-body{font-size:16px;line-height:1.65;}
+  .info-faction-line{margin-bottom:8px;color:var(--paper-dim);font-size:14px;}
   .info-panel .info-close{position:absolute;top:10px;right:12px;width:36px;height:36px;
     border:1px solid var(--line);background:transparent;color:var(--paper);font-size:18px;cursor:pointer;}
   .info-panel .sec{margin:16px 0 6px;color:var(--gold);font-weight:700;font-size:16px;border-bottom:1px solid var(--line);padding-bottom:4px;}
@@ -1361,16 +1370,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=172"></script>
-<script src="data.js?v=172"></script>
-<script src="room-lifecycle.js?v=172"></script>
-<script src="game.js?v=172"></script>
-<script src="weapons.js?v=172"></script>
-<script src="skills.js?v=172"></script>
-<script src="render.js?v=172"></script>
-<script src="render-table.js?v=172"></script>
-<script src="render-hand.js?v=172"></script>
-<script src="render-controls.js?v=172"></script>
-<script src="render-log.js?v=172"></script>
+<script src="config.js?v=173"></script>
+<script src="data.js?v=173"></script>
+<script src="room-lifecycle.js?v=173"></script>
+<script src="game.js?v=173"></script>
+<script src="weapons.js?v=173"></script>
+<script src="skills.js?v=173"></script>
+<script src="render.js?v=173"></script>
+<script src="render-table.js?v=173"></script>
+<script src="render-hand.js?v=173"></script>
+<script src="render-controls.js?v=173"></script>
+<script src="render-log.js?v=173"></script>
 </body>
 </html>

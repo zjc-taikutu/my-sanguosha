@@ -489,13 +489,21 @@ function renderPickGeneral(g, c){
     me.generalChoices.forEach(id=>{
       const gen=getGeneral(id); if(!gen) return;
       const card=document.createElement('div'); card.className='general-pick-card';
+      // 势力标识(第3步·3c):放进 .general-pick-info 文字区,不叠在 .avatar-box 缩略图上——
+      // 这张卡的头像是独立侧边缩略图、文字信息区背景是卡片自己的纯色(#1d1916),不是文字叠图片
+      // (和座位卡 .seat-art 那套刻意不共用,见上面已有的注释)。选将阶段还没正式声明技能借用,
+      // 直接查 gen.faction(候选武将自己的势力),不经过 generalFaction(player)——这里描述的是
+      // "这张候选卡代表的武将",不是"me 当前生效的武将",语义和 showGeneralInfo(id) 那次的
+      // 判断是一样的:调用方已经用具体 id 定死了要描述谁,不存在跟随化身的二义性。
+      const factionKey = gen.faction && FACTION_LABEL[gen.faction] ? gen.faction : null;
+      const factionChip = factionKey ? '<span class="inline-faction faction-'+factionKey+'">'+FACTION_LABEL[factionKey]+'</span>' : '';
       card.innerHTML =
         '<div class="avatar-box">'
           +'<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
           +'<div class="avatar-placeholder" style="display:none">'+escapeHtml(gen.name)+'</div>'
         +'</div>'
         +'<div class="general-pick-info">'
-          +'<div class="general-pick-name">'+escapeHtml(gen.name)+' · '+escapeHtml(gen.skill)+'</div>'
+          +'<div class="general-pick-name">'+escapeHtml(gen.name)+factionChip+' · '+escapeHtml(gen.skill)+'</div>'
           +'<div class="general-pick-desc">'+escapeHtml(gen.desc||'(暂无说明)')+'</div>'
         +'</div>';
       card.onclick=()=>respondPickGeneral(id);

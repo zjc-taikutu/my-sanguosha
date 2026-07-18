@@ -61,8 +61,16 @@ function renderHand(g){
   // 自己的武将信息(技能名+描述);未开局或无将时留空
   const myGenEl=document.getElementById('myGeneral');
   const myGen=g.started?getGeneral(me.general):null;
+  // 势力标识(第3步·3a):小色块+单字,和座位卡同一套视觉语言(.faction-* 配色、FACTION_LABEL
+  // 单字),只是尺寸为文字行内联大小(不是卡片色块那种绝对定位)。generalFaction(me) 跟随左慈
+  // 【化身】,和座位卡表现一致。用 g.started 门控(myGen 本身已经是这个条件),不会在选将阶段
+  // 提前泄露。
+  const myFactionKey = myGen ? generalFaction(me) : null;
+  const myFactionChip = (myFactionKey && FACTION_LABEL[myFactionKey])
+    ? '<span class="inline-faction faction-'+myFactionKey+'">'+FACTION_LABEL[myFactionKey]+'</span>'
+    : '';
   myGenEl.innerHTML = myGen
-    ? '你的武将：'+escapeHtml(myGen.name)+' · '+escapeHtml(myGen.skill)+'<span style="color:var(--paper-dim)">（'+escapeHtml(myGen.desc)+'）</span>'
+    ? '你的武将：'+escapeHtml(myGen.name)+myFactionChip+' · '+escapeHtml(myGen.skill)+'<span style="color:var(--paper-dim)">（'+escapeHtml(myGen.desc)+'）</span>'
     : '';
   // 响应阶段"多候选可选"判断:这一轮渲染需要的角色(role)和候选数量在循环外算一次,不必每张
   // 手牌各自重算一遍。只有候选>1(真实牌+龙胆/武圣/倾国转化)才需要玩家先点选具体一张;候选

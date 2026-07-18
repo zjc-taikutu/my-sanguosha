@@ -756,6 +756,11 @@ function generalFaction(player){
   const gen = player && getGeneral(player.general);
   return (gen && gen.faction) || 'qun';
 }
+// FACTION_LABEL:势力值(wei/shu/wu/qun/jin)→显示单字(魏/蜀/吴/群/晋)。唯一定义,座位卡/
+// #myGeneral文字行/武将说明弹窗/选将候选卡都查这一张表,不各自重复一份(原来只在 renderSeatCard
+// 里有一份局部拷贝,现在提到这里做单一来源;色块颜色仍在 index.html 的 .faction-* 里定义,
+// 不重复到这里)。
+const FACTION_LABEL = { wei:'魏', shu:'蜀', wu:'吴', qun:'群', jin:'晋' };
 // 装备来源的能力:任一已装备的牌在 EQUIPS 里声明了 cap===该能力(如诸葛连弩 cap:'unlimitedSha')。
 function equipHasCap(player, cap){
   if(!player || !player.equips) return false;

@@ -565,8 +565,8 @@ function renderSeatCard(g, seat, isSelf){
   // 显示条件和头像/武将名同一个 avatarReady(g.started && gen):三选一选将阶段选完但未正式
   // 开局前仍是隐藏信息,不能提前泄露势力(和头像那次修过的信息泄露bug同一条件)。
   // 不透明色块:对比度恒定、不随背后立绘明暗漂移(中央区角标那次的教训)。class 里的
-  // faction-<势力> 决定色块颜色(见 index.html)。FACTION_LABEL 缺失时兜底不渲染,不崩。
-  const FACTION_LABEL = { wei:'魏', shu:'蜀', wu:'吴', qun:'群', jin:'晋' };
+  // faction-<势力> 决定色块颜色(见 index.html)。FACTION_LABEL(data.js,单一来源,第3步起
+  // 座位卡/#myGeneral/说明弹窗/选将候选卡共用同一张表)缺失时兜底不渲染,不崩。
   const factionKey = avatarReady ? generalFaction(p) : null;
   const factionBadge = (factionKey && FACTION_LABEL[factionKey])
     ? '<div class="seat-faction faction-'+factionKey+'">'+FACTION_LABEL[factionKey]+'</div>'
@@ -1291,7 +1291,23 @@ function showInfo(title, bodyHtml){
 }
 function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.add('hidden'); m.innerHTML=''; logModalOpen=false; }
 // 供座位卡内联触发(武将/装备,均公开信息);inline onclick 已 stopPropagation,不触发选目标
-function showGeneralInfo(id){ const gen=getGeneral(id); if(gen) showInfo(gen.name+' · '+gen.skill, escapeHtml(gen.desc||'(暂无说明)')); }
+// showGeneralInfo(id):势力信息直接查 getGeneral(id).faction,不经过 generalFaction(player)——
+// 这个函数的两个调用点(座位卡自己的"?"角标 / 化身行的"?")传入的 id 本身就已经是"该显示
+// 哪个武将的信息"这个问题的答案(前者是 p.general 本身、后者是 p.huashenGeneral),不存在
+// "要不要跟随化身"的二义性:座位卡"?"传的是玩家自己的 general(左慈点自己的"?"传'zuoci'、
+// 显示群),化身行"?"传的是被借用武将的 id(如'caocao'、显示魏)——caller 已经选好了具体
+// 描述哪个武将,这里只负责把这一个武将自己的势力如实显示出来。
+// 势力块放进 body 而不是 title:showInfo 会对 title 整体做 escapeHtml,塞进去的 <span> 标签
+// 会被转义成字面文本、色块渲染不出来;body 是原样插入(不转义),放这里才能正常显示。
+function showGeneralInfo(id){
+  const gen=getGeneral(id);
+  if(!gen) return;
+  const factionKey = gen.faction && FACTION_LABEL[gen.faction] ? gen.faction : null;
+  const factionLine = factionKey
+    ? '<div class="info-faction-line">势力：<span class="inline-faction faction-'+factionKey+'">'+FACTION_LABEL[factionKey]+'</span></div>'
+    : '';
+  showInfo(gen.name+' · '+gen.skill, factionLine+escapeHtml(gen.desc||'(暂无说明)'));
+}
 function showEquipInfo(name){ const e=getEquip(name); showInfo(name, escapeHtml((e&&e.desc)||'(暂无说明)')); }
 function showDelayInfo(name){ showInfo(name, escapeHtml(getCardDesc(name)||'(暂无说明)')); }
 // 帮助按钮:一次性列出全部牌/武将/装备说明
