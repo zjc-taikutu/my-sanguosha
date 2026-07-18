@@ -21,7 +21,14 @@ function maybeStartQilin(g, attackerSeat, victimSeat){
     g.log=pushLog(g.log, attacker.name+' 的【麒麟弓】发动,选择弃置 '+victim.name+' 的哪匹坐骑…');
     return true;
   }
-  discardMount(g, victimSeat, hasP?'plus1':'minus1', attacker.name);  // 一匹:直接弃
+  // 一匹:直接弃。discardMount 会触发目标的 onLoseEquip 钩子——若目标是凌统、旋风在杀结算中途
+  // 挂起了 xuanfengPick pending,必须把它上报给调用方(respondShan)让它 return、别再往下跑
+  // g.pending=null;finishSingleShaTarget 把旋风覆盖掉;同时给这个 pending 挂上 resume={type:'sha'},
+  // 旋风结束后由 executeXuanfeng/cancelXuanfeng 走 resumeAfterInterrupt 接回杀收尾(方天队列/play)。
+  // 写法完全照抄 consumePendingHookQueue 的 pendingBefore 快照约定,零新模式。
+  const pendingBefore = g.pending;
+  discardMount(g, victimSeat, hasP?'plus1':'minus1', attacker.name);
+  if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return true; }
   return false;
 }
 // 弃置某玩家一匹坐骑进弃牌堆 + 触发失去装备钩子(枭姬等)。坐骑公开,日志写牌名。
@@ -39,7 +46,11 @@ function qilinResolve(slot){
     if(!victim || !victim.alive || (slot!=='plus1'&&slot!=='minus1') || !victim.equips[slot]){
       g.pending=null; g.phase='play'; return g; // 失效兜底
     }
+    // 双马选一同 maybeStartQilin 单马:discardMount 触发目标 onLoseEquip,旋风挂起就 attach
+    // resume={type:'sha'} 并保留(return),不再覆盖成 play。
+    const pendingBefore = g.pending;
     discardMount(g, victimSeat, slot, attacker?attacker.name:'');
+    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; }
     g.pending=null; g.phase='play';
     return g;
   });

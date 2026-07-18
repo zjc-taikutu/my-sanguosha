@@ -1912,22 +1912,30 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
     if(optCount === 1) {
       // 唯一选项:自动弃置
       const info = {trick:'猛进', from, to};
+      // 猛进弃的若是凌统的装备,applyTrickOnEquip 会触发其 onLoseEquip → 旋风在杀结算中途挂起。
+      // 快照 pending,弃置后若挂起了新 pending 就 attach resume={type:'sha'} 并 return——旋风结束后
+      // 走 resumeAfterInterrupt 接回杀收尾,不能继续往下跑 remainingAvailable/finishSingleShaTarget
+      // 把旋风覆盖掉。(applyTrickOnHand 弃手牌不触发 onLoseEquip,快照对它天然是"无变化"。)
+      // 【v1 已知限制】若此刻还有 remainingAvailable(青龙/贯石斧),旋风续接走 {type:'sha'} 尾巴会
+      // 跳过它们(庞德带青龙+猛进拆凌统装备时丢一次青龙再杀),见 CLAUDE.md 待优化点,本次不做 v2。
+      const pendingBefore = g.pending;
       if(handCount > 0) {
         applyTrickOnHand(g, info);
       } else if(equipSlots.length > 0) {
         applyTrickOnEquip(g, info, equipSlots[0]);
       }
-      
+
       g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' 一张牌');
       markSkillSound(g, '猛进');
-      
+
+      if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return; } // 旋风挂起,保留
       // 处理完猛进后,检查是否还有其他效果需要处理
       const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
         if(id === 'qinglong') return canStartQinglong(g, from);
         if(id === 'guanshifu') return canStartGuanshifu(g, from);
         return false;
       });
-      
+
       if(remainingAvailable.length > 0) {
         continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
       } else {
@@ -2019,19 +2027,23 @@ function mengjinPick(choice) {
     }
     
     if(!available.includes(choice)) return g;
-    
+
     const info = {trick:'猛进', from, to};
+    // 同 auto-single:快照 pending,弃装备触发凌统 onLoseEquip → 旋风挂起就 attach resume 并 return,
+    // 不能往下 g.pending=null 把旋风覆盖掉(applyTrickOnHand 弃手牌不触发,快照对它无变化)。
+    const pendingBefore = g.pending;
     if(choice === 'hand') {
       applyTrickOnHand(g, info);
     } else {
       applyTrickOnEquip(g, info, choice);
     }
-    
+
     g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' '+ (choice==='hand'?'一张手牌':'的装备【'+(target.equips[choice]?.name||choice)+'】'));
     markSkillSound(g, '猛进');
-    
+
+    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; } // 旋风挂起,保留
     g.pending = null;
-    
+
     // 处理完猛进后,检查是否还有其他效果需要处理
     const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
       if(id === 'qinglong') return canStartQinglong(g, from);
@@ -5146,15 +5158,22 @@ function executeXuanfeng(g) {
   // 清理pending状态
   const endingSeat = (pending.endingSeat != null) ? pending.endingSeat : pending.from;
   const trigger = pending.trigger;
+  const resume = pending.resume; // 杀结算中触发时(麒麟弓/猛进)由注入点挂上的续接标记,见下
   g.pending = null;
   markSkillSound(g, '旋风');
-  // 弃牌阶段结束触发的旋风:继续举荐/据守;装备触发的旋风回原 phase
+  // 旋风收尾分三种去向:
+  // ①弃牌阶段结束触发:继续举荐/据守(原有);
+  // ②杀结算中途触发(麒麟弓/猛进):pending.resume 存在 → 走 resumeAfterInterrupt 接回被打断的杀
+  //   收尾尾巴(方天队列推进 / 回 play),和濒死/遗计打断杀命中时完全同一套 resume 范式,零新模式;
+  // ③独立失去装备触发(顺手/拆桥/借刀):无 resume → 恢复到失去装备那一刻的休止相(原有,不变)。
   if(trigger === 'discard'){
     continueEndPhaseAfterXuanfeng(g, endingSeat);
+  } else if(resume){
+    resumeAfterInterrupt(g, resume, endingSeat);
   } else {
     g.phase = pending.previousPhase || g.phase;
   }
-  
+
   return g;
 }
 
@@ -5166,10 +5185,15 @@ function cancelXuanfeng() {
       const pending = g.pending;
       const endingSeat = (pending.endingSeat != null) ? pending.endingSeat : pending.from;
       const trigger = pending.trigger;
+      const resume = pending.resume; // 同 executeXuanfeng:杀结算中触发时的续接标记
       g.pending = null;
       g.log = pushLog(g.log, me.name + ' 取消发动【旋风】');
+      // 三种去向同 executeXuanfeng——"选择不发动"和"弃满2张"两条收尾路径必须一致:无论旋风有没有
+      // 实际弃牌,被打断的杀收尾都必须继续,否则会漏 checkWin/方天队列、软锁。
       if(trigger === 'discard'){
         continueEndPhaseAfterXuanfeng(g, endingSeat);
+      } else if(resume){
+        resumeAfterInterrupt(g, resume, endingSeat);
       } else {
         g.phase = pending.previousPhase || 'play';
       }
