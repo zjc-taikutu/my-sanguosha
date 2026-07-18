@@ -172,8 +172,6 @@
 - **颜良文丑【双雄】的座位按钮会渲染在服务端必然拒绝的座位上（既有 bug，点了没反应）**：`render.js` 里那个"双雄:决斗"按钮的渲染条件**手写了一份简化版的目标校验**——只查了 `hasCap(p,'kongcheng') && (p.hand||[]).length===0`（空城），但 `CARD_PLAYS['决斗'].canTarget` 真正的校验还包括 `isZhichiImmune(g,targetSeat,card)`（陈宫【智迟】免疫）和 `hasCap(target,'weimu') && isBlackTactics(card)`（贾诩【帷幕】不能成为黑色锦囊目标）。所以当目标是智迟状态下的陈宫、或持黑色牌打贾诩时，按钮照样渲染出来、点下去被 `playCard` 的 `spec.canTarget` 静默拒绝，表现为"点了没反应"。**正确写法是直接调 `CARD_PLAYS['决斗'].canTarget(...)`**（服务端 `playCard` 校验的就是这个函数，UI 和服务端口径不可能分叉），而不是自己重算一遍——**这次新写的"武圣:杀"座位按钮就是按这个正确写法做的**（完整对齐 `playCard` 的三件事：非自己 / 目标存活 / `spec.canTarget`），可以直接照抄。发现于"武圣红色 target:true 牌当杀"那次任务（设计阶段对照双雄先例时发现），按"一次只改一件事"当次未修。**以后新增任何"座位上的独立按钮"，目标校验一律直接调对应 `CARD_PLAYS[actionId].canTarget` + 复刻 `playCard` 的非自己/存活两项，不要手写简化版。**
 
 
-- **公孙瓒【趫猛】/祝融【烈刃】拿走目标装备时,缺失 `triggerHook(g, targetSeat, 'onLoseEquip', {count})` 调用——独立既有 bug,影响所有依赖 onLoseEquip 的技能(旋风/枭姬等),不止旋风**：`pickQiaomengEquip`(趫猛,`skills.js`)和 `respondLieRen`(烈刃拼点赢拿装备,`skills.js`)拿/弃目标装备时都是直接 `target.equips[slot]=null`,**从不调用 `triggerHook(onLoseEquip)`**——所以公孙瓒趫猛/祝融烈刃拿走你的装备时,你的孙尚香【枭姬】现在也不摸2张、凌统【旋风】也不触发。发现于"凌统旋风 resume 续接"那次任务(去找趫猛/烈刃注入点时才发现它们压根不触发钩子)。**修复分两步、放独立任务**:①补 `triggerHook(g, targetSeat, 'onLoseEquip', {count:1})`(会连带让枭姬对趫猛/烈刃摸2张,这是修对而不是新增副作用);②**重新核实**这两处的触发时机是否也在"杀结算中途"(趫猛在杀命中/被闪抵消后的效果调度里、烈刃在拼点赢之后),若是则同样需要 `resume={type:'sha'}` 续接(照抄麒麟弓/猛进这次的写法),不能假设和麒麟弓/猛进的时机一样。
-
 ## 五、当前进度
 
 **已完成**：
@@ -725,6 +723,14 @@ const CARD_PINYIN = {
   **【v1 已知限制,记入待优化点】**:`resume={type:'sha'}` 接回的是 `finishSingleShaTarget` 尾巴,**不重跑麒麟弓之后的趫猛/烈刃、或猛进之后的青龙/贯石斧**。①麒麟弓+趫猛/烈刃同触发需攻击者多 caps=左慈化身,astronomically rare;②**猛进+青龙更现实**——庞德可装青龙偃月刀,猛进拆凌统装备触发旋风时会跳过庞德的青龙"再来一杀"(不是软锁,是丢一次合法效果)。完整支持需 v2 的 `shaOffset` resume 分支(重跑 `continueShaOffsetEffects` 的 remaining),本次不做。
   **独立失去装备三入口(顺手/拆桥/借刀)不受影响**:它们不 attach resume,`pending.resume` 为 undefined → 走 `previousPhase` 原路径,行为完全不变(实测锁定)。
   **测试**(`run_xuanfeng_resume_test.js`,25项,未落盘):麒麟弓单马/双马、猛进 auto-single/pick 各自"旋风挂起+resume.type===sha";两种收尾(弃满2张→play+目标真弃2张 / 不发动→play)不软锁;方天嵌套续接推进下一目标;独立失去装备回归(resume undefined、previousPhase=play);已知限制场景(庞德青龙+猛进→不软锁);B路径回归(弃牌阶段 trigger==='discard'、无 resume)。`git stash` 确认修复前9项机制断言变红、独立失去装备/B路径在前后都绿。既有回归(上次旋风独立入口套件已更新麒麟弓那两条过时断言 + 李典 + 本轮六套)全绿。
+
+- **修复公孙瓒【趫猛】/祝融【烈刃】拿走目标装备时缺失 `onLoseEquip` 触发,顺带修好一个独立的既有 bug(方天画戟队列在这两个技能结算后卡死)**。上次记为待优化点,本次排查确认后按方案A实现。
+  **排查结论:两者都是 mid-杀**——调用位置和麒麟弓/猛进完全同一处（`respondShan` 不闪分支,`dealDamage` 之后、`finishSingleShaTarget` 之前:`if(maybeStartQiaomeng(...)) return g; if(maybeStartLieRen(...)) return g;`）。真实 dump 确认 `onLoseEquip` 完全没触发（枭姬摸牌数为0）。
+  **排查中发现的更深问题(不是 naive 补 triggerHook 就能解决的原因)**：`pickQiaomengEquip`/`respondLieRen` 的收尾此前是裸的 `g.pending=null;g.phase='play'`,从不调用 `finishSingleShaTarget`。这带来两个后果:①若直接在装备移除后插 `triggerHook`,此刻 `g.phase` 还是 `'qiaomengPickEquip'`/`'lieRenRespond'` 这种**死相**（对应 pending 已经不存在了),旋风若不发动、`previousPhase` 会捕获到这个死相并恢复回去 → 软锁(和顺手/拆桥/借刀当初的坑同构);②`checkWin`/方天画戟队列推进被完整跳过——真实 dump 证实（方天画戟+趫猛组合下,拿走目标装备后队列卡死,座位2永远不会被问）。
+  **实现（方案A,套用麒麟弓/猛进模式,零新写法）**：①**先 reorder**——装备移除后立即 `g.pending=null;g.phase='play'`,再触发 `triggerHook`,让钩子捕获正确的休止相；②`pendingBefore` 快照，钩子挂起新 pending（旋风）就 `resume={type:'sha'}` + return，不覆盖；③**收尾从裸 `phase='play'` 改成调用 `finishSingleShaTarget(g)`**（麒麟弓/猛进本来就这么收尾）——不是新设计，是让这两个函数走上早就存在的正确路径，**顺带修复了方天画戟队列卡死**这个独立 bug（真实 dump 验证：非旋风场景下，趫猛/烈刃拿走方天目标1的装备后，队列正确推进到座位2）。烈刃额外处理：拼点赢拿到的牌可能来自手牌也可能来自装备区，只有 `fromEquip===true`（真的来自装备区）时才触发 `onLoseEquip`。
+  **枭姬连带修复**：趫猛/烈刃拿走孙尚香装备后正确摸2张（实测锁定，属于修对而非引入副作用）。
+  **v1 已知限制沿用**：`resume={type:'sha'}` 不重跑趫猛/烈刃之后可能存在的其它效果——当前项目里趫猛/烈刃之后没有类似"猛进+青龙"那种链式效果，暂无实际影响；若未来出现同类组合，按同一原则记入待优化点即可。
+  **测试**（`run_qiaomeng_lieren_test.js`，25项，未落盘）：趫猛/烈刃核心触发+resume挂起、两种旋风收尾（弃满2张/不发动）不软锁、枭姬摸2张对照、方天队列非旋风场景纯推进（独立bug修复验证）、方天队列+旋风同时触发的复合场景、死相软锁回归（非相关目标场景确认落到 play 而非死相）、既有入口回归（顺手拆桥/麒麟弓/猛进不受影响）。`git stash` 确认修复前11项机制断言变红（onLoseEquip未触发、resume为null、枭姬未摸牌、方天队列卡在play且to为null），回归类断言在前后都绿。既有回归（本轮旋风套件+李典+六套）全绿。
 
 **可能的下一步**（待定）：
 - 响应超时/托管（修挂机卡死隐患）。

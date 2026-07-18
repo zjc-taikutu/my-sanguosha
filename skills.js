@@ -2703,6 +2703,17 @@ function pickQiaomengEquip(slot) {
     // 判断是否为坐骑牌
     const isMount = isMountCard(card);
     
+    // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条】趫猛拿走目标装备是杀结算中途的
+    // mid-杀效果(和麒麟弓/猛进同一位置:respondShan 的不闪分支,finishSingleShaTarget 之前)。
+    // 必须先把休止相/pending 重置成"到站"状态,再触发 onLoseEquip——否则钩子(凌统【旋风】)
+    // 捕获的 previousPhase 会是此刻的 'qiaomengPickEquip'(死相,pending 已经不在了),旋风
+    // 若不发动、恢复到这个死相就会软锁。重置后才触发钩子,钩子若挂起了新 pending(旋风)就
+    // attach resume={type:'sha'} 并 return,不再往下调用 finishSingleShaTarget 把它覆盖掉
+    // (遗计/濒死/麒麟弓/猛进同一套 pendingBefore 快照约定,零新写法)。
+    // 收尾从裸的 phase='play' 改成调用 finishSingleShaTarget(g)(和麒麟弓/猛进一致)——这不是
+    // 新增功能,是让趫猛走上这两个函数本来就该走的正确收尾路径,顺带修复了此前"从不调用
+    // finishSingleShaTarget、跳过 checkWin/方天画戟队列推进"这个独立既有 bug(方天画戟+趫猛
+    // 组合下,拿走目标装备后方天队列会永久卡死,不会推进到下一目标)。
     if (isMount) {
       // 获得坐骑牌：直接置入手牌
       target.equips[slot] = null;
@@ -2717,11 +2728,15 @@ function pickQiaomengEquip(slot) {
       g.log = pushLog(g.log, source.name + ' 弃置 ' + target.name + ' 的装备牌【' + card.name + '】');
       markSkillSound(g, 'qiaomeng');
     }
-    
-    // 清理状态
+
+    // 清理状态(先重置,让 onLoseEquip 钩子捕获到正确的休止相)
     g.pending = null;
     g.phase = 'play';
-    
+    const pendingBefore = g.pending; // = null
+    triggerHook(g, pending.targetSeat, 'onLoseEquip', {count:1});
+    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; } // 旋风等钩子挂起了,保留不覆盖
+    finishSingleShaTarget(g); // 方天画戟排队中还有下一个则继续,否则回到出牌阶段
+
     return g;
   });
 }
@@ -3512,7 +3527,8 @@ function respondLieRen(cardIndex) {
         
         // 从目标处移除该牌
         let cardFound = false;
-        
+        let fromEquip = false; // 是否是从装备区移除的——只有这种情况才触发 onLoseEquip
+
         // 先尝试从手牌中移除
         if (target.hand) {
           const handIndex = target.hand.findIndex(c => c === cardToGain);
@@ -3521,23 +3537,40 @@ function respondLieRen(cardIndex) {
             cardFound = true;
           }
         }
-        
+
         // 再尝试从装备区中移除
         if (!cardFound && target.equips) {
           for (const slot of Object.keys(target.equips)) {
             if (target.equips[slot] === cardToGain) {
               target.equips[slot] = null;
               cardFound = true;
+              fromEquip = true;
               break;
             }
           }
         }
-        
+
         if (cardFound) {
           // 祝融获得该牌
           if (!source.hand) source.hand = [];
           source.hand.push(cardToGain);
           g.log = pushLog(g.log, `${source.name} 【烈刃】拼点赢,获得 ${target.name} 的一张牌【${cardToGain.name}】`);
+        }
+
+        // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条】烈刃拼点赢拿走目标装备时同样是
+        // mid-杀效果(respondShan 不闪分支,finishSingleShaTarget 之前)。fromEquip 为真时才是真的
+        // "失去装备区的牌"(拿的若是手牌则不触发)。同 pickQiaomengEquip:先重置 pending/phase 到
+        // 'play',让钩子(旋风)捕获正确休止相而不是死相 'lieRenRespond';钩子挂起新 pending 就
+        // attach resume={type:'sha'} 并 return;收尾走 finishSingleShaTarget(而不是裸 phase='play'),
+        // 顺带修复此前跳过 checkWin/方天画戟队列推进的独立既有 bug。
+        if (fromEquip) {
+          g.pending = null;
+          g.phase = 'play';
+          const pendingBefore = g.pending; // = null
+          triggerHook(g, mySeat, 'onLoseEquip', {count:1});
+          if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; } // 旋风等钩子挂起了,保留不覆盖
+          finishSingleShaTarget(g);
+          return g;
         }
       } else {
         g.log = pushLog(g.log, `${source.name} 【烈刃】拼点赢,但 ${target.name} 没有牌`);
@@ -3545,11 +3578,12 @@ function respondLieRen(cardIndex) {
     } else {
       g.log = pushLog(g.log, `${source.name} 【烈刃】拼点没赢`);
     }
-    
-    // 清理状态
+
+    // 清理状态(未走上面 fromEquip 分支的所有其它情况:拼点没赢/拿的是手牌/目标没牌)
     g.pending = null;
     g.phase = 'play';
-    
+    finishSingleShaTarget(g); // 同上,顺带修复方天画戟队列推进
+
     return g;
   });
 }
