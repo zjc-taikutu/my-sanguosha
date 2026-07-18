@@ -63,6 +63,12 @@ function normalize(g){
   if(g.luanwuResume && (typeof g.luanwuResume.sourceSeat!=='number' || !Array.isArray(g.luanwuResume.remainingSeats))){
     g.luanwuResume=null;
   }
+  // 夏侯渊【神速】:"视为杀"结算跨 pending 时用此字段接回链,和上面 g.luanwuResume 同一设计
+  // (不塞进 g.pending,避免被杀响应过程中打开的各种子阶段覆盖)。
+  if(g.shensuResume===undefined) g.shensuResume=null;
+  if(g.shensuResume && (typeof g.shensuResume.seat!=='number' || !g.players[g.shensuResume.seat] || typeof g.shensuResume.remaining!=='number')){
+    g.shensuResume=null;
+  }
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   // 许褚【裸衣】:本回合伤害加成标记。回合开始重置,旧存档缺失回退 false。
@@ -4196,6 +4202,12 @@ function respondYaowu(choice) {
 // 是否还有排队中的下一个目标,有则继续,没有(或本来就不是方天画戟触发的)才真正回到出牌阶段。
 function finishSingleShaTarget(g){
   if(checkWin(g)) return;
+  // 夏侯渊【神速】"视为使用一张杀"结算完毕后的收尾:g.shensuResume 和 g.fangtianQueue/
+  // g.luanwuResume 同一设计——放在 g 上而不是 g.pending 里,不受 resolveShaUse 替换
+  // g.pending 的影响。finishSingleShaTarget 是这张"视为杀"(不管中途有没有触发濒死/争议/
+  // 天香/制蛮/毅重/仁王盾/八卦阵等任意打断)彻底结算完毕的唯一收敛点,在这里做神速自己的
+  // 阶段跳转天然正确、不会被提前冲掉。详见 skills.js 的 respondShensuSha/finishShensuSha。
+  if(g.shensuResume){ finishShensuSha(g); return; }
   if(g.fangtianQueue){ advanceFangtianQueue(g); return; }
   // 乱武借 resolveShaUse 出的杀结算完:接回乱武链
   if(g.luanwuResume){ continueLuanwuAfterSha(g); return; }

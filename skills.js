@@ -2535,71 +2535,99 @@ function discardShensuCardFromHand(g, seat, cardIndex) {
 }
 
 // 处理神速杀的目标选择
+// 【根因修复,见 CLAUDE.md「夏侯渊神速」条】resolveShaUse 内部(经 resolveShaUseNoLiuli→
+// continueShaAfterTieqi)会把 g.pending 整个替换成杀的标准响应结构(等待目标出闪/受伤;或
+// tieqi/liegong/guanxing 等其它子阶段),原实现在调用之后才读 g.pending.remaining——读到的
+// 已经不是这个 shensuSha pending 了,而且原实现无论 remaining 算出多少,都会在调用后
+// 立刻 g.pending=null 收尾,把刚建立起来的响应阶段直接冲掉,目标从未真正获得响应机会。
+// 修复不是简单地把 remaining 挪到调用前读(即使读对了数值,后面那段"立刻收尾"的代码本身
+// 依然会把响应阶段冲掉)——真正需要做的是让"这次杀处理完之后该怎么收尾"这件事,推迟到杀
+// 真正彻底结算完毕(不管中途有没有被濒死/争议/天香/制蛮/毅重/仁王盾/八卦阵等任意效果打断)
+// 那一刻才执行。做法是把这个信息存进 g.shensuResume(全局字段,不挂在 g.pending 上)——
+// 和 g.fangtianQueue/g.luanwuResume 同一设计(见 CLAUDE.md「方天画戟嵌套天然正确」条:
+// 队列/续接信息放在 g 上、不进被打断的局部栈,不受 g.pending 被谁替换的影响),配合
+// finishSingleShaTarget 新增的 g.shensuResume 检查——它是这张杀彻底结算完毕的唯一收敛点
+// (fangtianQueue/luanwuResume 也复用同一个收敛点),在这里做神速自己的阶段跳转天然正确。
 function respondShensuSha(targetSeat) {
   tx(g => {
     if (g.pending.type !== 'shensuSha' || g.pending.seat !== mySeat) return g;
-    
-    const me = g.players[mySeat];
+
     const target = g.players[targetSeat];
-    
+
     if (!target || !target.alive) return g;
-    
+
+    // 调用 resolveShaUse 之前先把需要的字段读出来存成局部变量/挪到 g.shensuResume,
+    // 不要指望调用后还能从 g.pending 读到这个 shensuSha pending 原来的东西。
+    const remaining = (g.pending.remaining || 1) - 1;
+    const fromShensu = g.pending.fromShensu;
+    g.shensuResume = { seat: mySeat, remaining, fromShensu };
+    g.pending = null; // 交给 resolveShaUse 自己决定这一刻该是什么 pending(和借刀杀人 respondJiedao 出杀分支同一写法)
+
     // 使用一张无距离限制的普通杀
-    const sha = { 
-      name: '杀', 
-      suit: '♠', 
-      rank: 2, 
+    const sha = {
+      name: '杀',
+      suit: '♠',
+      rank: 2,
       id: 'shensu_sha_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)
     };
-    
-    // 调用标准的杀处理函数
+
     // 神速的杀不计入出杀次数限制，所以传递 skipShaLimit 标记
     const shaInfo = {
       noDistance: true,
       fromShensu: true,
-      shensuType: g.pending.fromShensu,
+      shensuType: fromShensu,
       skipShaLimit: true
     };
-    
+
     resolveShaUse(g, g.players[mySeat], targetSeat, '无距离限制的【杀】', singleCardShaColor(sha), sha, shaInfo);
-    
-    // 减少剩余杀数量
-    let remaining = (g.pending.remaining || 1) - 1;
-    
-    if (remaining > 0) {
-      // 更新剩余数量，继续等待选择下一个目标
-      g.pending.remaining = remaining;
-      g.log = pushLog(g.log, me.name + ' 还需要使用' + remaining + '张无距离限制的普通【杀】');
-    } else {
-      // 完成所有杀的使用
-      g.pending = null;
-      g.shensuShaRemaining = 0;
-      
-      // 检查是否需要跳过阶段
-      if (g.shensuSkipJudgingAndDraw && g.shensuSkipPlay) {
-        // 同时发动了神速1和神速2
-        g.shensuSkipJudgingAndDraw = false;
-        g.shensuSkipPlay = false;
-        g.phase = 'discard';
-        g.log = pushLog(g.log, me.name + ' 【神速1+2】效果生效，跳过判定、摸牌和出牌阶段，进入弃牌阶段');
-      } else if (g.shensuSkipJudgingAndDraw) {
-        // 只发动了神速1
-        g.shensuSkipJudgingAndDraw = false;
-        g.phase = 'play';
-        g.log = pushLog(g.log, me.name + ' 【神速1】效果生效，跳过判定和摸牌阶段，进入出牌阶段');
-      } else if (g.shensuSkipPlay) {
-        // 只发动了神速2
-        g.shensuSkipPlay = false;
-        g.phase = 'discard';
-        g.log = pushLog(g.log, me.name + ' 【神速2】效果生效，跳过出牌阶段，进入弃牌阶段');
-      } else {
-        // 正常返回出牌阶段
-        g.phase = 'play';
-      }
-    }
-    
+
     return g;
   });
+}
+
+// finishShensuSha: g.shensuResume 存在时由 finishSingleShaTarget 调用——这张"视为杀"已经
+// 彻底结算完毕(命中/被闪抵消/被毅重仁王盾无效/等等,不管走了哪条子路径),现在才是真正安全
+// 执行神速自己的阶段跳转的时机。
+function finishShensuSha(g){
+  const resume = g.shensuResume;
+  g.shensuResume = null;
+  const seat = resume.seat;
+  const p = g.players[seat];
+  const remaining = resume.remaining;
+
+  if (remaining > 0) {
+    // 【断点2(shensuUsed共享总锁)修复前尚不可达】shensuShaRemaining 目前永远不会>1,
+    // 这个分支现在无法被真实场景触发——留着是让断点2修复后这里天然可用,不需要再回来改
+    // finishShensuSha 本身;行为已经过 vm 沙箱构造场景验证(状态转换正确、不抛异常),但
+    // 不代表真实"神速1+2"链路已经跑通,断点2那次任务需要专门为这条路径补真实场景测试。
+    g.shensuShaRemaining = remaining;
+    g.pending = { type: 'shensuSha', seat, remaining, noDistance: true, fromShensu: resume.fromShensu };
+    g.phase = 'shensuSha';
+    if (p) g.log = pushLog(g.log, p.name + ' 还需要使用' + remaining + '张无距离限制的普通【杀】');
+    return;
+  }
+
+  g.shensuShaRemaining = 0;
+  if (g.shensuSkipJudgingAndDraw && g.shensuSkipPlay) {
+    // 同时发动了神速1和神速2
+    g.shensuSkipJudgingAndDraw = false;
+    g.shensuSkipPlay = false;
+    g.phase = 'discard';
+    if (p) g.log = pushLog(g.log, p.name + ' 【神速1+2】效果生效，跳过判定、摸牌和出牌阶段，进入弃牌阶段');
+  } else if (g.shensuSkipJudgingAndDraw) {
+    // 只发动了神速1
+    g.shensuSkipJudgingAndDraw = false;
+    g.phase = 'play';
+    if (p) g.log = pushLog(g.log, p.name + ' 【神速1】效果生效，跳过判定和摸牌阶段，进入出牌阶段');
+  } else if (g.shensuSkipPlay) {
+    // 只发动了神速2
+    g.shensuSkipPlay = false;
+    g.phase = 'discard';
+    if (p) g.log = pushLog(g.log, p.name + ' 【神速2】效果生效，跳过出牌阶段，进入弃牌阶段');
+  } else {
+    // 正常返回出牌阶段
+    g.phase = 'play';
+  }
 }
 
 // 跳过神速1:回到判定区结算链路(不是写一个不存在的 phase='judge')
