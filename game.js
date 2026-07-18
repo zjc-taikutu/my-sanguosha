@@ -1672,17 +1672,53 @@ function askNextGuidu(g, currentReplaceCard = null) {
   });
 }
 
-// finishGuidu: 鬼道替换后的处理函数
+// finishGuidu: 鬼道替换后的处理函数。resume.kind 的分派逻辑必须和姐妹函数 finishGuicai
+// (鬼才改判,同一份 resume 结构、同一批判定场景)保持同等完整——鬼道和鬼才都是"判定牌亮出后
+// 可能被人用一张牌替换掉"这同一件事的两种不同技能,替换完之后"该怎么接回原判定所在的流程"
+// 是完全一致的收尾逻辑,不该因为触发技能不同就分派得比对方浅。以下 bagua/delayJudge/
+// beigeJudge 三段是逐字对照 finishGuicai(1776行起)搬过来的,不是重新设计。
 function finishGuidu(g, judgedSeat, replaceCard, resume) {
   // 使用替换后的牌作为判定结果
   // 调用对应的判定处理函数
-  
+
   if(resume.kind === 'bagua'){
-    // 八卦阵判定
-    return finishBaguaColor(g, judgedSeat, replaceCard);
+    // 八卦阵判定:判红黑之后还要按 resume.type(sha/aoe)接回被打断的流程——红则视为出闪,
+    // 推进 maybeStartShaOffsetEffects/finishSingleShaTarget 或 aoeAdvance;黑则原判定失败,
+    // 必须重新开出 respond/aoeResp pending 问真正的杀/闪,不能就此不了了之。
+    const red = finishBaguaColor(g, judgedSeat, replaceCard);
+    if(resume.type==='sha'){
+      if(red){
+        if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
+      } else {
+        g.pending={from:resume.from, to:resume.to};
+        if(resume.sourceCard!==undefined) g.pending.sourceCard=resume.sourceCard;
+        if(resume.shaInfo && resume.shaInfo.jiuBonus) g.pending.jiuBonus=true;
+        g.phase='respond';
+      }
+    } else if(resume.type==='aoe'){
+      if(red){
+        g.log=pushLog(g.log, g.players[resume.target].name+' 以【八卦阵】抵消【'+g.aoe.trick+'】');
+        aoeAdvance(g, resume.target);
+      } else {
+        g.pending={type:'aoeResp', from:g.aoe.from, to:resume.target, need:g.aoe.need};
+        if(g.aoe.sourceCard!==undefined) g.pending.sourceCard=g.aoe.sourceCard;
+        g.phase='aoeResp';
+        g.log=pushLog(g.log, '要求 '+g.players[resume.target].name+' 打出【'+g.aoe.need+'】');
+      }
+    }
+    return g;
   } else if(resume.kind === 'delayJudge'){
-    // 延时锦囊判定
-    return finishDelayCard(g, judgedSeat, DELAY_TRICKS[resume.trickName], replaceCard, resume.card);
+    // 延时锦囊判定:finishDelayCard 只处理这一张牌本身,还要跟一句 continueDelayResolution
+    // 才能推进判定区剩余的牌/摸牌阶段——和 finishGuicai 的 delayJudge 分支同一套嵌套挂起
+    // 处理(若又挂起了濒死/遗计,resume 只有 {type:'delay'},这里要补上 seat;若挂起的是
+    // 鬼才/鬼道自己的改判,resume 已经自带完整信息,不能覆盖)。
+    const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], replaceCard, resume.card);
+    if(result==='pending'){
+      if(g.pending.type==='dying' || g.pending.type==='yijiAsk') g.pending.resume={type:'delay', seat:resume.seat};
+      return g;
+    }
+    continueDelayResolution(g, resume.seat);
+    return g;
   } else if(resume.kind === 'tieqiJudge'){
     // 铁骑判定
     return finishTieqiJudge(g, resume.from, resume.to, replaceCard, resume.sourceCard, resume.shaColor, resume.shaInfo);
@@ -1695,6 +1731,12 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
   } else if(resume.kind === 'ganglieJudge'){
     // 刚烈判定
     return finishGanglieJudge(g, replaceCard, resume.seat, resume.sourceSeat, resume.resume);
+  } else if(resume.kind === 'beigeJudge'){
+    // 蔡文姬【悲歌】判定:此前完全没有这个分支,会落到下面的通用兜底(g.pending=null;
+    // g.phase='play'),悲歌该有的回血/摸牌/翻面/伤害来源弃牌全部被静默吞掉——加上专属分支,
+    // 和 finishGuicai 的 beigeJudge 分支(处理鬼才改判悲歌判定的同一场景)完全对齐。
+    processBeigeJudgeResult(g, replaceCard, resume.sourceSeat, resume.damagedSeat, resume.damageSource);
+    return g;
   } else if(resume.kind === 'leijiJudge'){
     // 雷击判定（特殊情况）
     const { sourceSeat, targetSeat } = resume;
