@@ -1898,11 +1898,15 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
       // 唯一选项:自动弃置
       const info = {trick:'猛进', from, to};
       // 猛进弃的若是凌统的装备,applyTrickOnEquip 会触发其 onLoseEquip → 旋风在杀结算中途挂起。
-      // 快照 pending,弃置后若挂起了新 pending 就 attach resume={type:'sha'} 并 return——旋风结束后
-      // 走 resumeAfterInterrupt 接回杀收尾,不能继续往下跑 remainingAvailable/finishSingleShaTarget
+      // 快照 pending,弃置后若挂起了新 pending 就 attach resume 并 return——旋风结束后走
+      // resumeAfterInterrupt 接回杀收尾,不能继续往下跑 remainingAvailable/finishSingleShaTarget
       // 把旋风覆盖掉。(applyTrickOnHand 弃手牌不触发 onLoseEquip,快照对它天然是"无变化"。)
-      // 【v1 已知限制】若此刻还有 remainingAvailable(青龙/贯石斧),旋风续接走 {type:'sha'} 尾巴会
-      // 跳过它们(庞德带青龙+猛进拆凌统装备时丢一次青龙再杀),见 CLAUDE.md 待优化点,本次不做 v2。
+      // 【v2】resume 类型从 {type:'sha'} 改成 {type:'shaOffset',from,to,sourceCard}——旋风挂起
+      // 这一刻还不知道(也不需要知道)此刻是否还有青龙偃月刀/贯石斧可续,统一 attach 这个类型,
+      // 交给 resumeAfterInterrupt 的 shaOffset 分支重新调 continueShaOffsetEffects 判断:
+      // 有就续(修复 v1 会跳过庞德青龙"再来一杀"的已知限制),没有就自动等价于原来 {type:'sha'}
+      // 的收尾(finishSingleShaTarget)。不在这里判断"有没有青龙",避免注入点和
+      // continueShaOffsetEffects 各自维护一份判断条件、日后走样。
       const pendingBefore = g.pending;
       if(handCount > 0) {
         applyTrickOnHand(g, info);
@@ -1913,7 +1917,7 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
       g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' 一张牌');
       markSkillSound(g, '猛进');
 
-      if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return; } // 旋风挂起,保留
+      if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard}; return; } // 旋风挂起,保留
       // 处理完猛进后,检查是否还有其他效果需要处理
       const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
         if(id === 'qinglong') return canStartQinglong(g, from);
@@ -2016,6 +2020,7 @@ function mengjinPick(choice) {
     const info = {trick:'猛进', from, to};
     // 同 auto-single:快照 pending,弃装备触发凌统 onLoseEquip → 旋风挂起就 attach resume 并 return,
     // 不能往下 g.pending=null 把旋风覆盖掉(applyTrickOnHand 弃手牌不触发,快照对它无变化)。
+    // 【v2】同 auto-single 分支,resume 类型改成 {type:'shaOffset',...},见上方注释说明。
     const pendingBefore = g.pending;
     if(choice === 'hand') {
       applyTrickOnHand(g, info);
@@ -2026,7 +2031,7 @@ function mengjinPick(choice) {
     g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' '+ (choice==='hand'?'一张手牌':'的装备【'+(target.equips[choice]?.name||choice)+'】'));
     markSkillSound(g, '猛进');
 
-    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; } // 旋风挂起,保留
+    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard}; return g; } // 旋风挂起,保留
     g.pending = null;
 
     // 处理完猛进后,检查是否还有其他效果需要处理
@@ -4041,6 +4046,18 @@ function resumeAfterInterrupt(g, resume, seat){
     // 乱武失体力濒死接回(杀路径走 luanwuResume + finishSingleShaTarget)
     if(g.luanwuResume) continueLuanwuAfterSha(g);
     else g.phase='play';
+  } else if(resume.type==='shaOffset'){
+    // 【v2】猛进(庞德拆装备)触发的失去装备钩子(如凌统旋风)打断后的接回。v1 曾经统一走
+    // {type:'sha'},只接回 finishSingleShaTarget 这段尾巴,会跳过猛进之后本该继续检查的
+    // 青龙偃月刀"再来一杀"/贯石斧——这是 v2 的修复点。这里不需要在 resume 里额外保存一份
+    // "打断前算好的候选列表"快照:canStartQinglong/canStartGuanshifu 只依赖攻击者(from)
+    // 自己当前的状态,和旋风打断的是目标(to)的装备完全无关,打断前后判断结果恒定一致,直接
+    // 重新调用即可,不会因为"数据过期"算错。remainingAvailable 固定传
+    // ['qinglong','guanshifu'](mengjin 已经处理完,不会再出现在候选里,和两个注入点未被
+    // 打断时的既有写法逐字一致);continueShaOffsetEffects 内部自己会重新过滤掉已经不成立
+    // 的选项,两者都不成立时自动等价于原来 {type:'sha'} 的收尾(finishSingleShaTarget),
+    // 不需要在这里分别判断"有没有青龙"。
+    continueShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, ['qinglong','guanshifu']);
   } else { // 'sha' 及其它
     if(g.fangtianQueue){ advanceFangtianQueue(g); }
     else if(g.luanwuResume){ continueLuanwuAfterSha(g); }
