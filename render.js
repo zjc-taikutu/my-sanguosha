@@ -1115,9 +1115,12 @@ function render(g){
     }
     // 颜良文丑【双雄】:选中一张与判定牌异色的手牌后,可明确选择"当【决斗】"使用。
     // 用座位上的独立按钮,避免覆盖这张牌原本自己的出牌效果。
-    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && isShuangxiongDuelSel && i!==mySeat && p.alive){
-      const blocked=hasCap(p,'kongcheng') && (p.hand||[]).length===0;
-      if(!blocked){
+    // 【目标校验必须和服务端逐项对齐,不要手写简化版】——这里曾经手写 blocked=空城判断,
+    // 漏了 CARD_PLAYS['决斗'].canTarget 里同样会查的 isZhichiImmune(陈宫智迟)/weimu(贾诩帷幕),
+    // 导致按钮会渲染在服务端必然拒绝的座位上、点了没反应。现在直接调用真正的 canTarget,
+    // 和武圣按钮(下面)同一写法,不再自己重算一遍。
+    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && isShuangxiongDuelSel && i!==mySeat && p.alive
+       && CARD_PLAYS['决斗'].canTarget(g, meP, selCard, i)){
         const idx=selectedCardIdx;
         const targetSeat=i;
         const db=document.createElement('button');
@@ -1126,7 +1129,6 @@ function render(g){
         db.style.margin='6px 14px 0';
         db.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌当【决斗】对 '+g.players[targetSeat].name+' 使用,发动【双雄】？', ()=>playCard(idx, '决斗', targetSeat)); };
         d.appendChild(db);
-      }
     }
     // 关羽【武圣】:选中一张"自己有独立效果、但也能当【杀】使用"的红色牌后,可明确选择"当【杀】"使用。
     // 和双雄同一个思路:用座位上的独立按钮,不覆盖这张牌原本自己的出牌效果——两种解读同屏共存,
