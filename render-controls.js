@@ -160,6 +160,16 @@ function guanshifuOptions(p){
   }});
   return list;
 }
+// 马谡【散谣】第二步(UI接入):第一步已经把 sanyaoOptions(p) 实现在 skills.js 里(和贯石斧
+// guanshifuOptions 同款 key 编码,只是不排除武器槽——散谣没有"这个装备就是它自己"这种自指
+// 问题),这里不重复实现,直接复用。全程只有马谡一人决定弃哪张牌、平局选哪个目标,不需要
+// 其它玩家响应,按张郃【巧变】已经确立的既有规则走"客户端本地累积选择、最后一次性原子提交":
+// sanyaoMode(bool,是否处于发动流程)+ sanyaoCostKey(已选的弃牌 key)+ sanyaoTarget(仅平局时
+// 需要,单一候选时不需要玩家选、由 UI 自动带上)。
+let sanyaoMode = false;
+let sanyaoCostKey = null;
+let sanyaoTarget = null;
+function resetSanyao(){ sanyaoMode=false; sanyaoCostKey=null; sanyaoTarget=null; }
 // 张郃【巧变】完整版:回合开始服务端问"是否发动"(g.phase==='qiaobianTurnStart'),点"发动"后
 // 客户端进入纯本地状态机(不入库,不需要其他玩家响应)——① 'choosePhase':选一张手牌+选一个
 // 阶段(判定/摸牌/出牌/弃牌),一次性提交 qiaobianDeclare(cardIdx, phaseChoice);
@@ -1589,12 +1599,11 @@ function renderControls(g){
     return;
   }
   
-  // 马谡【散谣】UI
-  const sanyaoChooseHtml = renderSanyaoChooseTarget(g);
-  if(sanyaoChooseHtml) { c.innerHTML = sanyaoChooseHtml; return; }
-  const sanyaoHtml = renderSanyao(g);
-  if(sanyaoHtml) { c.innerHTML = sanyaoHtml; return; }
-  
+  // 马谡【散谣】UI 已改为客户端本地状态机(sanyaoMode,见下方"出牌阶段按钮"区块的
+  // else-if 分支),不再经过服务端 pending,这里不需要任何分派——旧的 renderSanyao/
+  // renderSanyaoChooseTarget 两个函数(判断的是已作废的 sanyao/sanyaoChooseTarget 服务端
+  // pending 类型,且调用着第一步就已删除的 respondSanyao/respondSanyaoTarget)已一并删除。
+
   // 马谡【制蛮】UI
   const zhimengAskHtml = renderZhimengAsk(g);
   if(zhimengAskHtml) { c.innerHTML = zhimengAskHtml; return; }
@@ -3370,6 +3379,50 @@ function renderControls(g){
       }
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetZhiheng(); render(g); }; c.appendChild(cb);
+    } else if(sanyaoMode){
+      // 散谣本地选择:弃牌成本(手牌+装备混合,sanyaoOptions 已在 skills.js 实现)和平局目标
+      // 都是纯客户端一人决策,和贯石斧 guanshi 同款"直接列按钮 toggle 单选",不经过 renderHand
+      // (装备牌不在手牌区,没法靠点手牌选中)。候选目标用当前真实的 findMaxHpSeats(g) 现算,
+      // 不依赖任何服务端 pending——散谣全程 g.phase 都停在 'play',直到最后一次性提交。
+      const sOpts = sanyaoOptions(me);
+      const sCandidates = findMaxHpSeats(g);
+      const needsTargetChoice = sCandidates.length > 1;
+      if(sanyaoCostKey===null){
+        setBanner('【散谣】选择一张要弃置的牌(手牌或装备)。');
+      } else if(needsTargetChoice && sanyaoTarget===null){
+        setBanner('已选中弃牌,请选择一名体力值最大的目标(多人并列时任选其一)。');
+      } else {
+        setBanner('已选好,点击"确认发动"结算。');
+      }
+      sOpts.forEach(o=>{
+        const picked = sanyaoCostKey===o.key;
+        const b=document.createElement('button');
+        if(picked) b.className='primary';
+        b.textContent=(picked?'✓ ':'')+o.label;
+        b.onclick=()=>{ sanyaoCostKey=o.key; render(g); };
+        c.appendChild(b);
+      });
+      if(needsTargetChoice){
+        sCandidates.forEach(seat=>{
+          const tp=g.players[seat];
+          const picked = sanyaoTarget===seat;
+          const b=document.createElement('button');
+          if(picked) b.className='primary';
+          b.textContent=(picked?'✓ ':'')+tp.name+'(体力:'+tp.hp+')';
+          b.onclick=()=>{ sanyaoTarget=seat; render(g); };
+          c.appendChild(b);
+        });
+      }
+      const readyTarget = needsTargetChoice ? sanyaoTarget : (sCandidates.length===1 ? sCandidates[0] : null);
+      if(sanyaoCostKey!==null && readyTarget!==null){
+        const ok=document.createElement('button'); ok.className='primary';
+        const key=sanyaoCostKey, tgt=readyTarget, tgtName=g.players[tgt].name;
+        ok.textContent='确认发动【散谣】';
+        ok.onclick=()=>{ confirmAndPlay('弃置这张牌,对 '+escapeHtml(tgtName)+' 造成1点伤害,发动【散谣】？', ()=>sanyao(key, tgt)); };
+        c.appendChild(ok);
+      }
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetSanyao(); render(g); }; c.appendChild(cb);
     } else if(zhangbaMode){
       // 丈八选牌模式:选两张手牌当杀,再点目标。提供取消。
       setBanner('丈八蛇矛:选两张手牌当作【杀】(已选 '+zhangbaPicks.length+'/2)'+(zhangbaPicks.length===2?'，攻击距离 '+attackRange(g,mySeat)+'，点上方一名对手作为目标。':'。'));
@@ -3459,11 +3512,19 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode;
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode && !sanyaoMode;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
       c.appendChild(kb);
+    }
+    // 马谡【散谣】入口:出牌阶段限一次,手牌+装备里至少有一张能弃的牌才值得开这个入口
+    // (和断粮"至少有一张符合条件的牌才渲染"同一原则,不能只看"有没有 sanyao 能力")。
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'sanyao') && !g.sanyaoUsed && sanyaoOptions(me).length>0){
+      const syb=document.createElement('button'); syb.className='ghost';
+      syb.textContent='发动【散谣】';
+      syb.onclick=()=>{ selectedCardIdx=null; sanyaoMode=true; sanyaoCostKey=null; sanyaoTarget=null; render(g); };
+      c.appendChild(syb);
     }
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'jiushi') && me.faceup!==false && !g.jiuUsed){
       const jb=document.createElement('button'); jb.className='ghost';
@@ -3600,7 +3661,7 @@ function renderControls(g){
     }
     
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetMingce();resetFenxun();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
     
     // 丁奉【短兵】:选择额外目标阶段
     if(g.pending && g.pending.type==='duanbingChoose' && g.pending.sourceSeat===mySeat) {
@@ -3781,66 +3842,9 @@ function renderControls(g){
   }
 }
 
-// ========== 马谡【散谣】UI ==========
-
-function renderSanyaoChooseTarget(g) {
-  if(g.phase !== 'sanyaoChooseTarget' || !g.pending) return '';
-  const p = g.players[g.pending.from];
-  if(!p || p.seat !== mySeat) return '';
-  
-  let html = '<div class="sanyao-choose-target">';
-  html += '<p>' + escapeHtml(p.name) + ' 发动【散谣】，请选择体力值最大的目标：</p>';
-  
-  g.pending.candidates.forEach(seat => {
-    const target = g.players[seat];
-    if(target && target.alive) {
-      html += '<button onclick="respondSanyaoTarget(' + seat + ')">' + 
-        escapeHtml(target.name) + ' (体力:' + target.hp + ')</button>';
-    }
-  });
-  
-  html += '</div>';
-  return html;
-}
-
-function renderSanyao(g) {
-  if(g.phase !== 'sanyao' || !g.pending) return '';
-  const p = g.players[g.pending.from];
-  if(!p || p.seat !== mySeat) return '';
-  
-  const target = g.players[g.pending.target];
-  let html = '<div class="sanyao">';
-  html += '<p>' + escapeHtml(p.name) + ' 发动【散谣】，对 ' + escapeHtml(target.name) + ' 造成1点伤害：</p>';
-  html += '<p>请选择弃置一张牌：</p>';
-  
-  if((p.hand || []).length > 0) {
-    p.hand.forEach((card, idx) => {
-      if(card) {
-        html += '<button onclick="respondSanyao(\'hand\',' + idx + ')">手牌【' + escapeHtml(card.name) + '】</button>';
-      }
-    });
-  }
-  
-  EQUIP_SLOTS.forEach(slot => {
-    if(p.equips && p.equips[slot]) {
-      const equip = p.equips[slot];
-      const slotLabel = { weapon:'武器', armor:'防具', plus1:'+1马', minus1:'-1马' }[slot] || slot;
-      html += '<button onclick="respondSanyao(\'' + slot + '\')">' + slotLabel + '【' + escapeHtml(equip.name) + '】</button>';
-    }
-  });
-  
-  if((p.delays || []).length > 0) {
-    p.delays.forEach((card, idx) => {
-      if(card) {
-        html += '<button onclick="respondSanyao(\'delay\',' + idx + ')">判定区【' + escapeHtml(card.name) + '】</button>';
-      }
-    });
-  }
-  
-  html += '<button onclick="g.phase=\'play\'" class="ghost">取消</button>';
-  html += '</div>';
-  return html;
-}
+// 马谡【散谣】旧的服务端 pending 驱动 UI(renderSanyaoChooseTarget/renderSanyao)已删除——
+// 判断的 sanyaoChooseTarget/sanyao pending 类型和调用的 respondSanyaoTarget/respondSanyao
+// 都已在第一步整体作废,UI 改走 sanyaoMode 本地状态机(见上方"出牌阶段按钮"区块)。
 
 // ========== 马谡【制蛮】UI ==========
 

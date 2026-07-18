@@ -352,7 +352,7 @@ function showConfirm(message, onOk, onCancel){
 // 纯提取重构,行为零变化,只是让 confirmOwnOrSha(按原效果用/当杀 二选一弹窗)也能调用同一份
 // "清空全部客户端选牌/选目标状态"逻辑,不用另外复制一份 reset* 列表。
 function resetSelectionState(){
-  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng();
+  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao();
 }
 // confirmAndPlay: 出牌四类触发点(选目标/不选目标/丈八两张当杀)统一委托的包装——
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
@@ -780,6 +780,9 @@ function render(g){
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetLianhuan();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetTiesuo();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhiheng();
+  // 散谣全程停在 g.phase='play',没有独立的服务端 pending 可判——判据和 zhihengMode 同款,
+  // 只要不在"自己的出牌阶段"就退出本地发动流程。
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetSanyao();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetTiaoxin();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQingnang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQuhu();
