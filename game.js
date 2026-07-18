@@ -386,24 +386,9 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
-  // 马谡【散谣】选择目标阶段:from 应是数字且存活, candidates 应是非空数组
-  if(g.pending && g.pending.type==='sanyaoChooseTarget'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
-       !Array.isArray(d.candidates) || d.candidates.length===0 ||
-       !d.candidates.every(s => Number.isInteger(s) && g.players[s] && g.players[s].alive)){
-      g.pending=null; g.phase='play';
-    }
-  }
-  // 马谡【散谣】弃牌阶段:from/target 应是数字且存活
-  if(g.pending && g.pending.type==='sanyao'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.target!=='number' ||
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.target] || !g.players[d.target].alive){
-      g.pending=null; g.phase='play';
-    }
-  }
+  // 马谡【散谣】的 sanyao/sanyaoChooseTarget 两个旧 pending 类型已随第一步重新设计整体
+  // 作废(改成客户端本地累积选择、一次性原子提交,不再需要服务端两阶段 pending),这里原有
+  // 的两条防御性校验一并删除,不留死引用。
   // 马谡【制蛮】询问阶段:from/to 应是数字且存活, options 应是非空数组
   if(g.pending && g.pending.type==='zhimengAsk'){
     const d=g.pending;
@@ -4037,9 +4022,18 @@ function resumeAfterInterrupt(g, resume, seat){
       g.log=pushLog(g.log, g.players[seat].name+' 【苦肉】结算,摸两张牌');
       g.phase='play';
     }
-  } else if(resume.type==='quhu' || resume.type==='fanjian'){
+  } else if(resume.type==='quhu' || resume.type==='fanjian' || resume.type==='sanyao'){
+    // 马谡【散谣】和驱虎/反间同一形状:发动者在自己的出牌阶段对(可能是别人的)某个目标造成
+    // 伤害,伤害本身没有额外尾巴要做,只需要按"当前回合玩家(不是伤害目标)是否还活着"正确
+    // 收尾——伤害目标死的若不是回合玩家,回合并不切换,继续留在原发动者的出牌阶段。
     if(g.players[g.turn] && g.players[g.turn].alive) g.phase='play';
     else startTurn(g, nextAlive(g, g.turn));
+  } else if(resume.type==='sanyaoDamage'){
+    // 散谣的弃装备成本触发 onLoseEquip 钩子(如凌统旋风)中途打断后的接回:问完之后继续走
+    // 原本被打断的伤害结算。当前项目里马谡自己没有 onLoseEquip 钩子,这条分支实际不可达
+    // (一人只能是一个武将,不可能同时是马谡又是凌统/孙尚香),按"新增失去装备入口必须正确
+    // 接 resume"这条强制约定补上,面向正确性,不是修一个能被打的漏洞。
+    finishSanyaoDamage(g, resume.casterSeat, resume.target);
   } else if(resume.type==='enyuan'){
     // 恩怨反伤致死后接回原伤害流程
     resumeAfterInterrupt(g, resume.resume || {type:'sha'}, resume.seat);

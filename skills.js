@@ -1960,106 +1960,115 @@ function respondZaiqi() {
 }
 
 // ========== 马谡【散谣】技能 ==========
+// 第一步(服务端核心)实现记录见 CLAUDE.md。这次是从零重新设计,不是在旧骨架上打补丁——
+// 旧骨架(startSanyao/respondSanyao/respondSanyaoTarget + sanyao/sanyaoChooseTarget 两个
+// pending 类型)整体作废删除,原因见 CLAUDE.md 对应条目(findMaxHpSeats 排除自己是真实规则
+// bug、UI 的 p.seat!==mySeat 判断因为玩家对象根本没有 seat 字段而永远为真、respondSanyao
+// 漏了 onLoseEquip 钩子)。上次刚给这两个函数补的身份守卫这次随函数一起被替换,不是白做——
+// 那次的目的是"死代码也要有正确的卫生习惯",不是保证这段代码会被长期保留。
 
-// 找到全场体力值最大的角色（返回座位号数组）
-function findMaxHpSeats(g, excludeSeat) {
-  const alivePlayers = g.players.filter((p, i) => p && p.alive && i !== excludeSeat);
+// 找到全场(含马谡自己)体力值最大的角色（返回座位号数组）。
+// 官方原文用"全场"而不是"其他角色",马谡自己体力值最大时应该能对自己造成伤害——
+// 旧版 findMaxHpSeats(g, excludeSeat) 把发动者自己排除在候选之外,是真实规则 bug,已改正。
+// 平局(多人并列最大)时返回全部候选座位,由发动者从中选一个(不是全部命中/不是随机)。
+function findMaxHpSeats(g) {
+  const alivePlayers = g.players.filter(p => p && p.alive);
   if(alivePlayers.length === 0) return [];
   const maxHp = Math.max(...alivePlayers.map(p => p.hp));
   return alivePlayers
-    .map((p, i) => ({ seat: g.players.indexOf(p), hp: p.hp }))
-    .filter(p => p.hp === maxHp)
-    .map(p => p.seat);
+    .map(p => g.players.indexOf(p))
+    .filter(seat => g.players[seat].hp === maxHp);
 }
 
-// 发动散谣
-function startSanyao(g, seat) {
-  const p = g.players[seat];
-  if(!p || !p.alive) return;
-  if(g.sanyaoUsed === true) return;
-  if(g.phase !== 'play') return;
-  
-  const hasHand = (p.hand || []).length > 0;
-  const hasEquip = EQUIP_SLOTS.some(slot => p.equips && p.equips[slot]);
-  const hasDelay = (p.delays || []).length > 0;
-  
-  if(!hasHand && !hasEquip && !hasDelay) return;
-  
-  const maxHpSeats = findMaxHpSeats(g, seat);
-  if(maxHpSeats.length === 0) return;
-  
-  if(maxHpSeats.length === 1) {
-    g.pending = { type: 'sanyao', from: seat, target: maxHpSeats[0] };
-    g.phase = 'sanyao';
-    g.log = pushLog(g.log, p.name + ' 发动【散谣】,选择弃置一张牌…');
-    markSkillSound(g, '散谣');
-    return;
-  }
-  
-  g.pending = { type: 'sanyaoChooseTarget', from: seat, candidates: maxHpSeats.slice() };
-  g.phase = 'sanyaoChooseTarget';
-  g.log = pushLog(g.log, p.name + ' 发动【散谣】,请选择体力值最大的目标…');
-  markSkillSound(g, '散谣');
+// sanyaoOptions: 马谡自己当前可弃的项(手牌逐张 + 非空装备槽逐件,不含判定区——弃牌范围
+// 类推自贯石斧的既有口径,项目里对"弃置X张牌"这类不带区域限定措辞统一按"手牌+装备"解释,
+// 见 CLAUDE.md)。返回 {key,label} 列表,key 格式和贯石斧 guanshifuOptions 一致
+// ('hand:'+idx / 'equip:'+slot),供 UI(第二步)渲染按钮,也供服务端复用同一份 key 解析逻辑。
+function sanyaoOptions(p) {
+  const list = [];
+  (p.hand || []).forEach((c, idx) => { list.push({ key: 'hand:' + idx, label: '手牌【' + c.name + '】' }); });
+  EQUIP_SLOTS.forEach(slot => {
+    if(p.equips && p.equips[slot]) {
+      list.push({ key: 'equip:' + slot, label: (EQUIP_SLOT_LABEL[slot] || slot) + '【' + p.equips[slot].name + '】' });
+    }
+  });
+  return list;
 }
 
-// 响应散谣 — 选择弃置的牌
-function respondSanyao(cardType, cardIdxOrSlot) {
+// finishSanyaoDamage: 散谣弃牌成本已经结算完毕(不管有没有触发 onLoseEquip 中途打断)之后,
+// 真正造成伤害 + 收尾的共用尾巴。两处调用:①sanyao() 里弃牌未触发钩子打断的直达路径；
+// ②resumeAfterInterrupt 的 'sanyaoDamage' 分支(弃装备触发 onLoseEquip 挂起了新 pending,
+// 比如旋风,问完之后接回来继续伤害结算——见下方注释,这条分支当前不可达但按强制约定补上)。
+// srcType 传 'sanyao'(参照苦肉kurou/反间fanjian/驱虎quhu/苦肉kurou/骁果xiaoguo/刚烈ganglie/
+// 恩怨enyuan/挑衅qiangxi 同类命名惯例),sourceSeat 传马谡自己(不管目标是不是他本人),
+// 这样司马懿反馈这类"看伤害来源"的钩子能正确识别来源。
+function finishSanyaoDamage(g, casterSeat, targetSeat) {
+  const caster = g.players[casterSeat];
+  const interrupted = dealDamage(g, targetSeat, 1, casterSeat, (caster ? caster.name : '') + ' 发动【散谣】', 'sanyao');
+  if(interrupted) return; // dealDamage 自身的濒死/onDamaged 打断,由 resumeAfterInterrupt 的 'sanyao' 分支接回
+  if(g.players[g.turn] && g.players[g.turn].alive) g.phase = 'play';
+  else startTurn(g, nextAlive(g, g.turn));
+}
+
+// sanyao(costKey, targetSeat): 出牌阶段限一次的原子发动函数——弃哪张牌、平局选哪个目标,
+// 全程只有马谡一人决定、不需要其他玩家响应,按张郃【巧变】已经确立的既有规则走"客户端
+// 本地累积选择、最后一次性原子提交",不再引入 sanyao/sanyaoChooseTarget 这类服务端两阶段
+// pending。服务端仍然完整重新校验 costKey/targetSeat,不信任客户端传入的值。
+function sanyao(costKey, targetSeat) {
   tx(g => {
-    if(!g.pending || g.pending.type !== 'sanyao' || g.phase !== 'sanyao') return g;
-    // 调用者身份守卫:只有发动散谣的马谡本人(g.pending.from)能替自己选弃哪张牌。
-    // 函数体内部一律用 g.pending.from 取当事人(不是 to,散谣里响应者字段是 from),
-    // 和 respondTiaoxinChoice 同一范式,字段名按本函数实际读取的对象来定,别照抄挑衅的 to。
-    if(g.pending.from !== mySeat) return g;
-    const p = g.players[g.pending.from];
-    if(!p || !p.alive) return g;
-    const targetSeat = g.pending.target;
-    const target = g.players[targetSeat];
-    if(!target || !target.alive) { g.pending=null; g.phase = 'play'; return g; }
-    
-    let discardedCard = null;
-    if(cardType === 'hand') {
-      if(!p.hand || p.hand.length === 0) return g;
-      const idx = cardIdxOrSlot;
-      if(idx < 0 || idx >= p.hand.length) return g;
-      discardedCard = p.hand.splice(idx, 1)[0];
-    } else if(EQUIP_SLOTS.includes(cardType)) {
-      if(!p.equips || !p.equips[cardType]) return g;
-      discardedCard = p.equips[cardType];
-      p.equips[cardType] = null;
-    } else if(cardType === 'delay' && typeof cardIdxOrSlot === 'number') {
-      if(!p.delays || cardIdxOrSlot < 0 || cardIdxOrSlot >= p.delays.length) return g;
-      discardedCard = p.delays.splice(cardIdxOrSlot, 1)[0];
+    if(g.phase !== 'play' || g.turn !== mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me, 'sanyao') || g.sanyaoUsed) return g;
+
+    // 校验 costKey:必须真实对应马谡当前手牌里的某一张、或某个非空装备槽(不含判定区)。
+    let discardedCard = null, isEquip = false, equipSlot = null, handIdx = -1;
+    if(typeof costKey === 'string' && costKey.indexOf('hand:') === 0) {
+      const idx = Number(costKey.slice(5));
+      if(!Number.isInteger(idx) || idx < 0 || idx >= (me.hand || []).length) return g;
+      handIdx = idx;
+      discardedCard = me.hand[idx];
+    } else if(typeof costKey === 'string' && costKey.indexOf('equip:') === 0) {
+      const slot = costKey.slice(6);
+      if(!EQUIP_SLOTS.includes(slot) || !me.equips || !me.equips[slot]) return g;
+      isEquip = true; equipSlot = slot;
+      discardedCard = me.equips[slot];
     } else {
       return g;
     }
-    
-    if(discardedCard && !discardedCard.virtual) {
-      g.discard = g.discard || [];
-      g.discard.push(discardedCard);
-      g.log = pushLog(g.log, p.name + ' 弃置了【' + discardedCard.name + '】');
-    }
-    
-    g.sanyaoUsed = true;
-    // dealDamage 可能挂起濒死/受伤后技能;若被打断则保留其 pending,不可无条件清空
-    const interrupted = dealDamage(g, targetSeat, 1, undefined, p.name + '发动【散谣】', 'skill', discardedCard);
-    if(interrupted) return g;
-    g.pending = null;
-    g.phase = 'play';
-    if(checkWin(g)) return g;
-    return g;
-  });
-}
 
-// 响应散谣目标选择
-function respondSanyaoTarget(targetSeat) {
-  tx(g => {
-    if(g.phase !== 'sanyaoChooseTarget' || !g.pending) return g;
-    // 调用者身份守卫:同 respondSanyao,只有发动散谣的马谡本人(g.pending.from)能选目标。
-    if(g.pending.from !== mySeat) return g;
-    if(!g.pending.candidates.includes(targetSeat)) return g;
-    g.pending = { type: 'sanyao', from: g.pending.from, target: targetSeat };
-    g.phase = 'sanyao';
-    g.log = pushLog(g.log, g.players[g.pending.from].name + ' 选择了目标 ' + g.players[targetSeat].name);
+    // 校验 targetSeat:服务端重新计算候选集,不信任客户端传入的目标是否合法。
+    const maxHpSeats = findMaxHpSeats(g);
+    if(maxHpSeats.length === 0) return g;
+    if(!maxHpSeats.includes(targetSeat)) return g;
+
+    g.sanyaoUsed = true;
+    if(isEquip) {
+      me.equips[equipSlot] = null;
+    } else {
+      me.hand.splice(handIdx, 1);
+    }
+    g.discard = g.discard || [];
+    if(discardedCard && !discardedCard.virtual) g.discard.push(discardedCard);
+    g.log = pushLog(g.log, me.name + ' 发动【散谣】,弃置了【' + discardedCard.name + '】');
+    markSkillSound(g, '散谣');
+
+    if(isEquip) {
+      // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」/pickResolve 条】先把 phase 设回
+      // 休止相(play),再触发 onLoseEquip,让钩子(如旋风)捕获到正确的休止相；若钩子挂起了
+      // 新 pending,记下 resume 续接信息、这次 tx 到此为止,不在这里往下走伤害结算。
+      // 当前项目里马谡自己没有 onLoseEquip 钩子(旋风/枭姬只在凌统/孙尚香身上,一人只能是
+      // 一个武将),这个分支目前不可达,是按强制约定补上的正确性代码,不是修一个能被打的漏洞。
+      g.phase = 'play';
+      const pendingBefore = g.pending;
+      triggerHook(g, mySeat, 'onLoseEquip', { count: 1 });
+      if(g.pending !== pendingBefore && g.pending) {
+        g.pending.resume = { type: 'sanyaoDamage', casterSeat: mySeat, target: targetSeat };
+        return g;
+      }
+    }
+
+    finishSanyaoDamage(g, mySeat, targetSeat);
+    if(checkWin(g)) return g;
     return g;
   });
 }
