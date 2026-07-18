@@ -2778,8 +2778,14 @@ function respondJiedao(useSha, cardIdx){
       g.discard.push(weapon);
       g.log=pushLog(g.log, A.name+' 选择交出武器【'+weapon.name+'】,但使用者已不在场,该牌弃置(借刀杀人)');
     }
-    triggerHook(g, mySeat, 'onLoseEquip', {count:1});
+    // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条】先把休止相设成 play(A 交出武器后,
+    // 借刀已结算完毕、攻击者的出牌阶段继续),再触发 onLoseEquip——这样凌统【旋风】钩子捕获的
+    // previousPhase 才是 play(而不是此刻的 jiedaoChoice)。钩子若挂起了新 pending(旋风),
+    // 说明它接管了控制权,直接 return、不要再执行下面的重置把它覆盖掉(遗计/濒死同款约定)。
     g.pending=null; g.phase='play';
+    const pendingBefore=g.pending; // = null
+    triggerHook(g, mySeat, 'onLoseEquip', {count:1});
+    if(g.pending!==pendingBefore && g.pending) return g; // 旋风等钩子挂起了,保留不覆盖
     return g;
   });
 }
@@ -4555,11 +4561,18 @@ function resolveTrick(g, info){
     g.pending=null; g.phase='play'; return;
   }
   if(optCount===1){
-    // 唯一选择:免弹窗直接结算
+    // 唯一选择:免弹窗直接结算。
+    // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条】必须先把休止相设成 play 再结算:
+    // ①applyTrickOnEquip 内部会触发 onLoseEquip 钩子,凌统【旋风】捕获的 previousPhase 得是 play
+    //   (顺手/拆桥结算完、攻击者回合继续),否则会捕获到此刻的中间相(经无懈过来时是 'wuxie')、
+    //   旋风结束后恢复到死相导致软锁;②钩子若挂起了新 pending(旋风)就 return、不覆盖。
+    g.pending=null; g.phase='play';
+    const pendingBefore=g.pending; // = null
     if(handCount>0) applyTrickOnHand(g, info);
     else if(equipSlots.length>0) applyTrickOnEquip(g, info, equipSlots[0]);
     else applyTrickOnDelay(g, info, 0);
-    g.pending=null; g.phase='play'; return;
+    if(g.pending!==pendingBefore && g.pending) return; // 旋风等钩子挂起了,保留不覆盖
+    return;
   }
   // 多个可选:开使用者选牌子阶段(只有 from 能操作)
   g.pending={type:'pick', trick:info.trick, from:info.from, to:info.to};
@@ -4602,18 +4615,25 @@ function pickResolve(choice){
     const info={trick:g.pending.trick, from:g.pending.from, to:g.pending.to};
     const tgt=g.players[info.to];
     if(!tgt || !tgt.alive){ g.pending=null; g.phase='play'; return g; }
+    // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条】先把休止相设成 play 再结算:
+    // pickResolve 进来时 g.phase 是 'pick',若不先重置,applyTrickOnEquip 内触发的 onLoseEquip
+    // 钩子(凌统旋风)会把 previousPhase 捕获成 'pick'、旋风结束后恢复到死相软锁。重置后:
+    // 各失效兜底分支直接 return(状态已重置);正常结算后若钩子挂起了新 pending(旋风)就 return
+    // 不覆盖(遗计/濒死同款约定)。
+    g.pending=null; g.phase='play';
+    const pendingBefore=g.pending; // = null
     if(choice==='hand'){
-      if((tgt.hand||[]).length===0){ g.pending=null; g.phase='play'; return g; } // 失效兜底
+      if((tgt.hand||[]).length===0){ return g; } // 失效兜底(pending/phase 已重置)
       applyTrickOnHand(g, info);
     } else if(typeof choice==='string' && choice.startsWith('delay:')){
       const idx=Number(choice.slice(6));
-      if(!Number.isInteger(idx) || !(tgt.delays||[])[idx]){ g.pending=null; g.phase='play'; return g; } // 失效兜底
+      if(!Number.isInteger(idx) || !(tgt.delays||[])[idx]){ return g; } // 失效兜底
       applyTrickOnDelay(g, info, idx);
     } else {
-      if(!EQUIP_SLOTS.includes(choice) || !tgt.equips[choice]){ g.pending=null; g.phase='play'; return g; } // 失效兜底
+      if(!EQUIP_SLOTS.includes(choice) || !tgt.equips[choice]){ return g; } // 失效兜底
       applyTrickOnEquip(g, info, choice);
     }
-    g.pending=null; g.phase='play';
+    if(g.pending!==pendingBefore && g.pending) return g; // 旋风等钩子挂起了,保留不覆盖
     return g;
   });
 }

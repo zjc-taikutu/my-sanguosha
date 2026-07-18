@@ -172,6 +172,8 @@
 - **颜良文丑【双雄】的座位按钮会渲染在服务端必然拒绝的座位上（既有 bug，点了没反应）**：`render.js` 里那个"双雄:决斗"按钮的渲染条件**手写了一份简化版的目标校验**——只查了 `hasCap(p,'kongcheng') && (p.hand||[]).length===0`（空城），但 `CARD_PLAYS['决斗'].canTarget` 真正的校验还包括 `isZhichiImmune(g,targetSeat,card)`（陈宫【智迟】免疫）和 `hasCap(target,'weimu') && isBlackTactics(card)`（贾诩【帷幕】不能成为黑色锦囊目标）。所以当目标是智迟状态下的陈宫、或持黑色牌打贾诩时，按钮照样渲染出来、点下去被 `playCard` 的 `spec.canTarget` 静默拒绝，表现为"点了没反应"。**正确写法是直接调 `CARD_PLAYS['决斗'].canTarget(...)`**（服务端 `playCard` 校验的就是这个函数，UI 和服务端口径不可能分叉），而不是自己重算一遍——**这次新写的"武圣:杀"座位按钮就是按这个正确写法做的**（完整对齐 `playCard` 的三件事：非自己 / 目标存活 / `spec.canTarget`），可以直接照抄。发现于"武圣红色 target:true 牌当杀"那次任务（设计阶段对照双雄先例时发现），按"一次只改一件事"当次未修。**以后新增任何"座位上的独立按钮"，目标校验一律直接调对应 `CARD_PLAYS[actionId].canTarget` + 复刻 `playCard` 的非自己/存活两项，不要手写简化版。**
 
 
+- **凌统【旋风】在"杀结算过程中失去装备"(麒麟弓弃马 / 庞德猛进拆牌)暂不触发,需专项加 resume 续接机制,当前 naive 修会引入软锁故意不修**：旋风的失去装备触发,本次(方案A)只修好了"独立失去装备"的三类入口(顺手牵羊/过河拆桥/借刀交武器),它们失去装备后就到站(休止相 play、无未完成流程),`pending` 被调用方无条件覆盖是唯一问题,两行 reorder(先设休止相再触发钩子、钩子挂起就 return)即可。**但麒麟弓/猛进不同**:它们发生在杀结算过程中——`respondShan` 的杀命中分支里,`maybeStartQilin` 单匹马弃置后**返回 false**(表示"没挂起、继续"),调用方据此继续跑杀的收尾 `g.pending=null; finishSingleShaTarget(g)`(checkWin + 方天画戟队列推进 + 回合续接),这一句把旋风钩子刚挂起的 pending 覆盖掉。**不能用"别覆盖 pending"简单修**:即便阻止覆盖、让旋风挂起,旋风结算完之后杀的收尾(`finishSingleShaTarget`)也不会自动续接——`finishSingleShaTarget` 被永久跳过 → `checkWin` 漏判、方天画戟的下一个目标不再处理 → **软锁/漏结算,比现状(旋风不触发)更糟**。正确修法需要给旋风的装备触发加一套 **resume 续接机制**(类比 `resumeAfterInterrupt`/`finishDying`:旋风结算完回去接着跑被打断的杀收尾),现在旋风装备触发**只有 `g.phase = previousPhase` 这一句、没有任何 resume**。这是一个需要先出设计方案的专项改动,不在方案A范围。**当前行为(已回归锁定)**:麒麟弓/猛进弃凌统装备时旋风不触发,但杀的收尾正常完成、回到 play、不软锁(即"不修"至少不比现状更糟)。专项立项时,思路是让 `maybeStartQilin`/猛进在触发旋风时返回 true(挂起),并在旋风的 `executeXuanfeng`/`cancelXuanfeng` 装备分支里,用 resume 字段记住"回来要调 finishSingleShaTarget",而不是只 `g.phase=previousPhase`。
+
 ## 五、当前进度
 
 **已完成**：
@@ -705,6 +707,15 @@ const CARD_PINYIN = {
   **撞色核对（第1步推迟到本步的决策点⑥，已由用户拍板）**：座位色 NAME_COLORS 里有蓝 #3B82C4 和黄 #B8A22F，和魏蓝/群金同色系。渲染实际画面(魏势力+蓝座位名 / 群势力+黄座位名同屏)交用户眼睛核对——**用户决定接受现状、不微调势力色**。理由：势力块在左上角、座位名在标题栏中间，位置分离+形态不同(色块白字 vs 纯色文字)，且势力色是三国杀强约定俗成。以后若实际使用中觉得混淆，再单独改 `.faction-*` 的颜色值即可(纯展示、零连带)。
   **测试**（vm 沙箱真实驱动 renderSeatCard，8项 + Playwright 真实渲染像素采样）：各势力座位卡产出正确 `faction-<势力>`+单字；左慈化身跟随两条；未开局/选将阶段不泄露两条；四势力白字对比度4.75~6.60；不透明证明色块亮度跨立绘差0.0000；最小卡几何(字放得下、在卡内、不撞)。既有回归(第1步势力13项 + 李典 + 本轮四套89项)全绿——纯渲染改动，确认没带坏任何东西。
   **势力功能两步至此完成**：第1步数据层(65个faction+generalFaction)、第2步座位卡渲染。**第3步(可选、未做)**：选将候选卡/`#myGeneral`文字行/武将说明弹窗也显示势力——改动面小，看后续需要再做。
+
+- **修复凌统【旋风】"失去装备"触发被调用方无条件覆盖 pending 的 bug(方案A:修干净的三类入口,麒麟弓/猛进记为已知限制留待专项)**。**根因**:旋风的 `onLoseEquip` hook(`data.js`)在 `triggerHook` 中途同步设了 `g.pending='xuanfengPick'`/`g.phase='xuanfengPick'`,但调用方在 hook 返回后**无条件执行 `g.pending=null; g.phase='play'`**,把旋风 pending 冲掉——和遗计/濒死那批"hook 挂起 pending 却被调用方无条件推进覆盖"是同一类结构性 bug。**枭姬对照证明 hook 本身在跑**,只有"设 pending 的 hook"(旋风是唯一一个)受害:枭姬的 `onLoseEquip` 只摸牌不设 pending,覆盖对它无影响。
+  **排查用真实 dump 把"失去装备"入口分成两类性质不同的情况**(不能一起修):
+  - **独立失去装备(本次修)**:顺手牵羊/过河拆桥(唯一项 `game.js:4560` + pick `game.js:4614`)、借刀杀人 A 交武器(`game.js:2781`)。失去装备后就到站(休止相 play、无未完成流程)。**修法**:把 `g.pending=null; g.phase='play'` 挪到 `triggerHook(onLoseEquip)` **之前**,让 hook 捕获正确的休止相(play);hook 若挂起了新 pending(`g.pending` 变了且非 null)就 `return`、不再执行重置(遗计/濒死同款 `pendingBefore` 快照约定)。**reorder 不是可选的、是必需的**:真实流程里 `resolveTrick` 是从 `finishWuxieRound` 经无懈过来的,`triggerHook` 那一刻 `g.phase` 还是 `'wuxie'`——若不先重置,旋风捕获 `previousPhase='wuxie'`、结束后恢复到死相 → 软锁(实测确认 previousPhase 修复前会是 wuxie、修复后是 play)。
+  - **杀结算中失去装备(本次不修,记为已知限制)**:麒麟弓弃马 / 庞德猛进——见「四、已知的待优化点」新增条目,naive 修会软锁,需专项加 resume 续接。
+  **明确不改、dump 已验证不受影响的入口**(供以后新增失去装备入口时对照):换装换下旧装备(`equipCard` `game.js:2558`——`playCard` 未无条件重置 pending,旋风本来就正常触发,规则上换装该触发、实际也触发)、张郃巧变移动装备(`doQiaobianMove` `skills.js:829`——旋风正常挂起)。
+  **连带发现(无需改)**:`discardCard` 单张版(`game.js:4872`)不更新 `g.discardedThisPhase`,但全项目 grep 确认弃牌阶段 UI 只走批量版 `discardCards`(`4908` 有更新)、单张版无弃牌阶段调用点(仅防御性保留),B 路径(弃牌阶段弃≥2张触发旋风)当前安全。**⚠️ 若以后新增走单张 `discardCard` 的弃牌入口,需补 `g.discardedThisPhase` 更新,否则旋风弃牌计数漏。**
+  **通用约定(钉进文档,避免第 N 次重蹈)**:以后任何新增"失去装备"入口,`triggerHook(g, seat, 'onLoseEquip', ...)` 之后**不得无条件重置 pending/phase**,必须先快照 `pendingBefore`、触发后检查"hook 是否挂起了新 pending"、挂起了就 `return`;且若该入口发生在杀结算等**未完成流程**中,要评估是否需要 resume 续接、避免软锁(不是所有失去装备入口都能用"别覆盖 pending"简单修)。
+  **测试**(`run_xuanfeng_test.js`,vm 沙箱,16 项,未落盘):核心(过河拆桥拆凌统装备→`pending.type==='xuanfengPick'` 未被覆盖、`previousPhase==='play'`)、三类入口各测(顺手/拆桥唯一项+pick/借刀)、旋风挂起后不软锁(取消→play、真执行弃满2张→play 无残留)、不改入口回归(换装/巧变仍挂起)、枭姬对照(摸2张不误伤)、已知限制确认(麒麟弓真实杀命中流程→旋风不触发但杀收尾完成回 play 不软锁)、B 路径回归(弃牌阶段弃2张仍触发)。`git stash` 确认修复前 6 项核心断言变红(`pending=null`、`previousPhase=null`)、修复后 16 全 PASS。既有回归(李典+本轮六套)全绿。
 
 **可能的下一步**（待定）：
 - 响应超时/托管（修挂机卡死隐患）。
