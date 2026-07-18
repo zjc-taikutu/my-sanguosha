@@ -639,8 +639,12 @@ function normalize(g){
   if(typeof g.skipDraw!=='boolean') g.skipDraw=false;
   // 张郃【巧变】完整版:跳过弃牌阶段的标志位,和 g.skipDraw/g.skipPlay 同款防御
   if(typeof g.skipDiscard!=='boolean') g.skipDiscard=false;
-  // 夏侯渊【神速】:相关标志位
-  if(typeof g.shensuUsed!=='boolean') g.shensuUsed=false;
+  // 夏侯渊【神速】:相关标志位。shensuUsed1/shensuUsed2 分别对应神速1/神速2各自独立的
+  // "本回合是否已发动"限制(官方规则:两者各自限一次,一回合最多发动两次,即"夏侯二刀")——
+  // 【断点2修复】原来只有一个共享的 g.shensuUsed,发动神速1之后 shensuChoose2 连开启条件
+  // 都不成立,神速2永远问不到,已拆成两个独立字段。
+  if(typeof g.shensuUsed1!=='boolean') g.shensuUsed1=false;
+  if(typeof g.shensuUsed2!=='boolean') g.shensuUsed2=false;
   if(typeof g.shensuSkipJudgingAndDraw!=='boolean') g.shensuSkipJudgingAndDraw=false;
   if(typeof g.shensuSkipPlay!=='boolean') g.shensuSkipPlay=false;
   if(typeof g.shensuShaRemaining!=='number') g.shensuShaRemaining=0;
@@ -1306,8 +1310,10 @@ function finishDrawPhase(g, seat, n){
   // 乐不思蜀/张郃【巧变】:摸牌阶段照常摸牌,只是不给出牌(或弃牌)机会——advancePastPlay
   // 统一判断出牌/弃牌阶段是否被跳过,不在这里各自重复逻辑。
   
-  // 夏侯渊【神速2】: 摸牌完成后检查是否可以发动(用 g.turn,不看客户端 mySeat)
-  if (hasCap(g.players[seat], 'shensu') && !g.shensuUsed && seat === g.turn) {
+  // 夏侯渊【神速2】: 摸牌完成后检查是否可以发动(用 g.turn,不看客户端 mySeat)。
+  // 【断点2修复】检查 shensuUsed2(神速2自己的标志位),不再检查共享的 shensuUsed——
+  // 发动过神速1不应该挡住神速2这个独立的询问。
+  if (hasCap(g.players[seat], 'shensu') && !g.shensuUsed2 && seat === g.turn) {
     g.pending = { type: 'shensuChoose2', seat: seat };
     g.phase = 'shensuChoose2';
     g.log = pushLog(g.log, g.players[seat].name + ' 可以发动【神速】跳过出牌阶段并弃置装备牌');
@@ -5341,8 +5347,8 @@ function startTurn(g, seat){
   }
   // 贾诩完杀：回合开始时重置状态
   g.wanshaActive = false; g.wanshaDyingSeat = null;
-  // 夏侯渊【神速】
-  g.shensuUsed = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
+  // 夏侯渊【神速】:shensuUsed1/shensuUsed2 各自独立重置,不是共用一个标志位。
+  g.shensuUsed1 = false; g.shensuUsed2 = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
   g.qiaobianSkipJudge = false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌(走 cap,不硬编码武将 id)

@@ -775,7 +775,10 @@ function continueQiaobianCheck(g, seat){
 // 旧实现挂在 enterDrawPhase(判定之后),导致「跳过判定」永远晚一拍——官方是准备阶段跳过判定+摸牌。
 function continueShensu1Check(g, seat){
   const p=g.players[seat];
-  if(p && p.alive && hasCap(p,'shensu') && !g.shensuUsed && !g.shensuSkipJudgingAndDraw){
+  // 【断点2修复】检查 shensuUsed1(神速1自己的标志位),不再检查共享的 shensuUsed——
+  // 神速1/神速2 各自独立限一次,发动过神速2不该挡住神速1这个询问(理论上神速1的开启点
+  // 本来就早于神速2,这个顺序目前不会真的撞上,但字段语义要对,不能沿用共享写法)。
+  if(p && p.alive && hasCap(p,'shensu') && !g.shensuUsed1 && !g.shensuSkipJudgingAndDraw){
     g.pending = { type: 'shensuChoose1', seat };
     g.phase = 'shensuChoose1';
     g.log = pushLog(g.log, p.name + ' 可以发动【神速】跳过判定和摸牌阶段');
@@ -2389,11 +2392,13 @@ function triggerShensu1() {
     const seat = g.turn;
     const p = g.players[seat];
     
-    if (!p || !p.alive || !hasCap(p, 'shensu') || g.shensuUsed) return g;
-    
-    // 标记神速已使用
-    g.shensuUsed = true;
-    
+    // 【断点2修复】守卫和标记位改成 shensuUsed1(神速1自己的标志位),不再是共享的
+    // shensuUsed——发动过神速2不该挡住神速1(见 continueShensu1Check 同款注释)。
+    if (!p || !p.alive || !hasCap(p, 'shensu') || g.shensuUsed1) return g;
+
+    // 标记神速1已使用
+    g.shensuUsed1 = true;
+
     // 设置跳过判定和摸牌标记
     g.shensuSkipJudgingAndDraw = true;
     
@@ -2423,11 +2428,13 @@ function triggerShensu2() {
     const seat = mySeat;
     const p = g.players[seat];
     
-    if (!p || !p.alive || !hasCap(p, 'shensu') || g.shensuUsed) return g;
-    
-    // 标记神速已使用
-    g.shensuUsed = true;
-    
+    // 【断点2修复】守卫和标记位改成 shensuUsed2(神速2自己的标志位),不再是共享的
+    // shensuUsed——这正是断点2的根因:发动过神速1之后这里原来会被同一把总锁挡住。
+    if (!p || !p.alive || !hasCap(p, 'shensu') || g.shensuUsed2) return g;
+
+    // 标记神速2已使用
+    g.shensuUsed2 = true;
+
     // 检查是否有装备牌可以弃置
     let equipToDiscard = findShensuEquipToDiscard(p);
     if (!equipToDiscard) {
@@ -2596,10 +2603,12 @@ function finishShensuSha(g){
   const remaining = resume.remaining;
 
   if (remaining > 0) {
-    // 【断点2(shensuUsed共享总锁)修复前尚不可达】shensuShaRemaining 目前永远不会>1,
-    // 这个分支现在无法被真实场景触发——留着是让断点2修复后这里天然可用,不需要再回来改
-    // finishShensuSha 本身;行为已经过 vm 沙箱构造场景验证(状态转换正确、不抛异常),但
-    // 不代表真实"神速1+2"链路已经跑通,断点2那次任务需要专门为这条路径补真实场景测试。
+    // 【断点2已修复,这个分支现在真的可达了】shensuUsed 共享总锁拆成 shensuUsed1/
+    // shensuUsed2 之后,神速1+2 组合(俗称"夏侯二刀")可以在同一回合都发动,
+    // g.shensuShaRemaining 会先被 triggerShensu1 设成1,再被 triggerShensu2 累加成2——
+    // 这条分支当初实现 finishShensuSha 时就已经按"重新挂起 shensuSha pending 问下一个
+    // 目标"写好了,这次断点2修复没有改动这里的逻辑本身,只是让它从"写好了但走不到"变成
+    // 真正可达,已有真实场景测试覆盖(run_shensu_sha_test.js)。
     g.shensuShaRemaining = remaining;
     g.pending = { type: 'shensuSha', seat, remaining, noDistance: true, fromShensu: resume.fromShensu };
     g.phase = 'shensuSha';
