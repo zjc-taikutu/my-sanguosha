@@ -175,7 +175,335 @@ check('canSeeRole 规则', ()=>{
   assert.strictEqual(canSeeRole({gameMode:null, players:g.players}, 0, 0), false);
 });
 
-// ========== 后续 Task 追加的用例挂这里 ==========
+// ========== Task2+ : startGame / finish / checkWin / reward ==========
+
+function mkPlayers(n){
+  return Array.from({length:n}, (_,i)=>({
+    name:'P'+i, cid:'c'+i, hp:4, maxHp:4, hand:[], alive:true, equips:R('emptyEquips')(), delays:[]
+  }));
+}
+
+function freshG(n){
+  return {
+    started:false, players:mkPlayers(n), turn:0, phase:'lobby',
+    deck:[], discard:[], pending:null, aoe:null, log:[],
+    gameMode:null, winSide:null, lordGeneralPool:null,
+    roundNum:1, roundSeatsActed:[], exchangeCards:[],
+    shaUsed:false, lastCardSound:null, lastSkillSound:null
+  };
+}
+
+function setG(g){ vm.runInContext('__setG('+JSON.stringify(g).replace(/</g,'\\u003c')+')', sandbox); }
+// JSON 丢 function;改用直接赋值
+function loadG(g){
+  sandbox.__testG = g;
+  vm.runInContext('_g = global.__testG || __testG; if(typeof __setG==="function"){} ; _g = this.__testG;', sandbox);
+  // 更直接:
+  vm.runInContext('void 0', sandbox);
+  const ref = { get g(){ return sandbox._g; }, set g(v){ sandbox._g = v; } };
+  // vm 上下文:把对象挂到 sandbox 再赋 _g
+  Object.defineProperty(sandbox, '__tg', { value:g, writable:true, configurable:true });
+  vm.runInContext('_g = __tg;', sandbox);
+  return ()=> sandbox._g || vm.runInContext('_g', sandbox);
+}
+
+// 修复:直接在 sandbox 上设 _g
+function withG(g, fn){
+  sandbox._g = g;
+  vm.runInContext('_g = globalThis._g;', sandbox);
+  // sandbox 与 context 是同一对象 when createContext(context)
+  try { return fn(g); }
+  finally {}
+}
+
+// createContext 后 sandbox === context 的代理;直接 sandbox._g 可能不进 vm 的 _g 绑定
+// 使用 runInContext 设置:
+function bindG(g){
+  global.__ID_TEST_G = g;
+  vm.runInContext('globalThis.__ID_TEST_G = globalThis.__ID_TEST_G;', sandbox);
+  // 把 host 对象放进 sandbox
+  sandbox.__ID_TEST_G = g;
+  vm.runInContext('_g = __ID_TEST_G;', sandbox);
+}
+
+console.log('\n== Task2: normalize / startGame identity ==\n');
+
+check('normalize: 非法 gameMode→null, 清 role', ()=>{
+  const g = freshG(2);
+  g.gameMode = 'bogus';
+  g.players[0].role = 'fan';
+  g.players[0].roleRevealed = true;
+  R('normalize')(g);
+  assert.strictEqual(g.gameMode, null);
+  assert.strictEqual(g.players[0].role, null);
+  assert.strictEqual(g.players[0].roleRevealed, false);
+});
+
+check('normalize: identity 保留合法 role', ()=>{
+  const g = freshG(4);
+  g.gameMode = 'identity';
+  g.players[0].role = 'zhu';
+  g.players[0].roleRevealed = true;
+  R('normalize')(g);
+  assert.strictEqual(g.gameMode, 'identity');
+  assert.strictEqual(g.players[0].role, 'zhu');
+  assert.strictEqual(g.players[0].roleRevealed, true);
+});
+
+check('startGame identity n=3 拒绝', ()=>{
+  const g = freshG(3);
+  bindG(g);
+  R('startGame')('pick','identity');
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.phase, 'lobby');
+  assert.ok(gg.gameMode==null || gg.phase==='lobby');
+  assert.ok(!gg.players[0].role);
+});
+
+check('startGame identity random 拒绝', ()=>{
+  const g = freshG(4);
+  bindG(g);
+  R('startGame')('random','identity');
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.phase, 'lobby');
+});
+
+check('startGame identity n=4 pick → 发身份+主公5选', ()=>{
+  const g = freshG(4);
+  bindG(g);
+  R('startGame')('pick','identity');
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.gameMode, 'identity');
+  assert.strictEqual(gg.phase, 'pickingLordGeneral');
+  assert.deepStrictEqual(countRoles(gg.players.map(p=>p.role)), EXPECT[4]);
+  const lord = R('getLordSeat')(gg);
+  assert.ok(lord>=0);
+  assert.strictEqual(gg.players[lord].roleRevealed, true);
+  assert.ok(Array.isArray(gg.players[lord].generalChoices));
+  assert.strictEqual(gg.players[lord].generalChoices.length, 5);
+  assert.ok(Array.isArray(gg.lordGeneralPool));
+  assert.strictEqual(gg.lordGeneralPool.length, 5);
+  gg.players.forEach((p,i)=>{
+    if(i===lord) return;
+    assert.strictEqual(p.generalChoices, null);
+  });
+});
+
+check('startGame ffa pick 仍 3 选', ()=>{
+  const g = freshG(2);
+  bindG(g);
+  R('startGame')('pick','ffa');
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.gameMode, 'ffa');
+  assert.strictEqual(gg.phase, 'pickingGeneral');
+  assert.strictEqual(gg.players[0].generalChoices.length, 3);
+  assert.strictEqual(gg.players[0].role, null);
+});
+
+console.log('\n== Task3: lord pick + finishGeneralAssign ==\n');
+
+check('主公选将后他人3张+公开武将', ()=>{
+  const g = freshG(4);
+  bindG(g);
+  R('startGame')('pick','identity');
+  let gg = vm.runInContext('_g', sandbox);
+  const lord = R('getLordSeat')(gg);
+  const pickId = gg.players[lord].generalChoices[0];
+  vm.runInContext('mySeat = '+lord, sandbox);
+  R('respondPickLordGeneral')(pickId);
+  gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.players[lord].general, pickId);
+  assert.strictEqual(gg.players[lord].generalChoices, null);
+  assert.strictEqual(gg.phase, 'pickingGeneral');
+  gg.players.forEach((p,i)=>{
+    if(i===lord) return;
+    assert.ok(Array.isArray(p.generalChoices), 'seat'+i);
+    assert.strictEqual(p.generalChoices.length, 3);
+    assert.ok(!p.generalChoices.includes(pickId), '不与主公重复');
+  });
+});
+
+check('全员选完:主公+1血且从主公起手', ()=>{
+  const g = freshG(4);
+  bindG(g);
+  R('startGame')('pick','identity');
+  let gg = vm.runInContext('_g', sandbox);
+  const lord = R('getLordSeat')(gg);
+  const pickId = gg.players[lord].generalChoices[0];
+  vm.runInContext('mySeat = '+lord, sandbox);
+  R('respondPickLordGeneral')(pickId);
+  gg = vm.runInContext('_g', sandbox);
+  // 他人选将
+  for(let i=0;i<4;i++){
+    if(i===lord) continue;
+    const choices = gg.players[i].generalChoices;
+    assert.ok(choices && choices.length);
+    vm.runInContext('mySeat = '+i, sandbox);
+    R('respondPickGeneral')(choices[0]);
+    gg = vm.runInContext('_g', sandbox);
+  }
+  // 可能还在 huashenPick;若有左慈需跳过——强制无左慈
+  // 若 started 仍 false 且 phase huashenPick,用 debug 或直接 finish
+  if(!gg.started && gg.phase==='huashenPick'){
+    // 不发动:找不到 respondHuashen 简单路径时,直接给所有 zuoci 声明
+    while(gg.phase==='huashenPick' && gg.pending){
+      const s = gg.pending.seat;
+      const pl = gg.players[s];
+      const gid = pl.huashenPool[0];
+      const entry = R('HUASHEN_SKILL_TABLE')[gid];
+      const sk = entry && entry[0] && entry[0].name;
+      vm.runInContext('mySeat = '+s, sandbox);
+      if(typeof R('respondHuashenPick')==='function' && sk){
+        R('respondHuashenPick')(gid, sk);
+      } else {
+        // 兜底:清空 huashen 要求
+        pl.huashenGeneral = gid;
+        pl.huashenSkillName = sk || 'x';
+        gg.pending = null;
+        R('checkHuashenBeforeAssign')(gg);
+      }
+      gg = vm.runInContext('_g', sandbox);
+    }
+  }
+  assert.strictEqual(gg.started, true, 'phase='+gg.phase);
+  const lordP = gg.players[lord];
+  const baseHp = R('generalMaxHp')(lordP.general);
+  assert.strictEqual(lordP.maxHp, baseHp + 1, '主公+1');
+  assert.strictEqual(lordP.hp, lordP.maxHp);
+  // 非主公无 +1
+  gg.players.forEach((p,i)=>{
+    if(i===lord) return;
+    assert.strictEqual(p.maxHp, R('generalMaxHp')(p.general));
+  });
+  assert.strictEqual(gg.turn, lord, '从主公起手');
+});
+
+console.log('\n== Task4: checkWin ==\n');
+
+check('checkWin 主忠胜', ()=>{
+  const g = {
+    gameMode:'identity', players:[
+      {role:'zhu', alive:true, name:'主'},
+      {role:'zhong', alive:true, name:'忠'},
+      {role:'fan', alive:false, name:'反'},
+      {role:'nei', alive:false, name:'内'},
+    ], pending:{x:1}, aoe:{}, log:[]
+  };
+  assert.strictEqual(R('checkWin')(g), true);
+  assert.strictEqual(g.winSide, 'lord');
+  assert.strictEqual(g.winner, '主公与忠臣');
+  assert.strictEqual(g.phase, 'over');
+});
+
+check('checkWin 反贼胜', ()=>{
+  const g = {
+    gameMode:'identity', players:[
+      {role:'zhu', alive:false, name:'主'},
+      {role:'fan', alive:true, name:'反'},
+      {role:'nei', alive:true, name:'内'},
+    ], log:[]
+  };
+  assert.strictEqual(R('checkWin')(g), true);
+  assert.strictEqual(g.winSide, 'fan');
+});
+
+check('checkWin 内奸胜', ()=>{
+  const g = {
+    gameMode:'identity', players:[
+      {role:'zhu', alive:false, name:'主'},
+      {role:'fan', alive:false, name:'反'},
+      {role:'nei', alive:true, name:'内'},
+    ], log:[]
+  };
+  assert.strictEqual(R('checkWin')(g), true);
+  assert.strictEqual(g.winSide, 'nei');
+});
+
+check('checkWin 无胜者', ()=>{
+  const g = {
+    gameMode:'identity', players:[
+      {role:'zhu', alive:false, name:'主'},
+      {role:'zhong', alive:true, name:'忠'},
+      {role:'fan', alive:false, name:'反'},
+      {role:'nei', alive:false, name:'内'},
+    ], log:[]
+  };
+  assert.strictEqual(R('checkWin')(g), true);
+  assert.strictEqual(g.winSide, 'none');
+  assert.strictEqual(g.winner, '无');
+});
+
+check('checkWin ffa 仍按人数', ()=>{
+  const g = {
+    gameMode:'ffa', players:[
+      {alive:true, name:'A'},
+      {alive:false, name:'B'},
+    ], log:[]
+  };
+  assert.strictEqual(R('checkWin')(g), true);
+  assert.strictEqual(g.winner, 'A');
+  assert.strictEqual(g.winSide, null);
+});
+
+check('checkWin identity 未结束', ()=>{
+  const g = {
+    gameMode:'identity', players:[
+      {role:'zhu', alive:true, name:'主'},
+      {role:'fan', alive:true, name:'反'},
+    ], log:[]
+  };
+  assert.strictEqual(R('checkWin')(g), false);
+});
+
+console.log('\n== Task5: applyIdentityKillReward ==\n');
+
+check('杀反摸3', ()=>{
+  const g = {
+    gameMode:'identity',
+    deck: Array.from({length:10}, (_,i)=>({id:i,name:'杀',suit:'♠',rank:1})),
+    discard:[], log:[],
+    players:[
+      {role:'fan', name:'反', alive:false, hand:[], equips:R('emptyEquips')(), delays:[]},
+      {role:'zhu', name:'主', alive:true, hand:[], equips:R('emptyEquips')(), delays:[], hp:5, maxHp:5},
+    ]
+  };
+  R('applyIdentityKillReward')(g, 0, 1);
+  assert.strictEqual(g.players[1].hand.length, 3);
+});
+
+check('主杀忠弃手牌装备、判定区保留', ()=>{
+  const delayCard = {id:99, name:'乐不思蜀', suit:'♥', rank:6};
+  const g = {
+    gameMode:'identity', deck:[], discard:[], log:[],
+    players:[
+      {role:'zhong', name:'忠', alive:false, hand:[], equips:R('emptyEquips')(), delays:[]},
+      {
+        role:'zhu', name:'主', alive:true, hp:5, maxHp:5,
+        hand:[{id:1,name:'杀',suit:'♠',rank:2},{id:2,name:'闪',suit:'♥',rank:2}],
+        equips:{ weapon:{id:3,name:'青龙偃月刀',suit:'♠',rank:5}, armor:null, plus1:null, minus1:null },
+        delays:[delayCard]
+      },
+    ]
+  };
+  R('applyIdentityKillReward')(g, 0, 1);
+  assert.strictEqual(g.players[1].hand.length, 0);
+  assert.strictEqual(g.players[1].equips.weapon, null);
+  assert.strictEqual(g.players[1].delays.length, 1);
+  assert.strictEqual(g.players[1].delays[0].name, '乐不思蜀');
+  assert.ok(g.discard.length >= 3);
+});
+
+check('ffa 不奖惩', ()=>{
+  const g = {
+    gameMode:'ffa', deck:[{id:1,name:'杀',suit:'♠',rank:1}], discard:[], log:[],
+    players:[
+      {role:'fan', name:'A', alive:false, hand:[], equips:R('emptyEquips')()},
+      {name:'B', alive:true, hand:[], equips:R('emptyEquips')()},
+    ]
+  };
+  R('applyIdentityKillReward')(g, 0, 1);
+  assert.strictEqual(g.players[1].hand.length, 0);
+});
 
 console.log('\n== summary ==');
 console.log('passed:', passed, 'failed:', failed);

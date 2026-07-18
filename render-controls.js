@@ -43,6 +43,8 @@ function hasWeaponToDiscard(player) {
 }
 
 // ---------- targeting UI state ----------
+// 大厅对战模式选择(纯客户端,点开始时写入 g.gameMode):'ffa'|'identity'|null
+let selectedGameMode = null;
 let selectedCardIdx = null;
 // 响应阶段"多候选可选"(respondShan出闪/aoeRespond南蛮万箭响应):候选>1(真实牌+龙胆/武圣/
 // 倾国转化)时,玩家先点选具体一张手牌,记下标;候选<=1时不使用这个变量,维持原有"按钮直接
@@ -490,11 +492,16 @@ function renderXunxun(g, c){
   }
 }
 
-function renderPickGeneral(g, c){
+// opts.lordPick=true: 身份局主公 5 选 1,onclick 走 respondPickLordGeneral
+function renderPickGeneral(g, c, opts){
+  const lordPick = !!(opts && opts.lordPick);
   const me = g.players[mySeat];
   if(!me){ setBanner('选将阶段…'); return; }
   if(Array.isArray(me.generalChoices) && me.generalChoices.length>0){
-    setBanner('选将阶段:请从下面3名候选武将中选择一名');
+    const nChoice = me.generalChoices.length;
+    setBanner(lordPick
+      ? ('主公选将:请从下面'+nChoice+'名候选武将中选择一名')
+      : ('选将阶段:请从下面'+nChoice+'名候选武将中选择一名'));
     const list=document.createElement('div'); list.className='general-pick-list';
     me.generalChoices.forEach(id=>{
       const gen=getGeneral(id); if(!gen) return;
@@ -516,7 +523,7 @@ function renderPickGeneral(g, c){
           +'<div class="general-pick-name">'+escapeHtml(gen.name)+factionChip+' · '+escapeHtml(gen.skill)+'</div>'
           +'<div class="general-pick-desc">'+escapeHtml(gen.desc||'(暂无说明)')+'</div>'
         +'</div>';
-      card.onclick=()=>respondPickGeneral(id);
+      card.onclick=()=> lordPick ? respondPickLordGeneral(id) : respondPickGeneral(id);
       list.appendChild(card);
     });
     c.appendChild(list);
@@ -542,7 +549,8 @@ function renderPickGeneral(g, c){
     const debugBtn=document.createElement('button');
     debugBtn.style.cssText='border:1px solid #d4a017;color:#d4a017;background:transparent;';
     debugBtn.textContent='【测试】确认选择';
-    debugBtn.onclick=()=>debugPickGeneral(sel.value);
+    // 主公选将阶段调试也走 lord 入口,保证后续发他人候选
+    debugBtn.onclick=()=> lordPick ? respondPickLordGeneral(sel.value) : debugPickGeneral(sel.value);
     debugBox.appendChild(debugBtn);
     c.appendChild(debugBox);
     return;
@@ -1631,37 +1639,79 @@ function renderControls(g){
     return;
   }
   
+  // 身份局主公选将(须在 !g.started 通用大厅分支之前)
+  if(g.phase==='pickingLordGeneral'){
+    const lord = getLordSeat(g);
+    if(lord===mySeat){
+      renderPickGeneral(g, c, { lordPick:true });
+    } else {
+      const lordP = g.players[lord];
+      setBanner('等待主公 '+(lordP?escapeHtml(lordP.name):'')+' 选将…');
+    }
+    return;
+  }
   if(!g.started){
     const cnt=(g.players||[]).filter(Boolean).length;
-    // 两种开局模式的按钮并列:随机武将(原有行为,直接分配)/三选一(进入 pickingGeneral
-    // 阶段各自选择)。不管哪种模式,startGame(mode) 内部都靠"开局前不放回抽样锁定这局武将池"
-    // 保证同局武将互不重复,这里的按钮只负责传参、不做任何重复性判断。
-    // 两个按钮视觉权重必须一致(都用 ghost,不用 primary/ghost 这种"一个突出一个不突出"的
-    // 搭配)——这两个是平等的两种模式选择,不是"默认推荐项+备选项"的关系,主次视觉会误导玩家
-    // 下意识觉得该点哪个。人数计数两边都要显示(之前只有随机武将那个有,三选一没有,容易让人
-    // 忽略"三选一同样受人数门槛限制"这件事)。
-    const btnRandom=document.createElement('button');
-    btnRandom.className='ghost'; btnRandom.textContent='开始游戏(随机武将)（'+cnt+'/'+SEATS+'）';
-    btnRandom.disabled = cnt<MIN_PLAYERS;
-    btnRandom.onclick=()=>startGame('random');
-    c.appendChild(btnRandom);
+    // 1) 对战模式:乱斗 / 主公局
+    const mkModeBtn=(label, mode)=>{
+      const b=document.createElement('button');
+      b.className = selectedGameMode===mode ? 'primary' : 'ghost';
+      b.textContent = label;
+      b.onclick=()=>{ selectedGameMode=mode; if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
+      c.appendChild(b);
+    };
+    mkModeBtn('乱斗', 'ffa');
+    mkModeBtn('主公局', 'identity');
 
-    const btnPick=document.createElement('button');
-    btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)（'+cnt+'/'+SEATS+'）';
-    btnPick.disabled = cnt<MIN_PLAYERS;
-    btnPick.onclick=()=>startGame('pick');
-    c.appendChild(btnPick);
+    // 2) 开局方式(依赖已选模式)
+    if(selectedGameMode==='ffa'){
+      const btnRandom=document.createElement('button');
+      btnRandom.className='ghost'; btnRandom.textContent='开始游戏(随机武将)（'+cnt+'/'+SEATS+'）';
+      btnRandom.disabled = cnt<MIN_PLAYERS;
+      btnRandom.onclick=()=>startGame('random','ffa');
+      c.appendChild(btnRandom);
+      const btnPick=document.createElement('button');
+      btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)（'+cnt+'/'+SEATS+'）';
+      btnPick.disabled = cnt<MIN_PLAYERS;
+      btnPick.onclick=()=>startGame('pick','ffa');
+      c.appendChild(btnPick);
+    } else if(selectedGameMode==='identity'){
+      // 主公局仅三选一,不提供随机武将
+      const btnPick=document.createElement('button');
+      btnPick.className='ghost';
+      btnPick.textContent='开始身份局(三选一)（'+cnt+'/'+SEATS+'）';
+      btnPick.disabled = cnt<1; // 可点,人数不足在 onclick 拦截(规格 B)
+      btnPick.onclick=()=>{
+        if(cnt<4){ alert('主公局至少需要 4 名玩家'); return; }
+        if(cnt>8){ alert('主公局最多 8 名玩家'); return; }
+        startGame('pick','identity');
+      };
+      c.appendChild(btnPick);
+    } else {
+      const tip=document.createElement('button');
+      tip.className='ghost'; tip.disabled=true;
+      tip.textContent='请先选择对战模式';
+      c.appendChild(tip);
+    }
 
-    if(cnt<MIN_PLAYERS) setBanner('至少 '+MIN_PLAYERS+' 人即可开始,还差 '+(MIN_PLAYERS-cnt)+' 人…');
+    if(!selectedGameMode) setBanner('请先选择对战模式：乱斗 或 主公局');
+    else if(selectedGameMode==='identity'){
+      if(cnt<4) setBanner('主公局需 4~8 人，还差 '+(4-cnt)+' 人…');
+      else if(cnt<SEATS) setBanner('身份局已可开始（'+cnt+' 人），主公将先选将（5 选 1）');
+      else setBanner('身份局已满员，可开始');
+    } else if(cnt<MIN_PLAYERS) setBanner('至少 '+MIN_PLAYERS+' 人即可开始,还差 '+(MIN_PLAYERS-cnt)+' 人…');
     else if(cnt<SEATS) setBanner('已可开始（'+cnt+' 人),也可等满 '+SEATS+' 人。');
     return;
   }
   if(g.phase==='over'){
     const btn=document.createElement('button'); btn.className='primary';
-    btn.textContent='再来一局'; btn.onclick=newGame; c.appendChild(btn);
+    btn.textContent='再来一局'; btn.onclick=()=>{ selectedGameMode=null; newGame(); }; c.appendChild(btn);
     // "结束并清理房间"这个按钮已经统一到页面左上角常驻的 #closeRoomBtn(cleanupRoom),
     // 不再在这里重复渲染同一个功能,避免游戏结束时同时出现两个功能一样的按钮让玩家困惑。
-    setBanner('🏆 胜者：'+escapeHtml(g.winner||'')+' · 大家看完结果后,可点左上角「关闭房间」删除本房间数据。', 'border-color:var(--gold);color:var(--gold)');
+    const winText = g.gameMode==='identity'
+      ? ('胜方：'+(g.winner||'无'))
+      : ('胜者：'+(g.winner||''));
+    setBanner('🏆 '+escapeHtml(winText)+' · 大家看完结果后,可点左上角「关闭房间」删除本房间数据。', 'border-color:var(--gold);color:var(--gold)');
     return;
   }
   if(g.phase==='tieqi' && g.pending && g.pending.type==='tieqi' && g.pending.from===mySeat){

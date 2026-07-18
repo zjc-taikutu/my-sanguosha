@@ -44,6 +44,17 @@ function normalize(g){
     });
   }
   g.players = g.players || [];
+  // 身份模式:ffa/identity;非法/缺失回退 null(当乱斗行为)。winSide 仅 identity 终局用。
+  if(g.gameMode!=='ffa' && g.gameMode!=='identity') g.gameMode=null;
+  if(g.winSide!=null && !['fan','nei','lord','none'].includes(g.winSide)) g.winSide=null;
+  if(g.lordGeneralPool!=null && !Array.isArray(g.lordGeneralPool)) g.lordGeneralPool=null;
+  g.players.forEach(p=>{
+    if(!p) return;
+    if(p.role!=null && !['zhu','zhong','fan','nei'].includes(p.role)) p.role=null;
+    if(typeof p.roleRevealed!=='boolean') p.roleRevealed=false;
+    // 非 identity 清空脏身份,避免旧局/乱斗残留
+    if(g.gameMode!=='identity'){ p.role=null; p.roleRevealed=false; }
+  });
   // 轮次计数:数字/数组防御,Firebase 吞空数组、旧存档可能没有这两个字段
   if(!Number.isInteger(g.roundNum)) g.roundNum=1;
   if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
@@ -3879,6 +3890,11 @@ function finishDying(g, actuallyDied){
   
   if(actuallyDied){
     p.alive=false;
+    // 身份局:死亡翻开身份(主公本来就 revealed,再写无妨)
+    if(g.gameMode==='identity' && p.role){
+      p.roleRevealed = true;
+      g.log = pushLog(g.log, p.name+' 的身份是【'+(ROLE_LABEL[p.role]||p.role)+'】');
+    }
     // 阵亡:所有手牌 + 装备牌 + 判定区(延时锦囊)弃置进弃牌堆(标准规则),让牌回流、牌库不被抽干
     const equipCards = EQUIP_SLOTS.map(s=> p.equips && p.equips[s]).filter(Boolean);
     const delayCards = p.delays || [];
@@ -3896,6 +3912,11 @@ function finishDying(g, actuallyDied){
     g.log=pushLog(g.log, p.name+' 无人使用【桃】救援,阵亡！'+(parts.length?'（'+parts.join('，')+'）':''));
     // 阵亡弃装备刻意【不】触发 onLoseEquip 失去装备钩子(如枭姬):人已死,死亡结算不再发动常规技能。
     // ⚠️ 日后新增「主动卸载装备」入口时,记得在那里接入 triggerHook(g, seat, 'onLoseEquip', {count}),别漏了枭姬。
+
+    // 身份局击杀奖惩(须在 checkWin 之前)。杀手=resume.sourceSeat(与断肠同源)。
+    // onLoseEquip 可能挂起 pending(如旋风):终局 checkWin 优先;未终局则保留 hook pending。
+    const killerForReward = resume && typeof resume.sourceSeat==='number' ? resume.sourceSeat : undefined;
+    applyIdentityKillReward(g, seat, killerForReward);
     
     // 蔡文姬【断肠】：杀死你的角色失去所有武将技能(锁定技)
     // 技能查询走 getGeneral(player.general).caps,必须置 skillsLost 让 generalHasCap/hasCap/triggerHook 失效
@@ -3931,8 +3952,14 @@ function finishDying(g, actuallyDied){
   } else {
     g.log=pushLog(g.log, p.name+' 脱离濒死！');
   }
+  // 死亡路径上奖惩/钩子可能已把 g.pending 从 dying 换成其它(旋风等);未终局须保留。
+  const postDeathPending = (actuallyDied && g.pending && g.pending.type!=='dying') ? g.pending : null;
+  if(checkWin(g)) return; // checkWin 会清 pending/aoe
+  if(postDeathPending){
+    g.pending = postDeathPending;
+    return;
+  }
   g.pending=null;
-  if(checkWin(g)) return;
   resumeAfterInterrupt(g, resume, seat);
 }
 // respondWangxi: 李典【忘隙】技能的响应函数
@@ -4245,16 +4272,73 @@ function advanceFangtianQueue(g){
   q.shaInfo=null;
   resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard, undefined);
 }
-// checkWin: 存活<=1 则结束游戏(置 over/winner、清理 pending/aoe、记日志),返回 true;否则 false。
+// checkWin: 乱斗=存活<=1;身份局=阵营胜负(见 identity 规格)。
+// 返回 true 表示已结束游戏。
 function checkWin(g){
+  if(g.gameMode==='identity'){
+    const alivePred = (pred)=> (g.players||[]).some(p=>p && p.alive && pred(p));
+    const lordAlive = alivePred(p=>p.role==='zhu');
+    const fanAlive  = alivePred(p=>p.role==='fan');
+    const neiAlive  = alivePred(p=>p.role==='nei');
+    let winSide = null;
+    if(!lordAlive){
+      if(fanAlive) winSide = 'fan';
+      else if(neiAlive) winSide = 'nei';
+      else winSide = 'none'; // 主死且无反无内 → 无胜者
+    } else if(!fanAlive && !neiAlive){
+      winSide = 'lord';
+    }
+    if(!winSide) return false;
+    g.phase='over';
+    g.winSide = winSide;
+    g.winner = ({fan:'反贼', nei:'内奸', lord:'主公与忠臣', none:'无'})[winSide];
+    g.pending=null; g.aoe=null;
+    g.log=pushLog(g.log, '游戏结束，胜方：'+g.winner);
+    return true;
+  }
   if(aliveCount(g)<=1){
     const w=g.players.find(p=>p&&p.alive);
     g.phase='over'; g.winner = w?w.name:'无';
+    g.winSide = null;
     g.pending=null; g.aoe=null;
     g.log=pushLog(g.log, '游戏结束,胜者：'+g.winner);
     return true;
   }
   return false;
+}
+
+// 身份局击杀奖惩(finishDying 死亡分支调用)。killerSeat 非数字/杀手已死 → 无奖惩。
+// 主杀忠:弃手牌+装备,判定区保留;弃装触发 onLoseEquip。
+function applyIdentityKillReward(g, victimSeat, killerSeat){
+  if(g.gameMode!=='identity') return;
+  const victim = g.players[victimSeat];
+  if(!victim || !victim.role) return;
+  if(typeof killerSeat!=='number') return;
+  const killer = g.players[killerSeat];
+  if(!killer || !killer.alive) return;
+  if(victim.role==='fan'){
+    drawN(g, killerSeat, 3);
+    g.log = pushLog(g.log, killer.name+' 杀死反贼，摸三张牌');
+    return;
+  }
+  if(victim.role==='zhong' && killer.role==='zhu'){
+    if((killer.hand||[]).length){
+      g.discard.push(...killer.hand);
+      killer.hand = [];
+    }
+    let lost = 0;
+    EQUIP_SLOTS.forEach(s=>{
+      const card = killer.equips && killer.equips[s];
+      if(card){
+        g.discard.push(card);
+        killer.equips[s] = null;
+        lost++;
+      }
+    });
+    // 判定区保留 — 不碰 killer.delays
+    if(lost) triggerHook(g, killerSeat, 'onLoseEquip', {count:lost});
+    g.log = pushLog(g.log, killer.name+' 误杀忠臣，弃置所有手牌和装备');
+  }
 }
 // 决斗中由当前 active 玩家响应：打出【杀】则把出杀义务交给对方；认输则受伤、决斗结束。
 // duelResponse: 决斗响应。吕布【无双】(锁定技)是"跟吕布决斗的对方每轮需连续打出两张杀,

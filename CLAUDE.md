@@ -173,6 +173,7 @@
 ## 五、当前进度
 
 **已完成**：
+- **身份模式（主公局）B 档**：开局可选乱斗(`ffa`)/主公局(`identity`)。规格 `docs/superpowers/specs/2026-07-19-identity-mode-design.md`，计划 `docs/superpowers/plans/2026-07-19-identity-mode.md`。要点：`g.gameMode`；`IDENTITY_TABLE` 4~8 人配比；`p.role`/`p.roleRevealed`；主公局仅三选一（主公 5 选 1，选定后全场立刻可见主公武将，他人 3 选 1）；主公 `maxHp+1`、从主公座位 `startTurn`；`checkWin` 身份胜负（反/内/主忠/无胜者）；杀反摸 3、主杀忠弃手牌+装备（**判定区保留**）、`applyIdentityKillReward`；`canSeeRole`+座位 `.seat-identity` 色块；2~3 人点主公局拦截提示；乱斗路径零回归。**主公技仍不做**。回归 `run_identity_mode_test.js`。`?v=` 181。
 - 基础流程：摸牌/出牌/弃牌三阶段、回合流转、2~3 人可变人数。
 - **借刀杀人**：两个不同角色目标（A 要有武器、B 要在 A 攻击范围内），项目里第一次"选两个不同角色"的目标交互——不是标准单目标流程能表达，`CARD_PLAYS['借刀杀人']` 的 `effect` 故意留空（正常流程不会走到，只有 `target:true`+`canPlay` 借用现有"选中即高亮"的 UI 判定），实际由客户端专属两步选择（`jiedaoSeatA` 状态：先点场上有武器的角色为 A，再点 A 攻击范围内的另一角色为 B）直接调 `jieDaoShaRen(cardIdx,seatA,seatB)`（校验武器/距离后弃牌、`startTrick(...,seatB)`）。`startTrick`/`finishWuxieRound` 新增 `seatB` 随 `info`/`pending` 透传（其它锦囊不传，无操作）。**被无懈整体抵消**：和桃园结义同款"抵消的是整体效果"，不是逐目标 AOE 结构，被挡下 A 完全不用做选择。无懈通过后进入新的 `jiedaoChoice` 阶段（`g.pending={type:'jiedaoChoice',from,seatA,seatB}`），只有 A 能操作 `respondJiedao(useSha)`：选杀→`findUsableAs(A.hand,A,'杀')`+`resolveShaUse`；选不出杀→武器离开 A 装备区，**交给使用者、进使用者手牌**（官方规则，不是弃入弃牌堆——之前的实现把它误弃入弃牌堆，已修复，见「当前进度」的改动记录）+`triggerHook(...,'onLoseEquip',{count:1})`（孙尚香摸两张）。使用者已阵亡这种理论边界下没有手牌可归还，才兜底弃入弃牌堆防止牌凭空消失。**关键正确性修复**：`resolveShaUse` 原本无条件在开头设 `g.shaUsed=true`，这只在"调用方必是当前回合玩家自己出牌阶段出杀"时安全——借刀杀人打破这个假设（A 可能根本不是当前回合玩家）。**修复方式是把 `g.shaUsed=true` 从 `resolveShaUse` 内部挪到两个原有调用点**（`CARD_PLAYS['杀'].effect`、`playZhangbaSha`）各自设置，借刀杀人这个新调用点完全不碰它——从根源解决，不是加特判，这样借来的杀天然不占用任何人（包括 A 自己和真正的当前回合玩家）的每回合出杀次数限制，且不重复距离校验（B 是否在 A 范围内已在选目标那一步校验过）。`buildDeck` 2 张。
 - **五谷丰登**：项目里第一次"公共牌区+轮流挑选"的交互。复用 `pending` 扩展字段的一贯做法（和借刀杀人的 `seatB`、延时锦囊的 `card` 同一模式），不新起独立容器：`g.pending={type:'wugu', from, pool:[牌...], order:[座位...], idx}`。**亮牌用新写的 `revealPool(g,n)`，不是 `judge()`**——语义不同：`judge` 是"翻一张+立刻进弃牌堆+判定日志"，`revealPool` 是"批量暂存到公共池,不进弃牌堆、不记判定日志"，之后可能被挑走进手牌、也可能被无懈/挑完剩余弃入弃牌堆。出牌 `effect` 里 `pool=revealPool(g,aliveCount(g))`，走和无中生有/桃园结义同一模板的 `startTrick(...,to:mySeat,pool)`（`to` 占位）。**无懈整体抵消**：`finishWuxieRound` 的 `blocked` 分支新增——`info.pool` 非空则整体 `push` 进 `g.discard`（这些是真实牌，不需要虚拟牌那套 `discardOrVanish`）。**未被无懈**：`resolveTrick` 新分支按当前存活玩家从发起者起用 `nextAlive` 环形转一圈算出 `order`，开 `'wugu'` 阶段。**挑选**：新函数 `wuguPick(poolIdx)`，仅 `mySeat===order[idx]` 可操作，选中的牌从 `pool` 移除、进挑选者手牌，`idx++`；挑完一整圈（`idx===order.length`）收尾。**阵亡边界**（无懈询问期间有人阵亡，导致 `order` 比 `pool` 短）：不追求"重新分配剩牌"这种复杂规则，只在挑完一圈后把 `pool` 里的剩余牌兜底弃入弃牌堆，保证不卡死。`normalize` 防御：`pool`/`order` 缺失回退 `[]`（Firebase 吞空数组），`from`/`idx` 非数字或 `order` 为空则整体判无效清空 `pending`。UI：`g.phase==='wugu'` 时公共池对所有人公开显示，只有当前 `order[idx]` 那位能点击挑选（其余人只读+等待提示）。`buildDeck` 2 张。
@@ -792,7 +793,8 @@ const CARD_PINYIN = {
 **可能的下一步**（待定）：
 - 响应超时/托管（修挂机卡死隐患）。
 - 装备系统后续（见「进行中」），可解锁更多武将和锦囊。
-- 身份场（主公/反贼/内奸）、选将。
+- 主公技（激将/护驾/制霸/妄尊等）——身份骨架已就绪，可按 `p.role==='zhu'` 接入。
+- 身份 DB 真隐藏（Firebase 读权限）；当前与手牌同为朋友局界面隐藏、库可读。
 - 更多武将。
 
 ---

@@ -64,30 +64,72 @@ function enterGame(){
   gameRef.on('value', snap => render(snap.val()));
 }
 
-// startGame(mode): 'random'(随机分配,允许原来的重复逻辑被"不放回抽样"取代,天然不重复)
-// 或 'pick'(三选一)。两种模式都在真正开局前用不放回抽样从全部武将里锁定"这局会用到哪些
-// 武将",不需要处理"两人抢同一个武将"这类实时并发冲突——抽样这一步和后续所有分配都在同一次
-// tx 事务里原子完成。
-// 守卫条件必须同时检查 g.phase==='pickingGeneral',不能只查 g.started——pick 模式下选将阶段
-// g.started 仍是 false,如果几个玩家几乎同时点了不同的开始按钮(比如一人先点"三选一"已经建立
-// 好候选状态,另一人紧接着点"随机武将"),只查 g.started 会让后到的那次调用照样通过守卫、把
-// 刚建立好的选将状态覆盖掉。Firebase 的 tx() 事务保证这些调用严格按到达服务器的先后顺序依次
-// 执行(不会真正并发、不会数据损坏),补上这条守卫后"先到先得,后面的都是 no-op"就是完全正确
-// 的行为,不需要额外加锁或更复杂的仲裁逻辑。
-function startGame(mode){
+// startGame(mode, gameMode):
+//   mode = 'random' | 'pick'  武将分配方式
+//   gameMode = 'ffa' | 'identity'  对战模式(乱斗/主公局);缺省或非法当 'ffa'
+// 身份局(identity)仅允许 pick、人数 4~8;先发身份再主公 5 选 1。
+// 守卫须同时检查 pickingGeneral / pickingLordGeneral,不能只查 g.started。
+function startGame(mode, gameMode){
   tx(g=>{
-    if(g.started || g.phase==='pickingGeneral' || g.players.length<MIN_PLAYERS) return g;
-    if(mode!=='random' && mode!=='pick') return g;
-    g.generalMode = mode;
+    if(g.started || g.phase==='pickingGeneral' || g.phase==='pickingLordGeneral') return g;
+    const gm = (gameMode==='identity') ? 'identity' : 'ffa';
     const n = g.players.length;
-    const allIds = Object.keys(GENERALS);
-    const shuffled = [...allIds].sort(()=>Math.random()-0.5); // 不放回抽样,保证不重复
+    if(gm==='identity'){
+      if(n<4 || n>8) return g;
+      if(mode!=='pick') return g;
+    } else {
+      if(n<MIN_PLAYERS) return g;
+      if(mode!=='random' && mode!=='pick') return g;
+    }
+    g.gameMode = gm;
+    g.generalMode = mode;
+    g.winSide = null;
+    g.lordGeneralPool = null;
+    // 乱斗:清身份字段
+    if(gm!=='identity'){
+      g.players.forEach(p=>{ if(p){ p.role=null; p.roleRevealed=false; } });
+    }
 
+    const allIds = Object.keys(GENERALS);
+    const shuffled = [...allIds].sort(()=>Math.random()-0.5);
+
+    // ----- 身份局:发身份 + 主公 5 选 1 -----
+    if(gm==='identity'){
+      assignIdentities(g.players);
+      const lord = getLordSeat(g);
+      if(lord<0) return g;
+      const LORD_PICK = 5;
+      const OTHER_PICK = 3;
+      const needed = LORD_PICK + OTHER_PICK * (n - 1);
+      g.log = pushLog(g.log, '身份模式开启，主公是 '+g.players[lord].name);
+      if(shuffled.length < needed){
+        // 武将不足:退化随机分将,直接开局收尾
+        g.players.forEach((p,i)=>{
+          p.general = shuffled[i % shuffled.length];
+          p.generalChoices = null;
+        });
+        g.lordGeneralPool = null;
+        checkHuashenBeforeAssign(g);
+        return g;
+      }
+      g.lordGeneralPool = shuffled.slice(0, LORD_PICK);
+      g.players[lord].generalChoices = g.lordGeneralPool.slice();
+      g.players[lord].general = null;
+      g.players.forEach((p,i)=>{
+        if(!p || i===lord) return;
+        p.generalChoices = null;
+        p.general = null;
+      });
+      g.phase = 'pickingLordGeneral';
+      g.log = pushLog(g.log, '请主公从 5 名武将中选择…');
+      return g;
+    }
+
+    // ----- 乱斗:原有 random / pick -----
     if(mode==='pick'){
       const perPlayer = 3;
       const needed = n*perPlayer;
       if(shuffled.length < needed){
-        // 武将数不够撑起三选一(每人3个候选且互不重复),安全退化为直接随机分配,不报错不卡死
         g.players.forEach((p,i)=>{ p.general = shuffled[i % shuffled.length]; });
         checkHuashenBeforeAssign(g);
         return g;
@@ -102,7 +144,6 @@ function startGame(mode){
       return g;
     }
 
-    // random 模式:直接不重复分配,走原有开局收尾
     g.players.forEach((p,i)=>{ p.general = shuffled[i]; });
     checkHuashenBeforeAssign(g);
     return g;
@@ -117,8 +158,11 @@ function startGame(mode){
 // 不能因为这次改动顺手引入新的手写 g.phase。
 function finishGeneralAssign(g){
   g.deck = buildDeck(); g.discard=[];
+  g.lordGeneralPool = null;
   g.players.forEach((p,i)=>{
     p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
+    // 身份局主公 +1 体力上限
+    if(g.gameMode==='identity' && p.role==='zhu') p.maxHp += 1;
     p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.delays=[];
     p.equips = emptyEquips();                // 装备区:开局四槽全空
     drawN(g,i,START_HAND);
@@ -127,7 +171,13 @@ function finishGeneralAssign(g){
   g.log = pushLog(g.log, '游戏开始！');
   // 第一回合也要走 startTurn(不能手写 g.turn/g.phase),否则会跳过判定区处理和洛神触发链路
   // ——这正是"开局第一回合甄姬洛神不触发"这个 bug 的根因,第二回合起走 endTurn→startTurn 就正常。
-  startTurn(g, 0);
+  // 身份局从主公座位起手;乱斗仍从座位 0。
+  let startSeat = 0;
+  if(g.gameMode==='identity'){
+    const lord = getLordSeat(g);
+    if(lord>=0) startSeat = lord;
+  }
+  startTurn(g, startSeat);
 }
 
 // checkHuashenBeforeAssign: 左慈【化身】v2 完整调度器——生成初始库存(p.huashenPool)+
@@ -236,6 +286,38 @@ function respondHuashenChangePickEnd(generalId, skillName){
 }
 
 // respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
+// respondPickLordGeneral: 身份局主公从 5 张候选中选 1。选完后全场立刻可见主公武将
+// (p.general 已写入;渲染层对主公放开 avatarReady)。再给其余玩家各发 3 张进入 pickingGeneral。
+function respondPickLordGeneral(generalId){
+  tx(g=>{
+    if(g.phase!=='pickingLordGeneral' || g.gameMode!=='identity') return g;
+    const lord = getLordSeat(g);
+    if(lord!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || me.general || !Array.isArray(me.generalChoices) || !me.generalChoices.includes(generalId)) return g;
+    if(!GENERALS[generalId]) return g;
+    me.general = generalId;
+    me.generalChoices = null;
+    // 主公武将对全场立刻可见,日志可写武将名
+    g.log = pushLog(g.log, me.name+' 选择了武将【'+GENERALS[generalId].name+'】');
+    const pool5 = Array.isArray(g.lordGeneralPool) ? g.lordGeneralPool : [];
+    const leftover = pool5.filter(id=>id!==generalId);
+    const unused = Object.keys(GENERALS).filter(id=>!pool5.includes(id));
+    const rest = [...leftover, ...unused].sort(()=>Math.random()-0.5);
+    const OTHER_PICK = 3;
+    let k = 0;
+    g.players.forEach((p,i)=>{
+      if(!p || i===lord) return;
+      p.generalChoices = rest.slice(k, k+OTHER_PICK);
+      k += OTHER_PICK;
+      p.general = null;
+    });
+    g.phase = 'pickingGeneral';
+    g.log = pushLog(g.log, '请其他玩家选将…');
+    return g;
+  });
+}
+
 function respondPickGeneral(generalId){
   tx(g=>{
     if(g.phase!=='pickingGeneral') return g;
@@ -246,6 +328,7 @@ function respondPickGeneral(generalId){
     // 日志刻意不写具体武将名字——候选和最终选择在正式开局(finishGeneralAssign)前都是
     // 隐藏信息,g.log 是所有玩家共享同步的字段(配合"新日志自动弹toast提醒所有人"机制),
     // 写具体牌名会让所有人立刻收到暴露选择的弹窗提示。
+    // (身份局主公已在 respondPickLordGeneral 写过名,此处是非主公)
     g.log = pushLog(g.log, me.name+' 已选定武将,等待其他玩家…');
     if(g.players.every(p=>p && p.general)){
       checkHuashenBeforeAssign(g); // 全部选完,检查是否需要先问左慈化身,再进入正式开局
@@ -279,12 +362,14 @@ function debugPickGeneral(generalId){
 function newGame(){
   tx(g=>{
     g.started=false; g.phase='lobby'; g.pending=null; g.winner=null; g.aoe=null;
+    g.gameMode=null; g.winSide=null; g.lordGeneralPool=null; g.generalMode=null;
     g.deck=[]; g.discard=[];
     g.players.forEach(p=>{
       p.general = randomGeneralId();     // 每局重新随机换将
       p.maxHp = generalMaxHp(p.general); // 异常回退 MAX_HP
       p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.delays=[];
       p.equips = emptyEquips();          // 装备区:每局重置为四槽全空
+      p.role=null; p.roleRevealed=false; p.generalChoices=null;
     });
     g.log=pushLog(g.log,'重置房间,可再次开始');
     return g;

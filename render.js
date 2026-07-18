@@ -540,11 +540,15 @@ function renderSeatCard(g, seat, isSelf){
   // 名字——gen 在这个玩家选完之后就已经非空了(respondPickGeneral 立即赋值,不等其他人
   // 选完),所以不能直接判断"gen是否非空"决定显示什么,要按"选没选"这个状态本身区分文案,
   // 只暴露"选没选"、不暴露选的是谁,和"其他玩家选择进度"那部分的隐藏信息原则一致。
-  const genLabel = g.started ? (gen?gen.name:'—') : (gen ? '已选' : '未定');
+  // 身份局主公选完将后全场立刻可见其武将(规格),不必等 g.started
+  const lordGeneralPublic = !!(g.gameMode==='identity' && p.role==='zhu' && gen);
+  const genLabel = g.started
+    ? (gen?gen.name:'—')
+    : (lordGeneralPublic ? gen.name : (gen ? '已选' : '未定'));
   // 头像:必须同时满足"真的选定了武将(gen 非空)"和"g.started"才显示真实头像——只查 gen
   // 不够,三选一选将阶段选完但还没正式开局前仍是隐藏信息,这是一个真实修过的信息泄露bug
-  // (见CLAUDE.md),这里延续同一条件不变。
-  const avatarReady = g.started && gen;
+  // (见CLAUDE.md)。**例外**:身份局主公选定后立刻公开立绘(lordGeneralPublic)。
+  const avatarReady = !!(gen && (g.started || lordGeneralPublic));
   // 左慈【化身】:声明借用某个武将后,座位卡头像改用那个武将的立绘,只改这一处视觉展示——
   // p.general 本身恒为'zuoci',技能判定(hasCap/generalHasCap等)、genLabel、genNameVert
   // 全部继续走 p.general/gen,不受这条影响。只在 p.general==='zuoci' 时才生效,不碰其他
@@ -559,7 +563,7 @@ function renderSeatCard(g, seat, isSelf){
   // 武将名竖排(writing-mode:vertical-rl + text-orientation:upright,见CSS)。固定字号,
   // 不是 fitFontSize 那套动态测量——武将名长度上限被 GENERALS 表本身锁定(已核实最长是
   // "颜良文丑"4字),固定字号配合对这个具体worst case的真实测量验证即可。
-  const genNameVert = (g.started && gen) ? escapeHtml(gen.name) : '';
+  const genNameVert = avatarReady ? escapeHtml(gen.name) : '';
   // 势力标识:不透明色块+白字单字(魏/蜀/吴/群/晋)。势力值走 generalFaction(p)——它跟随
   // 左慈【化身】(借了别人的武将,势力也跟着变,和上面 avatarGen 跟随化身表现一致)。
   // 显示条件和头像/武将名同一个 avatarReady(g.started && gen):三选一选将阶段选完但未正式
@@ -675,7 +679,7 @@ function renderSeatCard(g, seat, isSelf){
   // 裸立绘上)**,所以必须自带不透明底衬——通用 .info-badge 本身就带 background:#1a1410
   // (不透明十六进制色,不是 rgba 半透明),这条正好满足本方案"每个可见元素都要有自己的
   // 不透明底衬、不能只靠 text-shadow/半透明色块"的硬要求,挪位置时不能把它弄丢。
-  const infoBadge = (g.started&&gen)
+  const infoBadge = (avatarReady&&gen)
     ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
     : '';
   // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
@@ -707,12 +711,16 @@ function renderSeatCard(g, seat, isSelf){
       + '<div class="seat-gen-name">'+genNameVert+'</div>'
       + heartsHtml
     + '</div>'
-    // 右上角:身份(主公/忠臣/反贼/内奸)占位方块 → 正下方是"?"说明入口。
-    // **身份字段同样还没有,只留正方形空壳占位,不造假数据。** 这里**复用现有的
-    // .seat-identity**(它本来就是"身份占位"这个概念,只是之前放在卡片中部右侧),
-    // 不新造第二个占位元素,避免同一个概念同时存在两个占位。**这次(第7次微调)的草图
-    // 确认"右上角只有身份牌"这个现状继续保留,不新增内容,这里未改动。**
-    + '<div class="seat-identity"></div>'
+    // 右上角:身份(主公/忠臣/反贼/内奸)。identity 模式且 canSeeRole 时填单字+色块;
+    // 否则保持空壳(与未实现时视觉一致,不暗示隐藏身份)。
+    + (function(){
+        if(g.gameMode==='identity' && p.role && typeof canSeeRole==='function' && canSeeRole(g, mySeat, seat)){
+          const ch = {zhu:'主',zhong:'忠',fan:'反',nei:'内'}[p.role] || '';
+          const title = (typeof ROLE_LABEL!=='undefined' && ROLE_LABEL[p.role]) ? ROLE_LABEL[p.role] : '';
+          return '<div class="seat-identity role-'+p.role+'" title="'+escapeHtml(title)+'">'+ch+'</div>';
+        }
+        return '<div class="seat-identity"></div>';
+      })()
     + infoBadge
     + '<div class="seat-bottom">'+huashenLine+delayRow+equipRow+'</div>';
 }
