@@ -80,6 +80,13 @@ function normalize(g){
   if(g.shensuResume && (typeof g.shensuResume.seat!=='number' || !g.players[g.shensuResume.seat] || typeof g.shensuResume.remaining!=='number')){
     g.shensuResume=null;
   }
+  // 张角【雷击】:雷击从南蛮入侵/万箭齐发的响应里触发时,靠此字段跨 leijiChoose→leijiJudge→
+  // 可能的鬼道/鬼才改判 记住"结束后该 aoeAdvance 续接哪个座位之后的目标",同样不塞进
+  // g.pending(会被期间打开的 guiduAsk/guicai 等子阶段覆盖),和 g.shensuResume 同一设计。
+  if(g.leijiResume===undefined) g.leijiResume=null;
+  if(g.leijiResume && (typeof g.leijiResume.prevSeat!=='number' || !g.players[g.leijiResume.prevSeat])){
+    g.leijiResume=null;
+  }
   // 技能发动语音事件:同上,旧存档回退 null
   if(g.lastSkillSound===undefined) g.lastSkillSound=null;
   // 许褚【裸衣】:本回合伤害加成标记。回合开始重置,旧存档缺失回退 false。
@@ -1414,11 +1421,15 @@ function firstGuicaiAsker(g, judgedSeat){
 // resume.type 是 sha/aoe,和原本一致)或 'delayJudge'(走 DELAY_TRICKS[trickName].effect)。
 
 // ===== 张角【雷击】 =====
-// maybeStartLeiji: 张角使用或打出【闪】时触发雷击
-function maybeStartLeiji(g, sourceSeat, shanCard) {
+// maybeStartLeiji: 张角使用或打出【闪】时触发雷击。resume(可选):调用方在南蛮入侵/万箭齐发
+// 的响应(aoeRespond)里触发雷击时传 {prevSeat:mySeat}——雷击整条链路(leijiChoose→
+// leijiJudge→可能的鬼道/鬼才改判)结束后,要靠这个字段知道"该不该转而调用 aoeAdvance 续接
+// 群体锦囊队列的下一个目标",而不是无条件回到 play、把还没问到的目标凭空丢弃。respondShan
+// (单体杀响应)调用时不传,g.leijiResume 保持 null,行为和 3/4 完全一致。
+function maybeStartLeiji(g, sourceSeat, shanCard, resume) {
   const source = g.players[sourceSeat];
   if(!source || !source.alive || !hasCap(source, 'leiji')) return false;
-  
+
   // 找出所有其他存活角色
   const aliveSeats = [];
   for(let i = 0; i < g.players.length; i++){
@@ -1426,9 +1437,10 @@ function maybeStartLeiji(g, sourceSeat, shanCard) {
       aliveSeats.push(i);
     }
   }
-  
+
   if(aliveSeats.length === 0) return false;
-  
+
+  g.leijiResume = resume || null;
   // 进入雷击选择阶段
   g.pending = {
     type: 'leijiChoose',
@@ -1440,6 +1452,23 @@ function maybeStartLeiji(g, sourceSeat, shanCard) {
   g.log = pushLog(g.log, source.name + ' 可以发动【雷击】,选择一名角色进行判定');
   markSkillSound(g, '雷击');
   return true;
+}
+// finishLeijiChain: 雷击整条链路(不管是判完黑桃/非黑桃、还是中途取消、还是无牌可判/目标已死
+// 这类早退)真正结束时的唯一收尾出口——所有 doLeijiJudge/cancelLeiji/finishGuidu(leijiJudge
+// 分支)的退出点都必须经过这里,不能各自直接写 g.pending=null;g.phase='play'。按 g.leijiResume
+// 是否存在分两种收尾:有(这次雷击是从南蛮/万箭响应里触发的)→ 消费掉这个标记,改用
+// aoeAdvance(g, resume.prevSeat) 续接群体锦囊剩余的目标;没有(respondShan 触发的普通场景,
+// 3/4 的既有行为)→ 照旧回到 play。
+function finishLeijiChain(g){
+  if(g.leijiResume){
+    const resume = g.leijiResume;
+    g.leijiResume = null;
+    g.pending = null;
+    aoeAdvance(g, resume.prevSeat);
+  } else {
+    g.pending = null;
+    g.phase = 'play';
+  }
 }
 
 // triggerLeiji: 选择雷击的目标角色
@@ -1480,26 +1509,24 @@ function doLeijiJudge(g) {
     const target = g.players[targetSeat];
     
     if (!source || !source.alive || !target || !target.alive) {
-      g.pending = null;
-      g.phase = 'play';
+      finishLeijiChain(g);
       return g;
     }
-    
+
     // 进行判定
     const judgeCard = judge(g);
     if(!judgeCard) {
-      g.pending = null;
-      g.phase = 'play';
+      finishLeijiChain(g);
       return g;
     }
-    
+
     // 先检查是否有改判技能（按照规则顺序）
     // 这里先检查鬼道，因为鬼道应该先于其他改判技能被询问
     if(maybeGuidu(g, targetSeat, judgeCard, resume) === 'pending') return g;
-    
+
     // 然后检查鬼才
     if(maybeGuicai(g, targetSeat, judgeCard, resume) === 'pending') return g;
-    
+
     // 如果没有改判或改判完成后，检查判定结果
     // 注意: 如果有改判，judgeCard可能已经被替换
     const finalCard = judgeCard; // 如果有改判，会在finishGuidu或finishGuicai中处理
@@ -1510,11 +1537,10 @@ function doLeijiJudge(g) {
     } else {
       g.log = pushLog(g.log, target.name + ' 判定为' + finalCard.suit + rankText(finalCard.rank) + ',【雷击】无效');
     }
-    
-    // 清理状态
-    g.pending = null;
-    g.phase = 'play';
-    
+
+    // 清理状态——统一走 finishLeijiChain,不直接写 g.pending=null;g.phase='play'
+    finishLeijiChain(g);
+
     return g;
   });
 }
@@ -1524,9 +1550,8 @@ function cancelLeiji() {
   tx(g => {
     if (g.pending && (g.pending.type === 'leijiChoose' || g.pending.type === 'leijiJudge') &&
         g.pending.sourceSeat === mySeat) {
-      g.pending = null;
-      g.phase = 'play';
       g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【雷击】');
+      finishLeijiChain(g); // 统一走链路收尾出口,不直接写 g.pending=null;g.phase='play'
     }
     return g;
   });
@@ -1738,7 +1763,10 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     processBeigeJudgeResult(g, replaceCard, resume.sourceSeat, resume.damagedSeat, resume.damageSource);
     return g;
   } else if(resume.kind === 'leijiJudge'){
-    // 雷击判定（特殊情况）
+    // 雷击判定（特殊情况）——统一走 finishLeijiChain 收尾(和 doLeijiJudge/cancelLeiji 同一
+    // 出口),不落到下面给其它 kind 兜底用的通用 g.pending=null;g.phase='play',否则雷击若是
+    // 从南蛮/万箭响应里触发、又被鬼道/鬼才改判过,g.leijiResume 记着的续接队列信息就会被漏掉,
+    // 重演场景5那个"其余目标被凭空丢弃"的问题。
     const { sourceSeat, targetSeat } = resume;
     const target = g.players[targetSeat];
     if(replaceCard.suit === '♠'){
@@ -1747,12 +1775,14 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     } else {
       g.log = pushLog(g.log, target.name + ' 被替换判定为' + replaceCard.suit + rankText(replaceCard.rank) + ',【雷击】无效');
     }
+    finishLeijiChain(g);
+    return g;
   }
-  
+
   // 清理状态
   g.pending = null;
   g.phase = 'play';
-  
+
   return g;
 }
 
@@ -4978,6 +5008,20 @@ function aoeRespond(useCard, cardIdx){
       if(card.name!==need){
         if(hasCap(me,'longdan')) markSkillSound(g,'龙胆');
         else if(need==='杀' && hasCap(me,'wusheng')) markSkillSound(g,'武圣');
+      }
+      // 张角【雷击】:使用或打出【闪】时可以发动雷击——和 respondShan(3/4)同一套写法,插入
+      // 位置同理必须在 card 已经 splice 出来、aoeAdvance 推进到下一个目标之前,挂起就立即
+      // return,不能让 aoeAdvance 在同一次 tx 里把刚挂起的 leijiChoose 冲掉。
+      // 判断条件故意只看 card.name==='闪',不附加 need==='闪' 这个前置条件:aoeRespond 同时
+      // 服务南蛮入侵(need==='杀')和万箭齐发(need==='闪')两种群体锦囊,而龙胆是双向转化
+      // (canUseAs 里 role==='杀'&&card.name==='闪' 同样成立)——如果张角能拿到龙胆(目前只有
+      // 左慈化身这一条路),用一张真闪当杀响应南蛮入侵,这张牌本身仍然是"打出了一张【闪】",
+      // 按官方原文"当你使用或打出一张【闪】时"雷击依然应该触发,不该被 need==='杀' 挡住。
+      // 第4个参数 {prevSeat:mySeat} 是"雷击从南蛮/万箭响应触发"的续接标记(见
+      // maybeStartLeiji/finishLeijiChain 的注释)——respondShan(单体杀响应)不传这个参数,
+      // 两种触发场景各自走各自的收尾行为,互不影响。
+      if(hasCap(me,'leiji') && card.name==='闪'){
+        if(maybeStartLeiji(g, mySeat, card, {prevSeat:mySeat})) return g;
       }
       aoeAdvance(g, mySeat);
       return g;
