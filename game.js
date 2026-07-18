@@ -5024,9 +5024,17 @@ function respondShan(useShan, cardIdx){
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       markCardSound(g, '闪', mySeat, card);
       if(card.name!=='闪' && hasCap(me,'longdan')) markSkillSound(g,'龙胆');
-      // 张角【雷击】:使用或打出【闪】时可以发动雷击
+      // 张角【雷击】:使用或打出【闪】时可以发动雷击——maybeStartLeiji 内部会把 g.pending
+      // 整个换成 leijiChoose 结构(不再是这个函数原本认识的 {from,to,...} respond 结构),
+      // 必须检查它的返回值:一旦挂起就立即 return,不能再往下跑 played<needed/
+      // maybeStartShaOffsetEffects 这些以"g.pending 还是原来那个杀响应结构"为前提的判断——
+      // 否则 g.pending.from 会读到 undefined(取自已被替换的 leijiChoose 对象),这些判断
+      // 全部落空,最终执行到函数尾部的 g.pending=null;finishSingleShaTarget(g),把刚挂起
+      // 的 leijiChoose 在同一次 tx 里原地冲掉,雷击的"是否发动"询问永远不会被任何客户端
+      // 看到。和凌统旋风当初的 pendingBefore 快照检查是同一类问题,这里更简单——
+      // maybeStartLeiji 本身就有明确的布尔返回值,不需要额外快照比较。
       if(hasCap(me,'leiji') && card.name==='闪'){
-        maybeStartLeiji(g, mySeat, card);
+        if(maybeStartLeiji(g, mySeat, card)) return g;
       }
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
       // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
