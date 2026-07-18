@@ -159,6 +159,10 @@ function renderHand(g){
       // 点了直接提交,不需要额外确认(目标固定,不需要选目标)。
       usable = canUseAs(me, card, '杀');
       if(usable) onClick=()=>{ resetQinglong(); respondQinglong(true, idx); };
+    } else if(g.phase==='cixiongChoice'&&cixiongDiscardMode&&g.pending&&g.pending.type==='cixiongChoice'&&g.pending.to===mySeat){
+      // 雌雄双股剑:目标弃一张手牌,任意手牌可点,点了即提交
+      usable=true;
+      onClick=()=>{ resetCixiongDiscard(); respondCixiongChoice('discard', idx); };
     } else if(g.phase==='qiaobianTurnStart'&&qiaobianMode==='choosePhase'&&g.pending&&g.pending.type==='qiaobianTurnStart'&&g.pending.seat===mySeat){
       // 巧变选牌模式:任意一张牌都可以选(不检查牌名)。toggle 单选(和断粮同款),
       // 还要另外选一个阶段(四个按钮在 renderControls 里),两者都选好才出现"确认"。

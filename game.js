@@ -614,6 +614,13 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
+  // 雌雄双股剑:攻击者询问 / 目标二选一
+  if(g.pending && (g.pending.type==='cixiongAsk' || g.pending.type==='cixiongChoice')){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      g.pending=null; g.phase='play';
+    }
+  }
   // 顺手牵羊/过河拆桥的选牌子阶段(g.pending.type==='pick'):trick/from/to 全是标量
   // (trick 是字符串锦囊名,from/to 是座位号)。这次专门审查过是否需要补防御,结论是刻意不改——
   // 和这一批新补防御的类型同样携带座位引用,但 pick 早有既有先例(CLAUDE.md 明确记录
@@ -2719,17 +2726,8 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
     return;
   }
   
-  // 于禁【毅重】(锁定技,目标无防具+黑色杀)/ 仁王盾(装备了这件防具+黑色杀) → 直接无效,
-  // 不进响应阶段、不消耗闪、不受伤。两者共用同一个 hasCap 入口(武将能力/装备能力不分来源),
-  // 只是 || 一个条件——"目标无防具"和"目标装备了仁王盾"structurally 互斥(装备区防具槽
-  // 只有一个,不可能同时是"空"和"仁王盾",不需要额外防御代码)。shaColor 为 'red'/'none'/
-  // undefined 时都安全跳过这个判断,只有精确等于 'black' 才命中。
-  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
-    const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
-    g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
-    finishSingleShaTarget(g);
-    return;
-  }
+  // 杀链顺序(雌雄双股剑规格):流离后 → 铁骑/烈弓 → 雌雄 → 仁王/毅重 → 八卦/闪。
+  // 仁王/毅重无效已挪到 afterShaTargetSkills(雌雄之后),以便 FAQ「可先发动雌雄再因盾无效」。
   g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' '+usedAs });
   if(hasCap(me,'tieqi')){
     g.pending={type:'tieqi', from:fromSeat, to:targetSeat, shaColor};
@@ -2751,7 +2749,23 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
       return;
     }
   }
-  continueShaAfterTieqi(g, fromSeat, targetSeat, false, sourceCard, shaColor, shaInfo);
+  afterShaTargetSkills(g, fromSeat, targetSeat, false, sourceCard, shaColor, shaInfo);
+}
+
+// afterShaTargetSkills: 铁骑/烈弓结束后(或无这两技能)→ 雌雄双股剑 → 仁王/毅重 → continueShaAfterTieqi。
+// 所有"目标已确定、武将技已问完"的入口统一走这里,避免铁骑后漏雌雄或仁王过早短路。
+function afterShaTargetSkills(g, from, to, noShan, sourceCard, shaColor, shaInfo){
+  if(typeof maybeStartCixiong==='function' && maybeStartCixiong(g, from, to, noShan, sourceCard, shaColor, shaInfo)) return;
+  const me=g.players[from], target=g.players[to];
+  if(!me || !target || !target.alive){ finishSingleShaTarget(g); return; }
+  // 于禁【毅重】/ 仁王盾:黑色杀直接无效(在雌雄之后判定,见规格 FAQ)
+  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
+    const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
+    g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
+    finishSingleShaTarget(g);
+    return;
+  }
+  continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInfo);
 }
 // respondLiegong: 仅攻击者(pending.from)可响应。不需要判定,玩家的选择直接就是 noShan 的值——
 // 复用 continueShaAfterTieqi 同一条尾巴(和铁骑判红共用"不可被闪抵消"这一效果)。
@@ -2762,7 +2776,7 @@ function respondLiegong(activate){
     g.log=pushLog(g.log, activate
       ? g.players[from].name+' 发动【烈弓】,此【杀】不可被【闪】抵消'
       : g.players[from].name+'：不发动【烈弓】');
-    continueShaAfterTieqi(g, from, to, activate, g.pending.sourceCard, g.pending.shaColor, g.pending.jiuBonus ? {jiuBonus:true} : undefined);
+    afterShaTargetSkills(g, from, to, activate, g.pending.sourceCard, g.pending.shaColor, g.pending.jiuBonus ? {jiuBonus:true} : undefined);
     return g;
   });
 }
@@ -3009,12 +3023,12 @@ function respondTieqi(activate){
     const from=g.pending.from, to=g.pending.to;
     if(!activate){
       g.log=pushLog(g.log, g.players[from].name+'：不发动【铁骑】');
-      continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, g.pending.jiuBonus ? {jiuBonus:true} : undefined);
+      afterShaTargetSkills(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, g.pending.jiuBonus ? {jiuBonus:true} : undefined);
       return g;
     }
     const card=judge(g);
     const shaInfo = g.pending.jiuBonus ? {jiuBonus:true} : undefined;
-    if(!card){ continueShaAfterTieqi(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, shaInfo); return g; } // 无牌可判,视为未发动
+    if(!card){ afterShaTargetSkills(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, shaInfo); return g; } // 无牌可判,视为未发动
     if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard, shaColor:g.pending.shaColor, shaInfo})==='pending') return g;
     finishTieqiJudge(g, from, to, card, g.pending.sourceCard, g.pending.shaColor, shaInfo);
     return g;
@@ -3028,7 +3042,7 @@ function finishTieqiJudge(g, from, to, card, sourceCard, shaColor, shaInfo){
   // (现实中不会发生——铁骑是马超专属 cap,一人不能同时是马超又是郭嘉——但函数写法上不应该
   // 硬编码排除这种情况,和 maybeTiandu 本身"只查 hasCap,不硬编码武将名"的原则一致)。
   maybeTiandu(g, from, card);
-  continueShaAfterTieqi(g, from, to, red, sourceCard, shaColor, shaInfo);
+  afterShaTargetSkills(g, from, to, red, sourceCard, shaColor, shaInfo);
 }
 // playZhangbaSha: 丈八蛇矛特效——任意两张手牌当一个【杀】。与 playCard 平级(playCard 只吃单张)。
 // 次数/距离/目标响应与普通杀完全一致(共用 resolveShaUse);仅"凑杀"方式不同。

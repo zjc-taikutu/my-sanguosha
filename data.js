@@ -66,6 +66,7 @@ const EQUIPS = {
   '方天画戟': { slot:'weapon', range:4, cap:'fangtian', desc:'武器,射程4。锁定技,若你使用的【杀】是你手牌里的最后一张牌,则此【杀】可以额外选择至多两个目标(可以不多选、也可以只多选一个)。' },
   '古锭刀':   { slot:'weapon', range:2, cap:'gudingdao', desc:'武器,射程2。锁定技,当你使用【杀】对目标角色造成伤害时,若其没有手牌,此伤害+1。' },
   '贯石斧':   { slot:'weapon', range:3, cap:'guanshifu', desc:'武器,射程3。当你使用的【杀】被【闪】抵消时,你可以弃置两张牌(手牌/装备任意组合,须同时弃满两张),令此【杀】依然造成伤害。' },
+  '雌雄双股剑': { slot:'weapon', range:2, cap:'cixiong', desc:'武器,射程2。当你使用【杀】指定与你性别不同的角色为目标后,你可以令其选择一项:1.弃置一张手牌;2.令你摸一张牌。' },
   '的卢':     { slot:'plus1', dist:+1, desc:'坐骑(防御马)。其他角色计算与你的距离时+1,让你更难被【杀】攻击到。' },
   '绝影':     { slot:'plus1', dist:+1, desc:'坐骑(防御马)。其他角色计算与你的距离时+1,让你更难被【杀】攻击到。' },
   '爪黄飞电': { slot:'plus1', dist:+1, desc:'坐骑(防御马)。其他角色计算与你的距离时+1,让你更难被【杀】攻击到。' },
@@ -784,6 +785,11 @@ function generalGender(player){
   return (gen && gen.gender) || 'male';
 }
 function isMale(player){ return generalGender(player)==='male'; }
+// 两名角色武将性别是否不同(雌雄双股剑等)。走 generalGender,含左慈化身跟随。
+function isOppositeGender(a, b){
+  if(!a || !b) return false;
+  return generalGender(a) !== generalGender(b);
+}
 // generalFaction:武将所属势力(wei/shu/wu/qun/jin)。逐行对应 generalGender——同样的
 // 化身跟随分支(左慈【化身】借用别人的武将时,势力也跟着变:借曹操则算 wei)、同样的
 // player.general 取法、同样的脏数据回退。展示层和未来的势力相关技能都统一走这一个函数,
@@ -990,7 +996,7 @@ function getAnyDesc(name){ const e=getEquip(name); return (e && e.desc) || getCa
 const SUITS = ['♠','♥','♦','♣']; // 黑/红/红/♣黑;轮询分配保证红黑严格均衡(判定公平)
 function buildDeck(){
   // 牌堆:标准版(104基础+4EX)官方花色点数 + 项目额外实现的军争/非官方牌。
-  // 省略未实现的【雌雄双股剑】(♠2,需性别系统)。当前共135张。
+  // 标准版+军争等。雌雄双股剑 ♠2 已实现。
   // 点数:A=1,J=11,Q=12,K=13。同花色点数可在不同牌名重复,靠 id 区分。
   const S='♠', H='♥', C='♣', D='♦';
   const LIST = [
@@ -1023,8 +1029,9 @@ function buildDeck(){
     ['雷杀',S,4],['雷杀',S,5],['雷杀',S,6],['雷杀',S,7],['雷杀',S,8],
     ['雷杀',C,5],['雷杀',C,6],['雷杀',C,7],['雷杀',C,8],
     ['火攻',H,2],['火攻',H,3],['火攻',D,12],
-    // 标准版装备 18(官方19,省略雌雄双股剑)
+    // 标准版装备 19
     ['诸葛连弩',C,1],['诸葛连弩',D,1],
+    ['雌雄双股剑',S,2],
     ['青釭剑',S,6],['青龙偃月刀',S,5],['丈八蛇矛',S,12],
     ['贯石斧',D,5],['方天画戟',D,12],['麒麟弓',H,5],['寒冰剑',S,2],
     ['八卦阵',S,2],['八卦阵',C,2],['仁王盾',C,2],
@@ -1050,7 +1057,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DELAY_TRICKS,
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
-    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, equipHasCap,
+    canUseAs, findUsableAs, triggerHook, randomGeneralId, generalHasCap, generalCapValue, generalGender, isMale, isOppositeGender, equipHasCap,
     validateHuashenPick, huashenSkillEntry, huashenHasCap, huashenCapValue, huashenHasHook
   };
 }

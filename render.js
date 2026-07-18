@@ -39,7 +39,7 @@ const CARD_PINYIN = {
   '万箭齐发':'wanjianqifa', '火攻':'huogong', '闪电':'shandian', '乐不思蜀':'lebusishu',
   '兵粮寸断':'bingliangcunduan', '借刀杀人':'jiedaosharen', '五谷丰登':'wugufengdeng',
   '桃园结义':'taoyuanjieyi', '铁索连环':'tiesuolianhuan',
-  '诸葛连弩':'zhugeliannu', '青釭剑':'qinggangjian', '青龙偃月刀':'qinglongyanyuedao',
+  '诸葛连弩':'zhugeliannu', '雌雄双股剑':'cixiongshuanggujian', '青釭剑':'qinggangjian', '青龙偃月刀':'qinglongyanyuedao',
   '丈八蛇矛':'zhangbashemao', '贯石斧':'guanshifu', '方天画戟':'fangtianhuaji',
   '麒麟弓':'qilingong', '寒冰剑':'hanbingjian', '古锭刀':'gudingdao',
   '八卦阵':'baguazhen', '仁王盾':'renwangdun',
@@ -801,6 +801,8 @@ function render(g){
   if(!(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat)) resetXiaoguo();
   // 同款兜底:一旦不在"轮到自己(攻击者)响应青龙偃月刀"的状态,退出选牌模式,不留残留。
   if(!(g.phase==='qinglong' && g.pending && g.pending.type==='qinglong' && g.pending.from===mySeat)) resetQinglong();
+  // 同款兜底:雌雄双股剑目标选手牌弃置模式
+  if(!(g.phase==='cixiongChoice' && g.pending && g.pending.type==='cixiongChoice' && g.pending.to===mySeat)) resetCixiongDiscard();
   // 同款兜底:一旦不在"轮到自己(攻击者)响应贯石斧"的状态,清空已选的弃牌项,不留残留。
   if(!(g.phase==='guanshi' && g.pending && g.pending.type==='guanshi' && g.pending.from===mySeat)) resetGuanshi();
   // 同款兜底:一旦不在"轮到自己分配遗计牌"的状态,清空已选的分配项,不留残留。

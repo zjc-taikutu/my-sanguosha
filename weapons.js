@@ -297,3 +297,95 @@ function respondGuanshi(picks){
     return g;
   });
 }
+
+// ===== 雌雄双股剑:杀指定异性目标后,攻击者可选令目标弃1手牌或己摸1 =====
+// 挂点在 afterShaTargetSkills(铁骑/烈弓之后、仁王/毅重之前)。单目标特效。
+// 透传 noShan/shaColor/sourceCard/shaInfo 供结束后继续杀结算。
+function maybeStartCixiong(g, from, to, noShan, sourceCard, shaColor, shaInfo){
+  const attacker = g.players[from], target = g.players[to];
+  if(!attacker || !target || !target.alive || from===to) return false;
+  if(!hasCap(attacker, 'cixiong')) return false;
+  if(typeof isOppositeGender==='function'){
+    if(!isOppositeGender(attacker, target)) return false;
+  } else if(generalGender(attacker)===generalGender(target)) return false;
+  g.pending = { type:'cixiongAsk', from, to, noShan:!!noShan, shaColor };
+  if(sourceCard!==undefined) g.pending.sourceCard = sourceCard;
+  if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus = true;
+  g.phase = 'cixiongAsk';
+  g.log = pushLog(g.log, attacker.name+' 是否发动【雌雄双股剑】…');
+  return true;
+}
+
+function continueAfterCixiong(g){
+  const d = g.pending;
+  if(!d || (d.type!=='cixiongAsk' && d.type!=='cixiongChoice')){
+    finishSingleShaTarget(g);
+    return;
+  }
+  const from=d.from, to=d.to, noShan=d.noShan, shaColor=d.shaColor;
+  const sourceCard=d.sourceCard;
+  const shaInfo = d.jiuBonus ? {jiuBonus:true} : undefined;
+  g.pending = null;
+  // 仁王/毅重 + 后续:走 afterShaTargetSkills 后半——但 afterSha 会再 maybeStartCixiong。
+  // 这里直接做仁王判断 + continueShaAfterTieqi,避免重入雌雄。
+  const me=g.players[from], target=g.players[to];
+  if(!me || !target || !target.alive){ finishSingleShaTarget(g); return; }
+  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
+    const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
+    g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
+    finishSingleShaTarget(g);
+    return;
+  }
+  continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInfo);
+}
+
+// respondCixiongAsk: 仅攻击者。不发动→继续杀;发动→无手牌则己摸1,有手牌则问目标。
+function respondCixiongAsk(activate){
+  tx(g=>{
+    if(g.phase!=='cixiongAsk'||!g.pending||g.pending.type!=='cixiongAsk'||g.pending.from!==mySeat) return g;
+    const from=g.pending.from, to=g.pending.to;
+    const attacker=g.players[from], target=g.players[to];
+    if(!activate){
+      g.log=pushLog(g.log, attacker.name+'：不发动【雌雄双股剑】');
+      continueAfterCixiong(g);
+      return g;
+    }
+    g.log=pushLog(g.log, attacker.name+' 发动【雌雄双股剑】');
+    markCardSound(g, '雌雄双股剑', from, (attacker.equips&&attacker.equips.weapon)||null);
+    const handLen = (target.hand||[]).length;
+    if(handLen===0){
+      drawN(g, from, 1);
+      g.log=pushLog(g.log, target.name+' 没有手牌，'+attacker.name+' 摸一张牌');
+      continueAfterCixiong(g);
+      return g;
+    }
+    g.pending.type = 'cixiongChoice';
+    g.phase = 'cixiongChoice';
+    g.log=pushLog(g.log, '等待 '+target.name+' 选择：弃一张手牌 或 令 '+attacker.name+' 摸一张牌…');
+    return g;
+  });
+}
+
+// respondCixiongChoice: 仅目标。choice='discard'|'draw'; discard 须带合法手牌下标。
+function respondCixiongChoice(choice, cardIdx){
+  tx(g=>{
+    if(g.phase!=='cixiongChoice'||!g.pending||g.pending.type!=='cixiongChoice'||g.pending.to!==mySeat) return g;
+    const from=g.pending.from, to=g.pending.to;
+    const attacker=g.players[from], target=g.players[to];
+    if(choice==='draw'){
+      drawN(g, from, 1);
+      g.log=pushLog(g.log, target.name+' 令 '+attacker.name+' 摸一张牌（雌雄双股剑）');
+      continueAfterCixiong(g);
+      return g;
+    }
+    if(choice==='discard'){
+      const card = (typeof cardIdx==='number') ? (target.hand||[])[cardIdx] : null;
+      if(!card) return g;
+      g.discard.push(target.hand.splice(cardIdx,1)[0]);
+      g.log=pushLog(g.log, target.name+' 弃置手牌【'+card.name+'】（雌雄双股剑）');
+      continueAfterCixiong(g);
+      return g;
+    }
+    return g;
+  });
+}

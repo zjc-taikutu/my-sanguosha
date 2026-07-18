@@ -116,6 +116,9 @@ function resetXiaoguo(){ xiaoguoMode=false; }
 // 牌都可点,点了直接提交(和骁果同一个"点发动进选牌模式,选牌即提交"的单步交互模式)。
 let qinglongMode = false;
 function resetQinglong(){ qinglongMode=false; }
+// 雌雄双股剑:目标选「弃一张手牌」时进入选手牌模式
+let cixiongDiscardMode = false;
+function resetCixiongDiscard(){ cixiongDiscardMode=false; }
 // 贯石斧:杀被闪抵消后,装备者(攻击者)可选弃自己2张牌(手牌/装备混合)令这张杀依然造成伤害。
 // 不需要"发动"这一步单独确认——直接列出自己所有可弃项(手牌+非武器槽装备)供toggle多选,
 // 选够恰好2项才出现"确认发动",同屏始终有"不发动"按钮。guanshiPicks 存编码字符串
@@ -2342,6 +2345,48 @@ function renderControls(g){
   if(g.phase==='biyue' && g.pending && g.pending.type==='biyue'){
     const p=g.players[g.pending.seat];
     waitAskBanner(p?p.name:'貂蝉', '闭月');
+    return;
+  }
+  // 雌雄双股剑:攻击者是否发动
+  if(g.phase==='cixiongAsk' && g.pending && g.pending.type==='cixiongAsk' && g.pending.from===mySeat){
+    const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
+    const b1=document.createElement('button'); b1.className='primary';
+    b1.textContent='发动【雌雄双股剑】'; b1.onclick=()=>respondCixiongAsk(true);
+    c.appendChild(b1);
+    const b2=document.createElement('button');
+    b2.textContent='不发动'; b2.onclick=()=>respondCixiongAsk(false);
+    c.appendChild(b2);
+    setBanner('对 '+escapeHtml(to||'目标')+' 使用【杀】,是否发动【雌雄双股剑】?');
+    return;
+  }
+  if(g.phase==='cixiongAsk' && g.pending && g.pending.type==='cixiongAsk'){
+    const from=g.players[g.pending.from]&&g.players[g.pending.from].name;
+    const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
+    setBanner(escapeHtml(from||'')+' 对 '+escapeHtml(to||'')+' 使用【杀】,是否发动【雌雄双股剑】…');
+    return;
+  }
+  // 雌雄双股剑:目标二选一
+  if(g.phase==='cixiongChoice' && g.pending && g.pending.type==='cixiongChoice' && g.pending.to===mySeat){
+    const fromName=g.players[g.pending.from]&&g.players[g.pending.from].name;
+    if(cixiongDiscardMode){
+      setBanner('【雌雄双股剑】请选择一张手牌弃置(点牌即弃)。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消选牌'; cb.onclick=()=>{ resetCixiongDiscard(); render(g); }; c.appendChild(cb);
+    } else {
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='弃一张手牌'; b1.onclick=()=>{ cixiongDiscardMode=true; render(g); };
+      c.appendChild(b1);
+      const b2=document.createElement('button');
+      b2.textContent='令对方摸一张牌'; b2.onclick=()=>{ resetCixiongDiscard(); respondCixiongChoice('draw'); };
+      c.appendChild(b2);
+      setBanner(escapeHtml(fromName||'')+' 发动【雌雄双股剑】:弃一张手牌,或令其摸一张牌。');
+    }
+    return;
+  }
+  if(g.phase==='cixiongChoice' && g.pending && g.pending.type==='cixiongChoice'){
+    const from=g.players[g.pending.from]&&g.players[g.pending.from].name;
+    const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
+    setBanner(escapeHtml(from||'')+' 发动了【雌雄双股剑】,等待 '+escapeHtml(to||'')+' 选择…');
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
