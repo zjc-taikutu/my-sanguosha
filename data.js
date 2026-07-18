@@ -7,6 +7,47 @@ const MAX_HP = 4; // 大厅占位 / 兜底默认体力上限
 const START_HAND = 4;
 const BASIC_CARDS = ['杀','火杀','雷杀','闪','桃','酒']; // 基本牌:不含锦囊/装备,乐进【骁果】等按"是不是基本牌"判断的地方统一查这个表
 
+// ---------- 身份局(主公局)配比与查询 ----------
+// 仅 4~8 人。数组元素为 role id,开局洗牌后按座位发放。
+// 规格: docs/superpowers/specs/2026-07-19-identity-mode-design.md
+const IDENTITY_TABLE = {
+  4: ['zhu','zhong','fan','nei'],
+  5: ['zhu','zhong','fan','fan','nei'],
+  6: ['zhu','zhong','fan','fan','fan','nei'],
+  7: ['zhu','zhong','zhong','fan','fan','fan','nei'],
+  8: ['zhu','zhong','zhong','fan','fan','fan','fan','nei'],
+};
+const ROLE_LABEL = { zhu:'主公', zhong:'忠臣', fan:'反贼', nei:'内奸' };
+
+// 按人数洗牌写入 p.role;主公 roleRevealed=true,其余 false。人数不在 4~8 时 no-op。
+function assignIdentities(players){
+  const n = (players||[]).length;
+  const base = IDENTITY_TABLE[n];
+  if(!base) return;
+  const roles = [...base].sort(()=>Math.random()-0.5);
+  players.forEach((p,i)=>{
+    if(!p) return;
+    p.role = roles[i];
+    p.roleRevealed = (p.role === 'zhu');
+  });
+}
+
+function getLordSeat(g){
+  if(!g || !Array.isArray(g.players)) return -1;
+  return g.players.findIndex(p=>p && p.role==='zhu');
+}
+
+// 渲染用:谁能看见目标座位的身份。主公始终可见;已翻开可见;自己看自己可见。
+function canSeeRole(g, viewerSeat, targetSeat){
+  if(!g || g.gameMode!=='identity') return false;
+  const t = g.players && g.players[targetSeat];
+  if(!t || !t.role) return false;
+  if(t.role==='zhu') return true;
+  if(t.roleRevealed) return true;
+  if(viewerSeat===targetSeat) return true;
+  return false;
+}
+
 // ---------- 装备区(地基:只搭容器+显示;派生属性/距离/射程/效果一律后续经 EQUIPS 常量表 + getEquip 实现,不写进 Firebase) ----------
 // 四槽:weapon 武器 / armor 防具 / plus1 +1马(防御马) / minus1 -1马(进攻马);每槽存一张装备牌对象 {id,name} 或 null(空)。
 const EQUIP_SLOTS = ['weapon','armor','plus1','minus1'];
@@ -1005,6 +1046,7 @@ if (typeof module !== 'undefined' && module.exports) {
     GENERALS, GENERAL_IDS, getGeneral, generalMaxHp, hasCap, HUASHEN_SKILL_TABLE,
     EQUIPS, EQUIP_SLOTS, emptyEquips, getEquip,
     SEATS, MIN_PLAYERS, MAX_HP, START_HAND, BASIC_CARDS,
+    IDENTITY_TABLE, ROLE_LABEL, assignIdentities, getLordSeat, canSeeRole,
     DELAY_TRICKS,
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,
