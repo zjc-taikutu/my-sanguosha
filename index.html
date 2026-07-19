@@ -510,6 +510,19 @@
      column"把两者装在同一个容器里:装备条在下、判定区在上,判定区自然被装备条顶上去,
      不需要任何魔数、也不需要 :has() 或 JS 参与,行数怎么变都不会错位。 */
   .seat-bottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;}
+  /* 周泰【不屈】不屈牌行:红色系 chip,**不透明底衬**(#4a1414,深红,不透明)——刻意不抄
+     .dchip/.seat-huashen-line 那套"半透明+text-shadow"的旧写法,而是走势力标识/装备条那次
+     确立的"对比度不随立绘明暗漂移"标准。只显示花色+点数(render.js的seatEquipFace,和装备条
+     同一套红/黑配色:红花色#ff6a4d、黑花色var(--paper)),真实WCAG计算过这两个颜色在这个
+     不透明红底上同样达标(红花色5.30、白字11.54,均超过AA的4.5)——不新造配色,复用全项目
+     "红花色统一用这一个色值"的既有约定。这些牌是规则判定依赖的公开信息(周泰的存活判定是
+     "所有不屈牌点数唯一才能不死",其他玩家必须看到才能参与博弈),不做视角限制。位置在
+     化身行和判定区之间(数据优先级高于普通判定区,更靠上更显眼)。 */
+  .seat-buqu-row{display:flex;flex-wrap:wrap;gap:2px;justify-content:flex-end;
+    padding:0 3px 2px;}
+  .seat-buqu-row .bchip{font-size:9px;padding:1px 4px;border:1px solid var(--cinnabar-bright);
+    border-radius:4px;background:#4a1414;white-space:nowrap;}
+  .seat.me .seat-buqu-row .bchip{font-size:11px;padding:2px 6px;}
   /* 判定区(延时锦囊):叠在图片上层,自带半透明深色底衬(同血量思路,不能只靠描边)。
      紫色系呼应手牌 .card.trick 的锦囊配色,和装备的白底金字区分开。 */
   .seat-delays{display:flex;flex-wrap:wrap;gap:2px;justify-content:flex-end;
@@ -1373,16 +1386,16 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=198"></script>
-<script src="data.js?v=198"></script>
-<script src="room-lifecycle.js?v=198"></script>
-<script src="game.js?v=198"></script>
-<script src="weapons.js?v=198"></script>
-<script src="skills.js?v=198"></script>
-<script src="render.js?v=198"></script>
-<script src="render-table.js?v=198"></script>
-<script src="render-hand.js?v=198"></script>
-<script src="render-controls.js?v=198"></script>
-<script src="render-log.js?v=198"></script>
+<script src="config.js?v=199"></script>
+<script src="data.js?v=199"></script>
+<script src="room-lifecycle.js?v=199"></script>
+<script src="game.js?v=199"></script>
+<script src="weapons.js?v=199"></script>
+<script src="skills.js?v=199"></script>
+<script src="render.js?v=199"></script>
+<script src="render-table.js?v=199"></script>
+<script src="render-hand.js?v=199"></script>
+<script src="render-controls.js?v=199"></script>
+<script src="render-log.js?v=199"></script>
 </body>
 </html>

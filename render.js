@@ -650,6 +650,24 @@ function renderSeatCard(g, seat, isSelf){
       + escapeHtml(avatarGen?avatarGen.name:p.huashenGeneral)+'·'+escapeHtml(p.huashenSkillName||'')
       + ' <span class="huashen-info-mark">?</span></div>'
     : '';
+  // 周泰【不屈】:不屈牌行,红色系 chip,只显示花色+点数(不显示牌名——数量可变、名字长度
+  // 不可控,塞进小 chip 容易在窄屏挤爆;规则判定只需要点数,牌名放 title 属性里,hover仍可见,
+  // 信息不丢失)。**所有玩家可见,不做 isSelf/视角限制**——周泰的存活判定规则是"所有不屈牌
+  // 点数唯一才能不死",这是场上其他人必须能看到才能参与博弈判断的公开信息,不能藏起来。
+  // **用不透明底衬**(#4a1414,深红色,不透明)——这次不抄 .dchip/.seat-huashen-line 现有的
+  // 半透明+text-shadow那套旧写法,而是走势力标识/装备条那次确立的"对比度不随立绘明暗漂移"
+  // 标准。红/黑花色文字复用 seatEquipFace 已经校准过的两个色值(#ff6a4d红/var(--paper)白)——
+  // 这两个颜色原本是为装备条那层半透明深色渐变背景调的,这次用真实WCAG计算逐一验证过,在
+  // 这个新的 #4a1414 不透明红底上同样达标(红花色5.30、白字11.54,均远超4.5),所以直接复用,
+  // 不新造一套颜色——全项目"红花色统一用这一个色值"这条既有约定继续保持,不因为这次新增
+  // 一个新背景就分裂出第二套配色。门控条件和判定区同一原则(g.started且非空才渲染,空数组
+  // 时整个容器不渲染,不留空占位;不需要 hasCap 判断——buquCards 只有真的放置过不屈牌才会
+  // 非空,天然只有周泰才可能命中,不会误伤其他角色)。
+  const buquRow = (g.started && (p.buquCards||[]).length>0)
+    ? '<div class="seat-buqu-row">'+p.buquCards.map(c=>{
+        return '<span class="bchip" title="不屈牌：'+escapeHtml(c.name)+' '+escapeHtml(c.suit+rankText(c.rank))+'">'+(seatEquipFace(c)||'')+'</span>';
+      }).join('')+'</div>'
+    : '';
   // 判定区(延时锦囊):紫色 chip,叠在装备条上方(仍在图片上层),同样自带半透明底衬。
   const delayRow = (g.started && (p.delays||[]).length>0)
     ? '<div class="seat-delays">'+p.delays.map(c=>{
@@ -722,7 +740,7 @@ function renderSeatCard(g, seat, isSelf){
         return '<div class="seat-identity"></div>';
       })()
     + infoBadge
-    + '<div class="seat-bottom">'+huashenLine+delayRow+equipRow+'</div>';
+    + '<div class="seat-bottom">'+huashenLine+buquRow+delayRow+equipRow+'</div>';
 }
 
 
