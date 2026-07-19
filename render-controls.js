@@ -4079,21 +4079,28 @@ function renderZhichiStatus(g) {
 
 // 曹冲技能UI总入口
 function renderCaochong(g) {
-  // 称象询问阶段
-  if (g.pending && g.pending.type === 'chengxiangAsk' && g.pending.seat === mySeat) {
-    return renderChengxiangAsk(g);
+  // 称象询问阶段:"是否发动"本身和洛神"是否发动进行判定"同一原则——发动意图是隐藏信息,
+  // 非本人只看不剧透的banner,不返回任何面板内容。
+  if (g.pending && g.pending.type === 'chengxiangAsk') {
+    if (g.pending.seat === mySeat) return renderChengxiangAsk(g);
+    const p = g.players[g.pending.seat];
+    setBanner((p?escapeHtml(p.name):'')+' 受到伤害,是否发动【称象】…');
+    return '';
   }
-  
-  // 称象选择阶段
-  if (g.pending && g.pending.type === 'chengxiangChoose' && g.pending.seat === mySeat) {
+
+  // 称象选择阶段:官方规则是"亮出"牌堆顶4张牌——这是公开信息,所有玩家都应该能看到这4张牌
+  // 的牌面,和五谷丰登公共牌池(poolDesc对所有人可见)同一原则,不能用 seat===mySeat 把整个
+  // 渲染都挡住。renderChengxiangChoose 内部自己按 seat===mySeat 分叉:本人拿到完整的
+  // 交互面板(可点击选牌+确认/取消按钮),其余人只拿到只读的牌面展示,不含任何 onclick。
+  if (g.pending && g.pending.type === 'chengxiangChoose') {
     return renderChengxiangChoose(g);
   }
-  
+
   // 仁心选择阶段
   if (g.pending && g.pending.type === 'renxinChoose' && g.pending.seat === mySeat) {
     return renderRenxinChoose(g);
   }
-  
+
   return '';
 }
 
@@ -4117,8 +4124,28 @@ let chengxiangSelectedIndices = [];
 
 function renderChengxiangChoose(g) {
   const p = g.pending;
-  if (!p || p.type !== 'chengxiangChoose' || p.seat !== mySeat) return '';
-  
+  if (!p || p.type !== 'chengxiangChoose') return '';
+
+  // 非本人:只读展示亮出的4张牌本身(公开信息),不含任何 onclick,不能操作选择/确认/取消。
+  if (p.seat !== mySeat) {
+    const owner = g.players[p.seat];
+    const ownerName = owner ? owner.name : '';
+    let html = '<div class="skill-choose">';
+    html += '<h4>【称象】亮出的牌</h4>';
+    html += '<p>' + escapeHtml(ownerName) + ' 亮出了以下 ' + p.revealedCards.length + ' 张牌,正在选择获得哪些…</p>';
+    html += '<div class="card-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 10px 0;">';
+    p.revealedCards.forEach((card, idx) => {
+      const value = p.cardValues[idx].value;
+      html += '<div class="card-option" style="padding: 10px; border: 2px solid #ccc; border-radius: 5px;">';
+      html += '<div class="card-name">' + escapeHtml(card.name) + '</div>';
+      html += '<div class="card-value">点数: ' + value + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+
   const selectedCards = p.revealedCards.filter((_, i) => chengxiangSelectedIndices.includes(i));
   const selectedHtml = selectedCards.length > 0 
     ? selectedCards.map(c => c.name).join(',') 
