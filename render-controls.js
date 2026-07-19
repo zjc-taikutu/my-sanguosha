@@ -4178,7 +4178,10 @@ function renderChengxiangChoose(g) {
 }
 
 function toggleChengxiangCard(idx) {
-  const p = g.pending;
+  // 顶层具名函数,由HTML里的onclick在全局作用域直接调用,不是tx回调也不接收g参数——
+  // 必须用currentG(render.js里每次render(g)都会更新的"最近一次收到的游戏状态"),不能
+  // 引用一个从未在任何地方声明过的裸标识符g(会抛ReferenceError,点击静默无反应)。
+  const p = currentG.pending;
   if (!p || p.type !== 'chengxiangChoose' || p.seat !== mySeat) return;
   
   const cardValue = p.cardValues[idx].value;
@@ -4198,7 +4201,8 @@ function toggleChengxiangCard(idx) {
 }
 
 function confirmChengxiangSelection() {
-  const p = g.pending;
+  // 同 toggleChengxiangCard:顶层具名函数,必须用 currentG,不能引用未声明的裸 g。
+  const p = currentG.pending;
   if (!p || p.type !== 'chengxiangChoose' || p.seat !== mySeat) return;
   
   const sum = chengxiangSelectedIndices.reduce((s, i) => s + p.cardValues[i].value, 0);
