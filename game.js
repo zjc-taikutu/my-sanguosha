@@ -204,8 +204,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='luanjiChoose'){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.availablePairs) || d.availablePairs.length===0 ||
-       d.sourceSeat !== mySeat){
+       !Array.isArray(d.availablePairs) || d.availablePairs.length===0){
       g.pending = null;
       g.phase = 'play';
     }
@@ -215,8 +214,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='luanjiConfirm'){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.cardIndices) || d.cardIndices.length !== 2 ||
-       d.sourceSeat !== mySeat){
+       !Array.isArray(d.cardIndices) || d.cardIndices.length !== 2){
       g.pending = null;
       g.phase = 'play';
     }
@@ -226,8 +224,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='leijiChoose'){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.availableTargets) || d.availableTargets.length===0 ||
-       d.sourceSeat !== mySeat){
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
       g.pending = null;
       g.phase = 'play';
     }
@@ -899,8 +896,7 @@ function normalize(g){
   // 曹仁【据守】:选择阶段
   if(g.pending && g.pending.type==='jushouChoose'){
     const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       d.seat !== mySeat){
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
       g.pending = null;
       g.phase = 'end';
     }
@@ -951,7 +947,6 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
-       d.sourceSeat !== mySeat ||
        (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
       g.pending = null;
       g.phase = g.phase === 'beigeChoose' ? 'play' : g.phase;
@@ -962,7 +957,6 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
-       d.sourceSeat !== mySeat ||
        (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
       g.pending = null;
       g.phase = 'play';
@@ -973,7 +967,6 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
-       d.sourceSeat !== mySeat ||
        !d.resume || typeof d.resume.kind!=='string'){
       g.pending = null;
       g.phase = 'play';
@@ -1023,7 +1016,6 @@ function normalize(g){
   if(g.pending && g.pending.type==='xuanfengPick'){
     const d = g.pending;
     if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
-       d.from !== mySeat ||
        !Array.isArray(d.targets) ||
        !Array.isArray(d.discardedCounts) ||
        d.discardedCounts.length !== d.targets.length ||
@@ -1053,8 +1045,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.baseTarget!=='number' || !g.players[d.baseTarget] || !g.players[d.baseTarget].alive ||
-       !Array.isArray(d.availableTargets) || d.availableTargets.length===0 ||
-       d.sourceSeat !== mySeat){
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
       g.pending = null;
       g.phase = 'play';
     }
@@ -1141,8 +1132,7 @@ function normalize(g){
   // 丁奉【奋迅】:弃牌选择阶段
   if(g.pending && g.pending.type==='fenxunDiscard'){
     const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       d.seat !== mySeat){
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
       g.pending = null;
       g.phase = 'play';
     }
@@ -1152,8 +1142,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='fenxunTarget'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.availableTargets) || d.availableTargets.length===0 ||
-       d.seat !== mySeat){
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
       g.pending = null;
       g.phase = 'play';
     }
