@@ -286,8 +286,39 @@ function respondHuashenChangePickEnd(generalId, skillName){
 }
 
 // respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
-// respondPickLordGeneral: 身份局主公从 5 张候选中选 1。选完后全场立刻可见主公武将
-// (p.general 已写入;渲染层对主公放开 avatarReady)。再给其余玩家各发 3 张进入 pickingGeneral。
+// finishLordGeneralPick: 主公选将结算的共用主体(respondPickLordGeneral/debugPickLordGeneral
+// 校验各自的合法性之后都调用它)——选完后全场立刻可见主公武将(p.general 已写入;渲染层对
+// 主公放开 avatarReady),再给其余玩家各发 3 张进入 pickingGeneral。
+// **不做候选合法性校验**——校验是两个入口各自的职责,这里只负责"选定之后要做的事"。
+function finishLordGeneralPick(g, lord, generalId){
+  const me = g.players[lord];
+  me.general = generalId;
+  me.generalChoices = null;
+  // 主公武将对全场立刻可见,日志可写武将名
+  g.log = pushLog(g.log, me.name+' 选择了武将【'+GENERALS[generalId].name+'】');
+  const pool5 = Array.isArray(g.lordGeneralPool) ? g.lordGeneralPool : [];
+  // 池外调试选将:剩余池 = 全部武将去掉已选
+  const leftover = pool5.filter(id=>id!==generalId);
+  const unused = Object.keys(GENERALS).filter(id=>id!==generalId && !pool5.includes(id));
+  const rest = [...leftover, ...unused].sort(()=>Math.random()-0.5);
+  const OTHER_PICK = 3;
+  let k = 0;
+  g.players.forEach((p,i)=>{
+    if(!p || i===lord) return;
+    p.generalChoices = rest.slice(k, k+OTHER_PICK);
+    k += OTHER_PICK;
+    p.general = null;
+  });
+  g.phase = 'pickingGeneral';
+  g.log = pushLog(g.log, '请其他玩家选将…');
+}
+
+// respondPickLordGeneral: 正式入口——身份局主公从发给他的 5 张候选(g.lordGeneralPool)里
+// 选 1,只能点自己的候选池,不能选池外武将。**这条候选池校验是这个函数存在的意义**,和
+// respondPickGeneral(他人三选一正式入口)对 p.generalChoices 的 includes 校验同一原则,
+// 不能因为调试场景需要放开限制就把这条校验从正式入口里拿掉——调试需求应该走独立的
+// debugPickLordGeneral,不能共用这一个函数(这正是 6e3db94 那次改动踩的坑:当时把校验直接
+// 从这个正式入口里删掉了,导致正式流程里主公理论上能绕过UI选到候选池外的任意武将)。
 function respondPickLordGeneral(generalId){
   tx(g=>{
     if(g.phase!=='pickingLordGeneral' || g.gameMode!=='identity') return g;
@@ -296,26 +327,27 @@ function respondPickLordGeneral(generalId){
     const me = g.players[mySeat];
     if(!me || me.general) return g;
     if(!GENERALS[generalId]) return g;
-    // 正式 UI 只点候选;调试入口可传池外 id(与 debugPickGeneral 同策略)
-    me.general = generalId;
-    me.generalChoices = null;
-    // 主公武将对全场立刻可见,日志可写武将名
-    g.log = pushLog(g.log, me.name+' 选择了武将【'+GENERALS[generalId].name+'】');
-    const pool5 = Array.isArray(g.lordGeneralPool) ? g.lordGeneralPool : [];
-    // 池外调试选将:剩余池 = 全部武将去掉已选
-    const leftover = pool5.filter(id=>id!==generalId);
-    const unused = Object.keys(GENERALS).filter(id=>id!==generalId && !pool5.includes(id));
-    const rest = [...leftover, ...unused].sort(()=>Math.random()-0.5);
-    const OTHER_PICK = 3;
-    let k = 0;
-    g.players.forEach((p,i)=>{
-      if(!p || i===lord) return;
-      p.generalChoices = rest.slice(k, k+OTHER_PICK);
-      k += OTHER_PICK;
-      p.general = null;
-    });
-    g.phase = 'pickingGeneral';
-    g.log = pushLog(g.log, '请其他玩家选将…');
+    if(!Array.isArray(me.generalChoices) || !me.generalChoices.includes(generalId)) return g;
+    finishLordGeneralPick(g, lord, generalId);
+    return g;
+  });
+}
+
+// debugPickLordGeneral: 仅供测试用的调试入口——身份局主公选将阶段专属,不受候选池
+// (g.lordGeneralPool/me.generalChoices)限制,可以直接指定任意已实现的武将,方便测试某个
+// 具体主公武将不用靠随机等它出现在候选池里。和 debugPickGeneral(他人三选一的调试入口)同一
+// 定位、同一"不校验候选池"的既有约定,只是各自对应正式入口不同(这个对应 respondPickLordGeneral,
+// 后者对应 respondPickGeneral)——两条身份局选将路径(主公/他人)现在都各自有一对独立的
+// 正式/调试函数,不再像 6e3db94 之前那样共用一个函数导致调试需求波及正式校验。
+function debugPickLordGeneral(generalId){
+  tx(g=>{
+    if(g.phase!=='pickingLordGeneral' || g.gameMode!=='identity') return g;
+    const lord = getLordSeat(g);
+    if(lord!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me || me.general) return g;
+    if(!GENERALS[generalId]) return g;
+    finishLordGeneralPick(g, lord, generalId);
     return g;
   });
 }

@@ -526,7 +526,7 @@ function renderPickGeneral(g, c, opts){
           +'<div class="general-pick-name">'+escapeHtml(gen.name)+factionChip+' · '+escapeHtml(gen.skill)+'</div>'
           +'<div class="general-pick-desc">'+escapeHtml(gen.desc||'(暂无说明)')+'</div>'
         +'</div>';
-      card.onclick=()=> lordPick ? respondPickLordGeneral(id) : respondPickGeneral(id);
+      card.onclick=()=> lordPick ? respondPickLordGeneral(id) : respondPickGeneral(id); // 正式入口:两者都校验候选池
       list.appendChild(card);
     });
     c.appendChild(list);
@@ -552,8 +552,9 @@ function renderPickGeneral(g, c, opts){
     const debugBtn=document.createElement('button');
     debugBtn.style.cssText='border:1px solid #d4a017;color:#d4a017;background:transparent;';
     debugBtn.textContent='【测试】确认选择';
-    // 主公选将阶段调试也走 lord 入口,保证后续发他人候选
-    debugBtn.onclick=()=> lordPick ? respondPickLordGeneral(sel.value) : debugPickGeneral(sel.value);
+    // 调试入口:主公选将阶段走 debugPickLordGeneral(不受候选池限制),他人阶段走 debugPickGeneral——
+    // 两条路径各自独立,不再共用正式入口(respondPickLordGeneral/respondPickGeneral 只接受候选池内的id)
+    debugBtn.onclick=()=> lordPick ? debugPickLordGeneral(sel.value) : debugPickGeneral(sel.value);
     debugBox.appendChild(debugBtn);
     c.appendChild(debugBox);
     return;
