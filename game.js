@@ -5471,7 +5471,16 @@ function advanceXiaoguo(g, endingSeat, current){
   const asker=nextXiaoguoAsker(g, endingSeat, current);
   // 骁果问完一圈:必须先置空 pending,再交结束阶段后续(旋风/举荐/据守/finishTurn)。
   // 若不清空,过期 xiaoguo pending 会漏进下一回合,卡住中央出牌区(见 050d965 同类修复)。
-  if(asker===null){ g.pending=null; continueEndPhaseAfterXiaoguo(g, endingSeat);finishTurn(g, endingSeat); return; }
+  // ⚠️ continueEndPhaseAfterXiaoguo 自己内部就会在链条(旋风→举荐→据守)问完之后调用
+  // finishTurn(见其函数体末尾及各个"没有更多可发动的技能"分支),这里不能再额外补一次——
+  // 这行以前是 g.pending=null; continueEndPhaseAfterXiaoguo(g,endingSeat); finishTurn(g,endingSeat); return;
+  // 那个多余的 finishTurn 调用是 2026-07-13 一次三方合并(f0c2b4890935)把两条分支各自
+  // 独立正确的修改叠加在一起产生的遗留 bug:continueEndPhaseAfterXiaoguo 如果在中途挂起了
+  // 旋风(或举荐/据守)的新 pending 并 return,这里紧跟着无条件执行的 finishTurn 会在同一次
+  // tx 里把刚挂起的 pending 冲掉、直接推进到下一回合——和 endTurn() 自己调用
+  // continueEndPhaseAfterXiaoguo(g,mySeat);return g;（其后没有多余的 finishTurn）是同一条链、
+  // 同一个约定,两处调用方式必须一致。
+  if(asker===null){ g.pending=null; continueEndPhaseAfterXiaoguo(g, endingSeat); return; }
   g.pending={type:'xiaoguo', endingSeat, asking:asker};
   g.phase='xiaoguo';
   g.log=pushLog(g.log, '结束阶段:询问 '+g.players[asker].name+' 是否发动【骁果】…');
