@@ -2116,9 +2116,9 @@ function getZhimengOptions(g, targetSeat) {
 }
 
 // 触发制蛮询问。返回:
-//   'prevented' — 已防止伤害(唯一选项自动结算)
-//   'ask'       — 已挂起询问,调用方应立即 return true 暂停伤害
-//   false       — 不触发
+//   'ask'  — 已挂起询问(是否发动),调用方应立即 return true 暂停伤害——不管候选牌是1张
+//            还是多张都走这条路径,"是否发动"这一步永远要问,不能因为候选唯一就跳过
+//   false  — 不触发(目标无牌可拿/攻击者无制蛮/自伤等)
 function triggerZhimeng(g, from, to, ctx) {
   if(from === to) return false;
   
@@ -2134,12 +2134,12 @@ function triggerZhimeng(g, from, to, ctx) {
   
   const options = getZhimengOptions(g, to);
   if(options.length === 0) return false;
-  
-  if(options.length === 1) {
-    zhimengAutoResolve(g, from, to, options[0]);
-    return 'prevented';
-  }
-  
+
+  // 【制蛮】永远可选发动("你可以防止此伤害"),不管目标身上能拿的候选牌是1张还是多张——
+  // "唯一候选自动跳过选卡这一步"是对的简化(respondZhimeng(true)里已正确处理),但"唯一候选
+  // 自动跳过是否发动这一步"是错的:这里曾经在 options.length===1 时直接调用
+  // zhimengAutoResolve 自动结算、返回'prevented',完全剥夺了玩家"不发动、让伤害正常打出"
+  // 这个选择机会——两者不能混为一谈,这里必须无条件挂起 zhimengAsk 询问。
   g.pending = {
     type: 'zhimengAsk',
     from: from,

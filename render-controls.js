@@ -3947,7 +3947,11 @@ function renderControls(g){
 function renderZhimengAsk(g) {
   if(g.phase !== 'zhimengAsk' || !g.pending) return '';
   const p = g.players[g.pending.from];
-  if(!p || p.seat !== mySeat) {
+  // "我是不是这次该做选择的攻击者"要看 g.pending.from(pending自带的座位字段),不能看
+  // p.seat——玩家对象上根本没有seat这个属性(座位号是g.players数组下标,不是对象属性),
+  // p.seat恒为undefined,写成p.seat!==mySeat这个判断恒真,会让马谡本人也被挡在"等待"分支
+  // 里看不到发动/不发动按钮(和悲歌此前出现过的同一类bug)。
+  if(!p || g.pending.from !== mySeat) {
     return '<div class="zhimeng-wait">等待 ' + escapeHtml(p.name) + ' 选择是否发动【制蛮】…</div>';
   }
   
@@ -3964,7 +3968,8 @@ function renderZhimengAsk(g) {
 function renderZhimengPick(g) {
   if(g.phase !== 'zhimengPick' || !g.pending) return '';
   const p = g.players[g.pending.from];
-  if(!p || p.seat !== mySeat) return '';
+  // 同 renderZhimengAsk:必须用 g.pending.from,不能用不存在的 p.seat。
+  if(!p || g.pending.from !== mySeat) return '';
   
   const target = g.players[g.pending.to];
   let html = '<div class="zhimeng-pick">';

@@ -3501,7 +3501,9 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   if(!skipZhengyi && maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   if(!skipTianxiang && maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
   
-  // 马谡【制蛮】:伤害结算前。多选项必须暂停扣血;唯一选项直接防止。
+  // 马谡【制蛮】:伤害结算前,无论目标身上能拿的候选牌是1张还是多张都要先问"是否发动"
+  // (制蛮永远可选,不能因为候选唯一就自动结算跳过这一步),所以只会返回'ask'或false;
+  // 'prevented'分支保留是防御性写法(triggerZhimeng当前实现不会再返回它)。
   if(!skipZhimeng && typeof sourceSeat === 'number') {
     const originalCtx = { amount, sourceSeat, reason, srcType, sourceCard, to: seat };
     const zhimengResult = triggerZhimeng(g, sourceSeat, seat, originalCtx);
