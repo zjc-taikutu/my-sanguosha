@@ -266,5 +266,111 @@ check('hasCap cixiong', ()=>{
   assert.strictEqual(R('hasCap')(p,'cixiong'), false);
 });
 
+// ===== 优先级交互 1:大乔【流离】转移后,雌雄双股剑按转移后的新目标重新判断性别 =====
+// 用真实调用链驱动(playCard→maybeStartLiuli挂起→respondLiuli转移→resolveShaUseNoLiuli
+// 重入→afterShaTargetSkills→maybeStartCixiong),不直接调用底层判断函数跳过中间环节。
+// 3人局:distance() 在存活玩家数=3时任意两人间恒为1,不需要额外配马/武器控制距离。
+function mkLiuliScene(bGeneralId){
+  const male = mkPlayer('张飞','zhangfei'); // 攻击者:男
+  male.equips.weapon = {id:1,name:'雌雄双股剑',suit:'♠',rank:2};
+  male.hand = [{id:2,name:'杀',suit:'♥',rank:7}];
+  const daqiao = mkPlayer('大乔','daqiao'); // 原目标A:女,有流离
+  daqiao.hand = [{id:3,name:'闪',suit:'♦',rank:2}]; // 供流离弃置
+  const b = mkPlayer('B','b'+bGeneralId, {general: bGeneralId}); // 占位,下面用真实武将覆盖
+  const bGen = R('getGeneral')(bGeneralId);
+  b.gender = bGen && bGen.gender;
+  b.hp = bGen ? bGen.maxHp : 4; b.maxHp = b.hp;
+  const g = {
+    phase:'play', turn:0, started:true, players:[male, daqiao, b],
+    deck: Array.from({length:20},(_,i)=>({id:100+i,name:'杀',suit:'♠',rank:1})),
+    discard:[], pending:null, log:[], exchangeCards:[], shaUsed:false, gameMode:'ffa'
+  };
+  return { male, daqiao, b, g };
+}
+
+check('流离转移:攻击者与转移后新目标同性 → 雌雄双股剑不应触发(不是巧合,是重判生效)', ()=>{
+  const { g } = mkLiuliScene('guanyu'); // 关羽:男,与攻击者(张飞,男)同性
+  bindG(g);
+  vm.runInContext('mySeat=0;', sandbox);
+  R('playCard')(0, '杀', 1); // 张飞对大乔(座位1)使用杀
+  let gg = G();
+  assert.strictEqual(gg.phase, 'liuli', 'phase应挂起流离,实际='+gg.phase);
+  assert.strictEqual(gg.pending.to, 1);
+  vm.runInContext('mySeat=1;', sandbox);
+  R('respondLiuli')({kind:'hand', idx:0}, 2); // 大乔发动流离,转移给座位2(关羽)
+  gg = G();
+  assert.notStrictEqual(gg.phase, 'cixiongAsk',
+    '转移后新目标(关羽,男)与攻击者同性,雌雄双股剑不应触发,实际phase='+gg.phase);
+  // 反向确认:如果重判逻辑没生效、还在用原目标(大乔,女)的性别判断,这里就会误触发——
+  // 这条断言失败即代表"重判没有真的生效",不是断言写宽松了。
+});
+
+check('流离转移:攻击者与转移后新目标异性 → 雌雄双股剑应正确触发(和上一条互为对照,排除巧合)', ()=>{
+  const { g } = mkLiuliScene('zhenji'); // 甄姬:女,与攻击者(张飞,男)异性
+  bindG(g);
+  vm.runInContext('mySeat=0;', sandbox);
+  R('playCard')(0, '杀', 1);
+  let gg = G();
+  assert.strictEqual(gg.phase, 'liuli', 'phase应挂起流离,实际='+gg.phase);
+  vm.runInContext('mySeat=1;', sandbox);
+  R('respondLiuli')({kind:'hand', idx:0}, 2); // 转移给座位2(甄姬)
+  gg = G();
+  assert.strictEqual(gg.phase, 'cixiongAsk',
+    '转移后新目标(甄姬,女)与攻击者异性,雌雄双股剑应正确触发,实际phase='+gg.phase);
+  assert.strictEqual(gg.pending.from, 0);
+  assert.strictEqual(gg.pending.to, 2, '触发对象应是转移后的新目标(座位2),不是原目标(座位1)');
+});
+
+// ===== 优先级交互 2:铁骑/烈弓判定流程走完后,雌雄双股剑仍正确进入 =====
+// 同样用真实调用链(playCard→铁骑/烈弓pending→respondTieqi/respondLiegong→
+// afterShaTargetSkills→maybeStartCixiong),验证"完整杀结算流程里两个技能真的按顺序衔接"。
+check('铁骑判定后,雌雄双股剑仍正确触发(判定流程走完不会跳过或状态错乱)', ()=>{
+  const machao = mkPlayer('马超','machao'); // 男,自带铁骑
+  machao.equips.weapon = {id:1,name:'雌雄双股剑',suit:'♠',rank:2};
+  machao.hand = [{id:2,name:'杀',suit:'♥',rank:7}];
+  const zhenji = mkPlayer('甄姬','zhenji'); // 女,与马超异性,无流离/铁骑冲突
+  zhenji.hand = [{id:3,name:'闪',suit:'♦',rank:2}];
+  const g = {
+    phase:'play', turn:0, started:true, players:[machao, zhenji],
+    deck: [{id:200,name:'杀',suit:'♠',rank:9}, {id:201,name:'杀',suit:'♠',rank:8}], // 判定牌(黑桃,判红黑均可,不影响本测试)
+    discard:[], pending:null, log:[], exchangeCards:[], shaUsed:false, gameMode:'ffa'
+  };
+  bindG(g);
+  vm.runInContext('mySeat=0;', sandbox);
+  R('playCard')(0, '杀', 1);
+  let gg = G();
+  assert.strictEqual(gg.phase, 'tieqi', '应先挂起铁骑判定询问,实际='+gg.phase);
+  assert.strictEqual(gg.pending.from, 0);
+  R('respondTieqi')(true); // 马超发动铁骑,真实judge()翻牌
+  gg = G();
+  assert.strictEqual(gg.phase, 'cixiongAsk',
+    '铁骑判定流程走完后,雌雄双股剑应正确触发,实际phase='+gg.phase);
+  assert.strictEqual(gg.pending.from, 0);
+  assert.strictEqual(gg.pending.to, 1);
+});
+
+check('烈弓判定后,雌雄双股剑仍正确触发(同上,验证另一件武器的衔接)', ()=>{
+  const huangzhong = mkPlayer('黄忠','huangzhong'); // 男,自带烈弓
+  huangzhong.equips.weapon = {id:1,name:'雌雄双股剑',suit:'♠',rank:2}; // 射程2,满足烈弓触发条件之一
+  huangzhong.hand = [{id:2,name:'杀',suit:'♥',rank:7}];
+  const zhenji = mkPlayer('甄姬','zhenji'); // 女,与黄忠异性
+  zhenji.hand = []; // 手牌数0<=攻击距离2,满足烈弓触发条件
+  const g = {
+    phase:'play', turn:0, started:true, players:[huangzhong, zhenji],
+    deck: Array.from({length:5},(_,i)=>({id:300+i,name:'杀',suit:'♠',rank:1})),
+    discard:[], pending:null, log:[], exchangeCards:[], shaUsed:false, gameMode:'ffa'
+  };
+  bindG(g);
+  vm.runInContext('mySeat=0;', sandbox);
+  R('playCard')(0, '杀', 1);
+  let gg = G();
+  assert.strictEqual(gg.phase, 'liegong', '应先挂起烈弓询问,实际='+gg.phase);
+  R('respondLiegong')(true); // 黄忠发动烈弓
+  gg = G();
+  assert.strictEqual(gg.phase, 'cixiongAsk',
+    '烈弓判定流程走完后,雌雄双股剑应正确触发,实际phase='+gg.phase);
+  assert.strictEqual(gg.pending.to, 1);
+});
+
 console.log('\npassed:', passed, 'failed:', failed);
 process.exit(failed?1:0);
