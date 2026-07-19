@@ -274,6 +274,16 @@ function respondGuanshi(picks){
         if(slot==='weapon' || !EQUIP_SLOTS.includes(slot) || !me.equips[slot]) return g;
       } else return g;
     }
+    // sourceCard 必须在弃装备触发 onLoseEquip 钩子之前先取出——钩子(如旋风)可能把 g.pending
+    // 整个换成别的对象,晚取就读不到了。
+    const sourceCard=g.pending.sourceCard;
+    // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条+散谣 finishSanyaoDamage 同一范式】
+    // 先把休止相设成 play(贯石斧已经结算完毕、攻击者的出牌阶段继续),再触发 onLoseEquip,
+    // 这样旋风钩子捕获的 previousPhase 才是 play(而不是此刻已经死掉的 guanshi)。
+    g.phase='play';
+    // pendingBefore 快照:弃装备(下面循环里可能命中多次 equip:,每次都会重新触发钩子,但只需要
+    // 快照一次——只要循环结束后 g.pending 变成了别的对象,就说明期间某次触发挂起了新 pending)。
+    const pendingBefore=g.pending;
     // 弃牌:先处理装备(不受手牌下标变动影响),再处理手牌(大下标先弹,避免 splice 错位)
     const handIdxs=[];
     for(const p of picks){
@@ -289,13 +299,26 @@ function respondGuanshi(picks){
     handIdxs.sort((a,b)=>b-a).forEach(idx=>{ g.discard.push(me.hand.splice(idx,1)[0]); });
     if(handIdxs.length) g.log=pushLog(g.log, me.name+' 弃置'+handIdxs.length+'张手牌(贯石斧)');
     g.log=pushLog(g.log, me.name+' 发动【贯石斧】,此【杀】依然对 '+g.players[to].name+' 造成伤害');
-    const sourceCard=g.pending.sourceCard;
+    // 两张弃牌(成本)已经全部真实结算完毕。若其中弃自己装备那一步触发了 onLoseEquip 钩子并
+    // 挂起了新 pending(如旋风),不能再无条件 g.pending=null 把它覆盖掉——记下 resume 续接
+    // 信息、这次 tx 到此为止,强制命中的伤害延后到旋风问完之后才真正结算(见 finishGuanshiDamage)。
+    if(g.pending !== pendingBefore && g.pending){
+      g.pending.resume = { type:'guanshiDamage', from, to, sourceCard };
+      return g;
+    }
     g.pending=null;
-    const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha'), from, '贯石斧强制命中', 'sha', sourceCard);
-    if(dying) return g; // 濒死流程接管
-    finishSingleShaTarget(g);
+    finishGuanshiDamage(g, from, to, sourceCard);
     return g;
   });
+}
+// finishGuanshiDamage: 贯石斧强制命中的伤害结算 + 收尾,从 respondGuanshi 抽出的共用尾巴。
+// 两处调用:①respondGuanshi 弃牌未触发钩子打断的直达路径;②resumeAfterInterrupt 的
+// 'guanshiDamage' 分支(弃自己装备触发 onLoseEquip 挂起了新 pending,比如旋风,问完之后
+// 接回来继续造成这次被强制命中的伤害)——和散谣 finishSanyaoDamage 同一范式。
+function finishGuanshiDamage(g, from, to, sourceCard){
+  const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha'), from, '贯石斧强制命中', 'sha', sourceCard);
+  if(dying) return; // 濒死流程接管
+  finishSingleShaTarget(g);
 }
 
 // ===== 雌雄双股剑:杀指定异性目标后,攻击者可选令目标弃1手牌或己摸1 =====

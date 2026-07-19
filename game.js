@@ -4172,6 +4172,10 @@ function resumeAfterInterrupt(g, resume, seat){
     // 收尾——伤害目标死的若不是回合玩家,回合并不切换,继续留在原发动者的出牌阶段。
     if(g.players[g.turn] && g.players[g.turn].alive) g.phase='play';
     else startTurn(g, nextAlive(g, g.turn));
+  } else if(resume.type==='guanshiDamage'){
+    // 贯石斧(weapons.js)弃自己装备触发 onLoseEquip 钩子(如凌统旋风)中途打断后的接回:
+    // 问完之后继续走原本被打断的、贯石斧强制命中的伤害结算。
+    finishGuanshiDamage(g, resume.from, resume.to, resume.sourceCard);
   } else if(resume.type==='sanyaoDamage'){
     // 散谣的弃装备成本触发 onLoseEquip 钩子(如凌统旋风)中途打断后的接回:问完之后继续走
     // 原本被打断的伤害结算。当前项目里马谡自己没有 onLoseEquip 钩子,这条分支实际不可达
