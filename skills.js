@@ -1693,6 +1693,7 @@ function respondXiaoguoChoice(choice){
 function respondZhijiChoice(healOrDraw){
   tx(g=>{
     if(g.phase!=='zhijiChoice'||!g.pending||g.pending.type!=='zhijiChoice') return g;
+    if(g.pending.seat!==mySeat) return g; // 仅姜维本人可选择,和 respondTiaoxinChoice/respondSanyao 同型修复
     const seat = g.pending.seat;
     const p = g.players[seat];
     if(!p || !p.alive) {
