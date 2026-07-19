@@ -673,6 +673,120 @@ check('startGame identity n=8(边界内,应接受) 对照', ()=>{
   assert.deepStrictEqual(countRoles(gg.players.map(p=>p.role)), EXPECT[8]);
 });
 
+console.log('\n== Task10: 结束时全员身份揭晓(方案A,checkWin里批量翻转roleRevealed) ==\n');
+
+check('端到端①:反贼杀死主公触发反贼胜——结束后全员roleRevealed=true,canSeeRole全员互相可见', ()=>{
+  const g = freshG(4);
+  g.gameMode = 'identity'; g.started = true; g.phase = 'play'; g.turn = 0;
+  g.deck = Array.from({length:10}, (_,i)=>({id:'d'+i,name:'杀',suit:'♠',rank:1}));
+  // 座位0=反贼(杀手,存活) 座位1=主公(将死,1血) 座位2=忠臣(存活,从未参与击杀,身份此前从未翻开)
+  // 座位3=内奸(存活,同样从未翻开)——结束前这两人理应完全隐藏,结束后应该都能被看到
+  g.players[0].role='fan';   g.players[0].roleRevealed=false;
+  g.players[1].role='zhu';   g.players[1].roleRevealed=true; g.players[1].hp=1; g.players[1].maxHp=1;
+  g.players[2].role='zhong'; g.players[2].roleRevealed=false;
+  g.players[3].role='nei';   g.players[3].roleRevealed=false;
+  g.players.forEach((p,i)=>{ if(i!==1) p.hp=4; p.hand=[]; p.equips=R('emptyEquips')(); p.delays=[]; p.alive=true; });
+  bindG(g);
+  const dealDamage = R('dealDamage');
+  let gg = vm.runInContext('_g', sandbox);
+  const canSeeRole = R('canSeeRole');
+
+  // 结束前(伤害尚未打出):座位2/3的身份对彼此、对反贼杀手都应保持隐藏(既有规则,未受本次改动影响)
+  assert.strictEqual(canSeeRole(gg, 0, 2), false, '结束前:反贼不应能看到忠臣(座位2)的身份');
+  assert.strictEqual(canSeeRole(gg, 0, 3), false, '结束前:反贼不应能看到内奸(座位3)的身份');
+
+  const dying = dealDamage(gg, 1, 1, 0, '受到伤害', 'sha'); // 座位0(反贼)对座位1(主公)造成1点伤害
+  assert.strictEqual(dying, true, 'dealDamage 应挂起濒死流程');
+  gg = runDyingLoopNoTao(); // 无人有桃,问完一圈后主公真实阵亡→checkWin应判定反贼胜
+
+  assert.strictEqual(gg.phase, 'over', '主公死、反贼仍活,游戏应结束');
+  assert.strictEqual(gg.winSide, 'fan');
+
+  // 断言1(核心):结束后全部座位(不论死没死、不论此前是否翻开过)roleRevealed都应为true
+  gg.players.forEach((p,i)=>{
+    assert.strictEqual(p.roleRevealed, true, 'seat'+i+' 结束后roleRevealed应为true,实际='+p.roleRevealed);
+  });
+  // 断言2:canSeeRole 结束后对任意viewer/target组合都应返回true(哪怕viewer/target都是此前
+  // 从未死过、从未主动翻开身份的座位2/3)
+  for(let viewer=0; viewer<4; viewer++){
+    for(let target=0; target<4; target++){
+      assert.strictEqual(canSeeRole(gg, viewer, target), true,
+        'canSeeRole(g,'+viewer+','+target+') 结束后应为true,实际='+canSeeRole(gg, viewer, target));
+    }
+  }
+});
+
+check('普通模式(ffa)回归:游戏结束不应受本次改动影响,roleRevealed字段行为不变', ()=>{
+  const g = freshG(2);
+  g.gameMode = 'ffa'; g.started = true; g.phase = 'play';
+  g.players.forEach(p=>{ p.role=null; p.roleRevealed=false; p.alive=true; });
+  g.players[1].alive = false; // 只剩座位0存活
+  const checkWin = R('checkWin');
+  const over = checkWin(g);
+  assert.strictEqual(over, true, 'ffa下应正常判定结束(存活<=1)');
+  assert.strictEqual(g.phase, 'over');
+  assert.strictEqual(g.winSide, null, 'ffa结束不应设置winSide');
+  // roleRevealed字段本来就一直是false(ffa模式role恒为null),这次改动的代码块严格限定在
+  // g.gameMode==='identity'分支内,不应该被执行到,字段应保持原值不被波及
+  g.players.forEach((p,i)=>{
+    assert.strictEqual(p.roleRevealed, false, 'ffa下seat'+i+' roleRevealed不应被这次改动改动,实际='+p.roleRevealed);
+  });
+});
+
+check('未结束路径回归:checkWin被调用但胜负条件不满足 → roleRevealed不应被提前批量翻转', ()=>{
+  const g = freshG(4);
+  g.gameMode = 'identity';
+  // 死的是忠臣,主公/反贼/内奸都还活着——胜负条件都不满足,checkWin应提前return false
+  g.players[0].role='fan';   g.players[0].roleRevealed=false; g.players[0].alive=true;
+  g.players[1].role='zhong'; g.players[1].roleRevealed=false; g.players[1].alive=false; // 已死但只是忠臣,不构成任何胜负条件
+  g.players[2].role='zhu';   g.players[2].roleRevealed=true;  g.players[2].alive=true;
+  g.players[3].role='nei';   g.players[3].roleRevealed=false; g.players[3].alive=true;
+  const checkWin = R('checkWin');
+  const over = checkWin(g);
+  assert.strictEqual(over, false, '主公/反贼/内奸都还活着,不应判定结束');
+  assert.notStrictEqual(g.phase, 'over');
+  // 断言核心:未结束时,不该死的忠臣roleRevealed可以已经是true(那是finishDying单独设的,
+  // 不归这次改动管),但从未死过的反贼/内奸不应该被这次改动提前批量翻开
+  assert.strictEqual(g.players[0].roleRevealed, false, '反贼(座位0)未死,不应被checkWin提前翻开身份');
+  assert.strictEqual(g.players[3].roleRevealed, false, '内奸(座位3)未死,不应被checkWin提前翻开身份');
+  const canSeeRole = R('canSeeRole');
+  assert.strictEqual(canSeeRole(g, 1, 0), false, '死一个忠臣不应意外让全场身份都亮了——反贼身份仍应隐藏');
+  assert.strictEqual(canSeeRole(g, 1, 3), false, '内奸身份仍应隐藏');
+});
+
+check('端到端②(UI数据层验证):游戏结束后重新查询,此前存活未死的角色现在也"可见"(不是空白)', ()=>{
+  // 复用①的终局状态,模拟座位卡渲染逻辑会做的判断:g.started&&gen 决定显示不显示,
+  // canSeeRole决定身份色块显示不显示——结束后,座位2(忠臣,全程存活未死)现在也应该"可见"。
+  const g = freshG(4);
+  g.gameMode = 'identity'; g.started = true; g.phase = 'play'; g.turn = 0;
+  g.deck = Array.from({length:10}, (_,i)=>({id:'d'+i,name:'杀',suit:'♠',rank:1}));
+  g.players[0].role='fan';   g.players[0].roleRevealed=false;
+  g.players[1].role='zhu';   g.players[1].roleRevealed=true; g.players[1].hp=1; g.players[1].maxHp=1;
+  g.players[2].role='zhong'; g.players[2].roleRevealed=false;
+  g.players[3].role='nei';   g.players[3].roleRevealed=false;
+  g.players.forEach((p,i)=>{ if(i!==1) p.hp=4; p.hand=[]; p.equips=R('emptyEquips')(); p.delays=[]; p.alive=true; });
+  bindG(g);
+  const dealDamage = R('dealDamage');
+  let gg = vm.runInContext('_g', sandbox);
+  const canSeeRole = R('canSeeRole');
+
+  assert.strictEqual(canSeeRole(gg, 0, 2), false, '游戏进行中:座位2(存活忠臣)身份应对旁观者隐藏');
+
+  dealDamage(gg, 1, 1, 0, '受到伤害', 'sha');
+  gg = runDyingLoopNoTao();
+  assert.strictEqual(gg.phase, 'over');
+  assert.strictEqual(gg.players[2].alive, true, '座位2(忠臣)应全程存活,从未经历finishDying');
+
+  // 模拟renderSeatCard里"这个座位该不该显示身份色块"的判断逻辑:g.started(结束后仍true)
+  // && canSeeRole(g,mySeat,seat) —— 任取一个旁观视角(座位0)重新渲染这个从未死过的座位2
+  const shouldShowIdentityBlock = gg.started && canSeeRole(gg, 0, 2);
+  assert.strictEqual(shouldShowIdentityBlock, true,
+    '结束后,座位2(全程存活、从未主动翻开过身份)现在应该"可见"(不再是空白/隐藏)');
+  assert.strictEqual(ROLE_LABEL_FROM_SANDBOX(sandbox)['zhong'], '忠臣'); // 顺带确认ROLE_LABEL可查到正确文案
+});
+
+function ROLE_LABEL_FROM_SANDBOX(sb){ return vm.runInContext('ROLE_LABEL', sb); }
+
 console.log('\n== summary ==');
 console.log('passed:', passed, 'failed:', failed);
 process.exit(failed ? 1 : 0);

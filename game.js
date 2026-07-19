@@ -4398,6 +4398,11 @@ function checkWin(g){
     g.winSide = winSide;
     g.winner = ({fan:'反贼', nei:'内奸', lord:'主公与忠臣', none:'无'})[winSide];
     g.pending=null; g.aoe=null;
+    // 结束时全员身份揭晓(规格§6.5):roleRevealed 唯一消费者是 canSeeRole,批量翻转后
+    // 座位卡 .seat-identity 靠既有渲染自动展示全部身份色块,不需要新增任何UI组件。
+    // 只在真正判定出胜负(上面 if(!winSide) 这道守卫已通过)之后才翻转,不会在游戏未结束
+    // 的路径上提前泄露隐藏身份。
+    g.players.forEach(p=>{ if(p) p.roleRevealed=true; });
     g.log=pushLog(g.log, '游戏结束，胜方：'+g.winner);
     return true;
   }
