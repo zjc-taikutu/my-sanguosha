@@ -1531,9 +1531,14 @@ function doLeijiJudge(g) {
     // 注意: 如果有改判，judgeCard可能已经被替换
     const finalCard = judgeCard; // 如果有改判，会在finishGuidu或finishGuicai中处理
     if(finalCard.suit === '♠'){
-      // 造成2点雷电伤害
-      dealDamage(g, targetSeat, 2, sourceSeat, source.name + ' 的【雷击】效果', 'leiji');
+      // 造成2点雷电伤害——必须检查dealDamage的返回值:2点伤害若致目标进入濒死(或触发仁心/
+      // 制蛮等其它onDamaged打断),dealDamage会挂起一个新pending并返回true,此时必须立即
+      // return,不能再往下跑finishLeijiChain(那会在同一次tx里把刚挂起的pending原地冲掉,
+      // 目标从未真正获得求桃机会)。濒死流程结束后会经resumeAfterInterrupt的'leiji'分支
+      // 自动接回这里(见该分支注释),不需要雷击自己处理续接。
+      const dying = dealDamage(g, targetSeat, 2, sourceSeat, source.name + ' 的【雷击】效果', 'leiji');
       g.log = pushLog(g.log, target.name + ' 判定为' + finalCard.suit + rankText(finalCard.rank) + ',受到2点雷电伤害');
+      if(dying) return g;
     } else {
       g.log = pushLog(g.log, target.name + ' 判定为' + finalCard.suit + rankText(finalCard.rank) + ',【雷击】无效');
     }
@@ -1770,8 +1775,10 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     const { sourceSeat, targetSeat } = resume;
     const target = g.players[targetSeat];
     if(replaceCard.suit === '♠'){
-      dealDamage(g, targetSeat, 2, sourceSeat, g.players[sourceSeat].name + ' 的【雷击】效果', 'leiji');
+      // 同 doLeijiJudge:必须检查dealDamage返回值,致濒死时立即return,不能执行finishLeijiChain。
+      const dying = dealDamage(g, targetSeat, 2, sourceSeat, g.players[sourceSeat].name + ' 的【雷击】效果', 'leiji');
       g.log = pushLog(g.log, target.name + ' 被替换判定为' + replaceCard.suit + rankText(replaceCard.rank) + ',受到2点雷电伤害');
+      if(dying) return g;
     } else {
       g.log = pushLog(g.log, target.name + ' 被替换判定为' + replaceCard.suit + rankText(replaceCard.rank) + ',【雷击】无效');
     }
@@ -4169,6 +4176,13 @@ function resumeAfterInterrupt(g, resume, seat){
     // (一人只能是一个武将,不可能同时是马谡又是凌统/孙尚香),按"新增失去装备入口必须正确
     // 接 resume"这条强制约定补上,面向正确性,不是修一个能被打的漏洞。
     finishSanyaoDamage(g, resume.casterSeat, resume.target);
+  } else if(resume.type==='leiji'){
+    // 张角【雷击】2点雷电伤害致濒死(或触发仁心/制蛮等其它onDamaged打断)后的接回——不需要
+    // 新逻辑,直接复用 finishLeijiChain(和判定完毕后正常收尾的那个函数完全一样):它只看
+    // g.leijiResume(4/4引入的、独立于g.pending之外的字段,濒死这整段打断期间不会被碰到)
+    // 决定该恢复到 aoeAdvance 续接(雷击是从南蛮/万箭响应里触发的)还是直接回到 play
+    // (respondShan单体响应触发的普通场景),和雷击自己判完黑桃之后本该走的收尾完全一致。
+    finishLeijiChain(g);
   } else if(resume.type==='enyuan'){
     // 恩怨反伤致死后接回原伤害流程
     resumeAfterInterrupt(g, resume.resume || {type:'sha'}, resume.seat);
