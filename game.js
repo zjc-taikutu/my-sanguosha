@@ -6783,8 +6783,9 @@ function calculateChengxiangOptions(cardValues, sumLimit) {
 function confirmChengxiangAsk() {
   tx(g => {
     if (g.pending.type !== 'chengxiangAsk') return g;
-    
+
     const seat = g.pending.seat;
+    if (seat !== mySeat) return g; // 仅曹冲本人可发动,和 chooseRenxinEquip 同一守卫写法
     const me = g.players[seat];
     
     // 确保牌堆有至少4张牌
@@ -6830,6 +6831,7 @@ function confirmChengxiangAsk() {
 function cancelChengxiangAsk() {
   tx(g => {
     if (g.pending.type !== 'chengxiangAsk') return g;
+    if (g.pending.seat !== mySeat) return g; // 仅曹冲本人可取消——任务未明确点名的第4处同型缺口,一并修
     g.pending = null;
     return g;
   });
@@ -6840,6 +6842,7 @@ function confirmChengxiang(selection) {
   tx(g => {
     if (g.pending.type !== 'chengxiangChoose') return g;
     const seat = g.pending.seat;
+    if (seat !== mySeat) return g; // 仅曹冲本人可确认选牌
     const me = g.players[seat];
     const pending = g.pending;
     
@@ -6868,6 +6871,7 @@ function cancelChengxiang() {
   tx(g => {
     if (g.pending.type !== 'chengxiangChoose') return g;
     const seat = g.pending.seat;
+    if (seat !== mySeat) return g; // 仅曹冲本人可选择0张
     const me = g.players[seat];
     g.discard = g.discard || [];
     g.discard.push(...g.pending.revealedCards);
