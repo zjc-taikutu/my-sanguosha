@@ -505,6 +505,174 @@ check('ffa 不奖惩', ()=>{
   assert.strictEqual(g.players[1].hand.length, 0);
 });
 
+console.log('\n== Task6: 死亡翻身份端到端(真实 dealDamage→startDying→respondDying→finishDying,不用合成状态跳过) ==\n');
+
+// 走真实响应循环(不预设座位顺序,动态读g.pending.asking,遵循项目"逐个询问"类响应函数的既有惯例)
+function runDyingLoopNoTao(){
+  let guard = 0;
+  let gg = vm.runInContext('_g', sandbox);
+  while(gg.phase==='dying' && gg.pending && gg.pending.type==='dying' && guard<10){
+    const asking = gg.pending.asking;
+    vm.runInContext('mySeat = '+asking, sandbox);
+    R('respondDying')(false);
+    gg = vm.runInContext('_g', sandbox);
+    guard++;
+  }
+  assert.ok(guard<10, '不应死循环(respondDying(false)未能在10轮内收尾)');
+  return gg;
+}
+
+check('端到端①:主公亲手误杀忠臣——真实死亡应正确翻身份→写日志→触发奖惩(手牌装备清空/判定区保留)→顺序正确→死后可见', ()=>{
+  const g = freshG(4);
+  g.gameMode = 'identity'; g.started = true; g.phase = 'play'; g.turn = 2;
+  g.deck = Array.from({length:10}, (_,i)=>({id:'d'+i,name:'杀',suit:'♠',rank:1}));
+  const delayCard = {id:'delay1', name:'乐不思蜀', suit:'♥', rank:6};
+  // 座位0=反贼(存活) 座位1=忠臣(将死,1血) 座位2=主公(杀手,存活,持有一件武器+一张判定区牌)
+  // 座位3=内奸(存活,旁观者视角,验证死后其它任意存活玩家都能看到)
+  g.players[0].role='fan';   g.players[0].roleRevealed=false;
+  g.players[1].role='zhong'; g.players[1].roleRevealed=false; g.players[1].hp=1; g.players[1].maxHp=1;
+  g.players[2].role='zhu';   g.players[2].roleRevealed=true;
+  g.players[2].hand=[{id:'h1',name:'杀',suit:'♠',rank:3},{id:'h2',name:'闪',suit:'♥',rank:4}];
+  g.players[2].equips={ weapon:{id:'w1',name:'青龙偃月刀',suit:'♠',rank:5}, armor:null, plus1:null, minus1:null };
+  g.players[2].delays=[delayCard];
+  g.players[3].role='nei';   g.players[3].roleRevealed=false;
+  g.players.forEach((p,i)=>{ if(i!==1) p.hp=4; if(i!==2){ p.hand=[]; p.equips=R('emptyEquips')(); p.delays=[]; } p.alive=true; });
+  bindG(g);
+  const dealDamage = R('dealDamage');
+  let gg = vm.runInContext('_g', sandbox);
+  const dying = dealDamage(gg, 1, 1, 2, '受到伤害', 'sha'); // 座位2(主公)对座位1(忠臣)造成1点伤害
+  assert.strictEqual(dying, true, 'dealDamage 应挂起濒死流程');
+  gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.phase, 'dying');
+  assert.strictEqual(gg.players[1].roleRevealed, false, '濒死过程中身份还不该提前翻开');
+
+  gg = runDyingLoopNoTao(); // 无人有桃,问完一圈后应真实死亡
+
+  // 断言1:roleRevealed 正确从 false 变成 true(死亡这一刻才翻开,不提前不延后)
+  assert.strictEqual(gg.players[1].alive, false, '忠臣应真的阵亡');
+  assert.strictEqual(gg.players[1].roleRevealed, true, '阵亡后身份应翻开');
+
+  // 断言2:执行顺序——身份翻开日志 → 主公罚没(手牌/装备)日志 → (checkWin此局未结束,不产生"游戏结束"日志)
+  const logs = gg.log.map(e=>e.text);
+  const roleLogIdx = logs.findIndex(t=>t.includes(gg.players[1].name) && t.includes('的身份是【忠臣】'));
+  const rewardLogIdx = logs.findIndex(t=>t.includes('误杀忠臣'));
+  assert.ok(roleLogIdx>=0, '应有身份翻开日志: '+JSON.stringify(logs));
+  assert.ok(rewardLogIdx>=0, '应有主公误杀忠臣的奖惩日志: '+JSON.stringify(logs));
+  assert.ok(roleLogIdx < rewardLogIdx, '身份翻开日志应早于奖惩日志(实际顺序 role='+roleLogIdx+' reward='+rewardLogIdx+')');
+
+  // 断言2b:奖惩确实被真实死亡流程触发(不是孤立调用)——主公手牌/武器清空,判定区保留
+  assert.strictEqual(gg.players[2].hand.length, 0, '主公手牌应被弃光');
+  assert.strictEqual(gg.players[2].equips.weapon, null, '主公武器应被弃置');
+  assert.strictEqual(gg.players[2].delays.length, 1, '主公判定区应保留不动');
+  assert.strictEqual(gg.players[2].delays[0].name, '乐不思蜀');
+
+  // 断言3:checkWin 已被调用检查过(反/内仍存活,主公仍存活→游戏不应结束)
+  assert.notStrictEqual(gg.phase, 'over', '反贼与内奸仍存活,不应结束游戏');
+  assert.strictEqual(gg.winSide, null);
+
+  // 断言4:死后任意存活玩家(不限于主公/杀手)现在都能看到死者的真实身份
+  const canSeeRole = R('canSeeRole');
+  assert.strictEqual(canSeeRole(gg, 3, 1), true, '内奸(座位3,纯旁观者)现在应能看到座位1(已死忠臣)的身份');
+  assert.strictEqual(canSeeRole(gg, 0, 1), true, '反贼(座位0)现在应能看到座位1的身份');
+});
+
+check('端到端②:忠臣杀死反贼——真实死亡应触发"杀反摸3"奖惩(经真实死亡流程,不是孤立调用)', ()=>{
+  const g = freshG(4);
+  g.gameMode = 'identity'; g.started = true; g.phase = 'play'; g.turn = 1;
+  g.deck = Array.from({length:10}, (_,i)=>({id:'d'+i,name:'杀',suit:'♠',rank:1}));
+  // 座位0=反贼(将死,1血) 座位1=忠臣(杀手,存活) 座位2=主公(存活) 座位3=内奸(存活)
+  g.players[0].role='fan';   g.players[0].roleRevealed=false; g.players[0].hp=1; g.players[0].maxHp=1;
+  g.players[1].role='zhong'; g.players[1].roleRevealed=false;
+  g.players[2].role='zhu';   g.players[2].roleRevealed=true;
+  g.players[3].role='nei';   g.players[3].roleRevealed=false;
+  g.players.forEach((p,i)=>{ if(i!==0) p.hp=4; p.hand=[]; p.equips=R('emptyEquips')(); p.delays=[]; p.alive=true; });
+  bindG(g);
+  const dealDamage = R('dealDamage');
+  let gg = vm.runInContext('_g', sandbox);
+  const handBefore = gg.players[1].hand.length;
+  const dying = dealDamage(gg, 0, 1, 1, '受到伤害', 'sha'); // 座位1(忠臣)对座位0(反贼)造成1点伤害
+  assert.strictEqual(dying, true);
+  gg = runDyingLoopNoTao();
+
+  assert.strictEqual(gg.players[0].alive, false, '反贼应真的阵亡');
+  assert.strictEqual(gg.players[0].roleRevealed, true, '阵亡后身份应翻开');
+  assert.strictEqual(gg.players[1].hand.length, handBefore + 3, '杀反贼的忠臣应摸3张牌(经真实死亡流程触发)');
+  const logs = gg.log.map(e=>e.text);
+  assert.ok(logs.some(t=>t.includes('杀死反贼，摸三张牌')), '应有杀反奖惩日志: '+JSON.stringify(logs));
+  assert.notStrictEqual(gg.phase, 'over', '主公/忠臣/内奸仍存活,不应结束游戏');
+});
+
+console.log('\n== Task7: applyIdentityKillReward killerSeat 非数字(如闪电致死无明确凶手) → 应安全提前return,无奖惩、不抛异常 ==\n');
+
+check('killerSeat=undefined(如闪电劈死) → 无奖惩且不抛异常', ()=>{
+  const g = {
+    gameMode:'identity', deck:[{id:1,name:'杀',suit:'♠',rank:1}], discard:[], log:[],
+    players:[
+      {role:'fan', name:'A', alive:false, hand:[{id:9,name:'杀',suit:'♠',rank:1}], equips:R('emptyEquips')()},
+      {role:'zhong', name:'B', alive:true, hand:[], equips:R('emptyEquips')()},
+    ]
+  };
+  assert.doesNotThrow(()=>{ R('applyIdentityKillReward')(g, 0, undefined); });
+  assert.strictEqual(g.players[1].hand.length, 0, '不应有人被越权摸牌/罚没');
+  assert.strictEqual(g.players[0].hand.length, 1, '死者手牌不应被这个函数动(那是finishDying自己的职责)');
+});
+
+check('killerSeat=NaN(非法数字) → 同样安全提前return', ()=>{
+  const g = {
+    gameMode:'identity', deck:[], discard:[], log:[],
+    players:[
+      {role:'fan', name:'A', alive:false, hand:[], equips:R('emptyEquips')()},
+      {role:'zhong', name:'B', alive:true, hand:[], equips:R('emptyEquips')()},
+    ]
+  };
+  assert.doesNotThrow(()=>{ R('applyIdentityKillReward')(g, 0, NaN); });
+  assert.strictEqual(g.players[1].hand.length, 0);
+});
+
+console.log('\n== Task8: newGame() 清空身份局残留字段 ==\n');
+
+check('newGame() 应清空 gameMode/winSide/role/roleRevealed,不残留上一局身份信息', ()=>{
+  const g = freshG(4);
+  g.gameMode = 'identity'; g.winSide = 'lord'; g.winner = '主公与忠臣'; g.phase = 'over'; g.started = true;
+  g.players[0].role='zhu';   g.players[0].roleRevealed=true;
+  g.players[1].role='zhong'; g.players[1].roleRevealed=true; // 死过,已翻开
+  g.players[2].role='fan';   g.players[2].roleRevealed=false;
+  g.players[3].role='nei';   g.players[3].roleRevealed=false;
+  bindG(g);
+  R('newGame')();
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.gameMode, null, 'gameMode应清空');
+  assert.strictEqual(gg.winSide, null, 'winSide应清空');
+  assert.strictEqual(gg.started, false);
+  assert.strictEqual(gg.phase, 'lobby');
+  gg.players.forEach((p,i)=>{
+    assert.strictEqual(p.role, null, 'seat'+i+' role应清空');
+    assert.strictEqual(p.roleRevealed, false, 'seat'+i+' roleRevealed应清空');
+  });
+});
+
+console.log('\n== Task9: startGame identity 人数边界(与已有的 n=3 拒绝对称) ==\n');
+
+check('startGame identity n=9(超过8人) 拒绝', ()=>{
+  const g = freshG(9);
+  bindG(g);
+  R('startGame')('pick','identity');
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.phase, 'lobby', '超过8人应被拒绝,不进入选将');
+  assert.ok(!gg.gameMode || gg.phase==='lobby');
+  assert.ok(!gg.players[0].role, '不应分配身份');
+});
+
+check('startGame identity n=8(边界内,应接受) 对照', ()=>{
+  const g = freshG(8);
+  bindG(g);
+  R('startGame')('pick','identity');
+  const gg = vm.runInContext('_g', sandbox);
+  assert.strictEqual(gg.gameMode, 'identity');
+  assert.strictEqual(gg.phase, 'pickingLordGeneral');
+  assert.deepStrictEqual(countRoles(gg.players.map(p=>p.role)), EXPECT[8]);
+});
+
 console.log('\n== summary ==');
 console.log('passed:', passed, 'failed:', failed);
 process.exit(failed ? 1 : 0);
