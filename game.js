@@ -186,10 +186,18 @@ function normalize(g){
   if(typeof g.zhichiImmunity!=='object' || g.zhichiImmunity===null) g.zhichiImmunity=null;
 
   // 辅诩【乱武】:乱武选择阶段
+  // ⚠️ d.remainingSeats.length===0 不是脏数据的信号——链条正常推进到最后一个人时,
+  // remainingSeats 本来就该是空数组(proceedToNextLuanwu 把它从长度1推进到长度0,这正是
+  // "正在询问链条最后一人"这个合法中间态)。之前这里把"空数组"和"数据损坏"划了等号,
+  // 每次链条走到最后一人,下一次 normalize(写路径的 tx 内部/任何客户端收到 Firebase 推送
+  // 的读路径)就会把这个合法状态当成脏数据清空——真实表现是"乱武链条永远只问到倒数第二人,
+  // 最后一人从不会被真正询问"(不分人数,3人局时最容易被注意到,因为只剩1个"其他角色"能
+  // 被问,一清空就等于"只问了下家一个人")。这条检查的其它几项(currentSeat/sourceSeat
+  // 的类型与存活性)本身没问题,只删掉 remainingSeats.length===0 这一条误判。
   if(g.pending && g.pending.type==='luanwuChoose'){
     const d = g.pending;
     if(typeof d.currentSeat!=='number' || !g.players[d.currentSeat] || !g.players[d.currentSeat].alive ||
-       !Array.isArray(d.remainingSeats) || d.remainingSeats.length===0 ||
+       !Array.isArray(d.remainingSeats) ||
        typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
       g.pending = null;
       g.phase = 'play';
