@@ -3160,7 +3160,8 @@ function startLuanwu() {
 function chooseLuanwuOption(option) {
   tx(g => {
     if (g.pending.type !== 'luanwuChoose') return g;
-    
+    if (g.pending.currentSeat !== mySeat) return g;
+
     const currentSeat = g.pending.currentSeat;
     const sourceSeat = g.pending.sourceSeat;
     const currentPlayer = g.players[currentSeat];
