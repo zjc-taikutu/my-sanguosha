@@ -3873,6 +3873,7 @@ function useNiepan(){
     me.equips=emptyEquips();
     me.delays=[];
     me.chained=false;
+    me.faceup=true;
     me.turnedOver=false;
     me.nirvanaUsed=true;
     const hpBefore = me.hp;

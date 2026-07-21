@@ -4088,7 +4088,7 @@ function renderFaceupStatus(g) {
   const p = g.players[mySeat];
   if(!p || p.faceup !== false) return '';
   
-  return '<div class="status-notice"><p>你处于翻面状态，本回合将被跳过并自动翻回正面</p></div>';
+  return '<div class="status-notice"><p>你处于背面状态：下次轮到你时将跳过整个回合并自动翻回正面；回合外仍可正常响应</p></div>';
 }
 
 // 智迟状态提示UI
