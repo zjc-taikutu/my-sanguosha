@@ -675,7 +675,7 @@ function renderControls(g){
       const available = (target.hand || []).length +
         Object.values(target.equips || {}).filter(Boolean).length +
         (target.delays || []).length;
-      if (i !== mySeat && target.alive && available > 0 && !g.pending.targets.includes(i)) {
+      if (i !== mySeat && target.alive && available > 0) {
         const b = document.createElement('button');
         b.className = 'target-btn';
         b.textContent = '选择 ' + escapeHtml(target.name);
@@ -684,7 +684,9 @@ function renderControls(g){
       }
     });
 
-    const selectedCount = (g.pending.discardedCounts || []).reduce((sum, count) => sum + count, 0);
+    const selectedCount = Array.isArray(g.pending.selections) && g.pending.selections.length
+      ? g.pending.selections.length
+      : (g.pending.discardedCounts || []).reduce((sum, count) => sum + count, 0);
     if(selectedCount > 0){
       const finishBtn = document.createElement('button');
       finishBtn.className = 'primary';
@@ -703,46 +705,35 @@ function renderControls(g){
     return;
   }
 
-  // 凌统【旋风】:选择弃牌数量阶段
-  if(g.pending && g.pending.type === 'xuanfengPick' && g.pending.from === mySeat && g.pending.stage === 'chooseCount') {
-    const div = document.createElement('div'); div.className = 'centered';
-    const currentTargetIndex = g.pending.currentTargetIndex;
-    const targetSeat = g.pending.targets[currentTargetIndex];
-    const target = g.players[targetSeat];
-    const maxAvailable = Math.min(g.pending.maxRemaining, 
-      (target.hand || []).length + 
-      Object.values(target.equips || {}).filter(e => e !== null).length +
-      (target.delays || []).length
-    );
-    
-    const h4 = document.createElement('h4'); h4.textContent = '【旋风】设置弃牌数';
-    const p = document.createElement('p'); 
-    p.textContent = `为 ${escapeHtml(target.name)} 选择弃置牌数（0-${Math.min(g.pending.maxRemaining, maxAvailable)}张）`;
-    
-    div.appendChild(h4);
-    div.appendChild(p);
-    
-    const countDiv = document.createElement('div'); countDiv.className = 'count-select';
-    
-    // 显示可选数量按钮
-    for (let count = 0; count <= Math.min(g.pending.maxRemaining, maxAvailable); count++) {
-      const b = document.createElement('button');
-      b.className = 'count-btn';
-      b.textContent = `${count}张`;
-      b.onclick = () => chooseXuanfengDiscardCount(count);
-      countDiv.appendChild(b);
+  // 凌统【旋风】:逐张选择牌（手牌随机，装备/判定牌可指定）
+  if(g.pending && g.pending.type === 'xuanfengPick' && g.pending.from === mySeat && g.pending.stage === 'chooseCard') {
+    const div=document.createElement('div'); div.className='centered';
+    const targetSeat=g.pending.currentTargetSeat;
+    const target=g.players[targetSeat];
+    const selected=g.pending.selections||[];
+    const h4=document.createElement('h4'); h4.textContent='【旋风】选择一张牌';
+    const p=document.createElement('p'); p.textContent=`选择弃置 ${escapeHtml(target.name)} 的哪张牌`;
+    div.appendChild(h4); div.appendChild(p);
+    const selectedHands=selected.filter(s=>s.targetSeat===targetSeat&&s.kind==='hand').length;
+    if((target.hand||[]).length>selectedHands){
+      const b=document.createElement('button'); b.className='primary';
+      b.textContent='弃随机一张手牌'; b.onclick=()=>pickXuanfengCard('hand'); div.appendChild(b);
     }
-    
-    div.appendChild(countDiv);
-    
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'cancel-btn';
-    cancelBtn.textContent = '取消';
-    cancelBtn.onclick = () => chooseXuanfengDiscardCount(0);
-    div.appendChild(cancelBtn);
-    
-    c.appendChild(div);
-    return;
+    EQUIP_SLOTS.forEach(slot=>{
+      const card=target.equips&&target.equips[slot];
+      if(!card||selected.some(s=>s.targetSeat===targetSeat&&s.kind==='equip'&&s.value===slot)) return;
+      const b=document.createElement('button'); b.className='primary';
+      b.textContent='弃装备【'+card.name+'】'; b.onclick=()=>pickXuanfengCard('equip',slot); div.appendChild(b);
+    });
+    (target.delays||[]).forEach((card,idx)=>{
+      if(selected.some(s=>s.targetSeat===targetSeat&&s.kind==='delay'&&s.value===idx)) return;
+      const b=document.createElement('button'); b.className='primary';
+      b.textContent='弃判定区【'+card.name+'】'; b.onclick=()=>pickXuanfengCard('delay',idx); div.appendChild(b);
+    });
+    const cancelBtn=document.createElement('button'); cancelBtn.className='cancel-btn';
+    cancelBtn.textContent='返回选择目标';
+    cancelBtn.onclick=()=>{ tx(g=>{ if(g.pending&&g.pending.type==='xuanfengPick'&&g.pending.from===mySeat){ g.pending.stage='selecting'; g.pending.currentTargetSeat=null; } return g; }); };
+    div.appendChild(cancelBtn); c.appendChild(div); return;
   }
 
   // 徐庶【举荐】:选非基本牌

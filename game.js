@@ -1023,6 +1023,7 @@ function normalize(g){
   // 凌统【旋风】:旋风选择阶段
   if(g.pending && g.pending.type==='xuanfengPick'){
     const d = g.pending;
+    if(!Array.isArray(d.selections)) d.selections=[];
     // Firebase Realtime Database 不保留空数组。旋风刚触发、尚未选择目标时，targets 和
     // discardedCounts 都是 []，同步回来后字段会直接缺失；这属于合法初始状态，不能当成
     // 脏数据清掉 pending，否则真实联机局中旋风界面会在建立后立刻消失。
@@ -5286,21 +5287,14 @@ function pickXuanfengTarget(seat) {
     
     // 同一目标只能选择一次。旧实现允许重复选择同一目标，但第二次会覆盖第一次记录的
     // discardedCounts，同时再次扣减 maxRemaining，最终出现“日志说选了两张、实际只弃一张”。
-    if (pending.targets.includes(seat)) return g;
-
     const available = (target.hand || []).length +
       EQUIP_SLOTS.filter(slot => target.equips && target.equips[slot]).length +
       (target.delays || []).length;
     if (available <= 0) return g;
 
-    pending.targets.push(seat);
-    pending.discardedCounts.push(0);
-    
-    // 进入选择弃牌数量阶段
-    pending.stage = 'chooseCount';
-    pending.currentTargetIndex = pending.targets.indexOf(seat);
-    
-    g.log = pushLog(g.log, `${me.name} 选择 ${target.name} 作为【旋风】目标,请选择弃置牌数`);
+    pending.stage = 'chooseCard';
+    pending.currentTargetSeat = seat;
+    g.log = pushLog(g.log, `${me.name} 选择 ${target.name} 作为【旋风】目标,请选择要弃置的牌`);
     
     return g;
   });
@@ -5354,13 +5348,49 @@ function chooseXuanfengDiscardCount(count) {
   });
 }
 
+// 手牌不可见，只能随机弃；装备区与判定区是明牌，可以指定。
+function pickXuanfengCard(kind, value) {
+  tx(g => {
+    const pending=g.pending;
+    if(!pending || pending.type!=='xuanfengPick' || pending.from!==mySeat || pending.stage!=='chooseCard') return g;
+    const targetSeat=pending.currentTargetSeat;
+    const target=g.players[targetSeat];
+    if(!target || !target.alive || pending.maxRemaining<=0) return g;
+    if(!Array.isArray(pending.selections)) pending.selections=[];
+    let selection=null;
+    if(kind==='hand'){
+      const already=pending.selections.filter(s=>s.targetSeat===targetSeat && s.kind==='hand').length;
+      if((target.hand||[]).length<=already) return g;
+      selection={targetSeat, kind:'hand'};
+    } else if(kind==='equip'){
+      const slot=String(value||'');
+      if(!EQUIP_SLOTS.includes(slot) || !target.equips || !target.equips[slot]) return g;
+      if(pending.selections.some(s=>s.targetSeat===targetSeat && s.kind==='equip' && s.value===slot)) return g;
+      selection={targetSeat, kind:'equip', value:slot};
+    } else if(kind==='delay'){
+      const idx=Number(value);
+      if(!Number.isInteger(idx) || idx<0 || idx>=(target.delays||[]).length) return g;
+      if(pending.selections.some(s=>s.targetSeat===targetSeat && s.kind==='delay' && s.value===idx)) return g;
+      selection={targetSeat, kind:'delay', value:idx, cardId:target.delays[idx].id};
+    } else return g;
+    pending.selections.push(selection);
+    pending.maxRemaining--;
+    pending.currentTargetSeat=null;
+    pending.stage='selecting';
+    if(pending.maxRemaining===0) executeXuanfeng(g);
+    return g;
+  });
+}
+
 // “至多两张”允许只弃一张后主动结束。旧UI没有这个出口，玩家选1张后只能继续凑满2张，
 // 或点“取消”把整次旋风作废，造成“日志显示发动、实际没有弃牌”的直接体验。
 function finishXuanfengSelection() {
   tx(g => {
     const pending = g.pending;
     if (!pending || pending.type !== 'xuanfengPick' || pending.from !== mySeat || pending.stage !== 'selecting') return g;
-    const selectedCount = (pending.discardedCounts || []).reduce((sum, count) => sum + count, 0);
+    const selectedCount = Array.isArray(pending.selections) && pending.selections.length
+      ? pending.selections.length
+      : (pending.discardedCounts || []).reduce((sum, count) => sum + count, 0);
     if (selectedCount <= 0 || selectedCount > 2) return g;
     executeXuanfeng(g);
     return g;
@@ -5373,6 +5403,34 @@ function executeXuanfeng(g) {
   if (!pending || pending.type !== 'xuanfengPick') return g;
   
   const me = g.players[pending.from];
+  const selections = Array.isArray(pending.selections) ? pending.selections : [];
+  if(selections.length){
+    for(const selection of selections){
+      const targetSeat=selection.targetSeat;
+      const target=g.players[targetSeat];
+      if(!target || !target.alive) continue;
+      let card=null;
+      if(selection.kind==='hand'){
+        const hand=target.hand||[];
+        if(hand.length) card=hand.splice(Math.floor(Math.random()*hand.length),1)[0];
+      } else if(selection.kind==='equip'){
+        const slot=selection.value;
+        if(EQUIP_SLOTS.includes(slot) && target.equips && target.equips[slot]){
+          card=target.equips[slot];
+          target.equips[slot]=null;
+          triggerHook(g, targetSeat, 'onLoseEquip', {count:1});
+        }
+      } else if(selection.kind==='delay'){
+        let idx=(target.delays||[]).findIndex(c=>c && selection.cardId!=null && c.id===selection.cardId);
+        if(idx<0) idx=selection.value;
+        if(Number.isInteger(idx) && target.delays && target.delays[idx]) card=target.delays.splice(idx,1)[0];
+      }
+      if(card){
+        g.discard.push(card);
+        g.log=pushLog(g.log, `${me.name} 发动【旋风】,弃置了 ${target.name} 的【${card.name}】`);
+      }
+    }
+  } else {
   const targets = pending.targets;
   const counts = pending.discardedCounts;
   
@@ -5439,6 +5497,7 @@ function executeXuanfeng(g) {
     g.discard.push(...cardsToDiscard);
     
     g.log = pushLog(g.log, `${me.name} 发动【旋风】,令 ${target.name} 随机弃置${cardsToDiscard.length}张牌`);
+  }
   }
   
   // 清理pending状态
@@ -5538,6 +5597,7 @@ function continueEndPhaseAfterXiaoguo(g, endingSeat){
         trigger: 'discard',
         targets: [],
         discardedCounts: [],
+        selections: [],
         maxRemaining: 2,
         stage: 'selecting',
         previousPhase: 'discard',

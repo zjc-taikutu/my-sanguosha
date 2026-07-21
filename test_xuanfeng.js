@@ -46,7 +46,7 @@ describe('凌统【旋风】修复', function() {
     assert.strictEqual(_g.phase, 'play');
   });
 
-  it('不能重复选择同一目标并重复扣减剩余数', function() {
+  it('选中目标后进入逐张选牌阶段', function() {
     mySeat = 0;
     const lingtong = player('凌统', 'lingtong');
     const target = player('目标', 'liubei');
@@ -59,10 +59,30 @@ describe('凌统【旋风】修复', function() {
 
     pickXuanfengTarget(1);
 
-    assert.deepStrictEqual(Array.from(_g.pending.targets), [1]);
-    assert.deepStrictEqual(Array.from(_g.pending.discardedCounts), [1]);
+    assert.strictEqual(_g.pending.currentTargetSeat, 1);
     assert.strictEqual(_g.pending.maxRemaining, 1);
-    assert.strictEqual(_g.pending.stage, 'selecting');
+    assert.strictEqual(_g.pending.stage, 'chooseCard');
+  });
+
+  it('可以指定弃置目标的装备而不是随机手牌', function() {
+    mySeat = 0;
+    const lingtong = player('凌统', 'lingtong');
+    const target = player('目标', 'liubei');
+    target.hand = [{ id: 'h1', name: '杀' }];
+    target.equips.armor = { id: 'e1', name: '八卦阵' };
+    _g = {
+      players: [lingtong, target], turn: 0, phase: 'xuanfengPick',
+      pending: { type: 'xuanfengPick', from: 0, trigger: 'equip', targets: [], discardedCounts: [], selections: [], maxRemaining: 2, stage: 'chooseCard', currentTargetSeat: 1, previousPhase: 'play' },
+      deck: [], discard: [], log: []
+    };
+
+    pickXuanfengCard('equip', 'armor');
+    finishXuanfengSelection();
+
+    assert.strictEqual(target.equips.armor, null);
+    assert.strictEqual(target.hand.length, 1);
+    assert.strictEqual(_g.discard[0].name, '八卦阵');
+    assert.strictEqual(_g.pending, null);
   });
 
   it('骁果令凌统失去装备后保留旋风pending并记录续接', function() {

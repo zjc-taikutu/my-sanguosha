@@ -405,6 +405,7 @@ const GENERALS = {
             trigger: 'equip',
             targets: [],
             discardedCounts: [],
+            selections: [],
             maxRemaining: 2,
             stage: 'selecting',
             previousPhase: previousPhase
