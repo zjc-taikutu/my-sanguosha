@@ -1679,9 +1679,16 @@ function respondXiaoguoChoice(choice){
     target.equips[choice]=null;
     g.discard.push(card);
     g.log=pushLog(g.log, target.name+' 弃置装备【'+card.name+'】,'+asker.name+' 摸一张牌');
+    // 装备已经弃置，先清掉骁果的旧 pending，再触发失去装备钩子。旋风若挂起，必须保留它并
+    // 记下骁果续接信息；旧实现触发后无条件 g.pending=null，导致只留下“可以发动旋风”的日志。
+    g.pending=null;
+    const pendingBefore=g.pending;
     triggerHook(g, endingSeat, 'onLoseEquip', {count:1});
     drawN(g, from, 1);
-    g.pending=null;
+    if(g.pending!==pendingBefore && g.pending){
+      g.pending.resume={type:'xiaoguo', endingSeat, lastAsker:from};
+      return g;
+    }
     advanceXiaoguo(g, endingSeat, from);
     return g;
   });

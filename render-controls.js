@@ -669,7 +669,10 @@ function renderControls(g){
     // 显示所有可选目标
     g.players.forEach((target, i) => {
       if (i === mySeat || !target || !target.alive) return;
-      if (i !== mySeat && target.alive) {
+      const available = (target.hand || []).length +
+        Object.values(target.equips || {}).filter(Boolean).length +
+        (target.delays || []).length;
+      if (i !== mySeat && target.alive && available > 0 && !g.pending.targets.includes(i)) {
         const b = document.createElement('button');
         b.className = 'target-btn';
         b.textContent = '选择 ' + escapeHtml(target.name);
@@ -677,10 +680,19 @@ function renderControls(g){
         div.appendChild(b);
       }
     });
+
+    const selectedCount = (g.pending.discardedCounts || []).reduce((sum, count) => sum + count, 0);
+    if(selectedCount > 0){
+      const finishBtn = document.createElement('button');
+      finishBtn.className = 'primary';
+      finishBtn.textContent = `完成发动（弃置${selectedCount}张）`;
+      finishBtn.onclick = finishXuanfengSelection;
+      div.appendChild(finishBtn);
+    }
     
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'cancel-btn';
-    cancelBtn.textContent = '取消';
+    cancelBtn.textContent = selectedCount > 0 ? '取消整次旋风' : '不发动';
     cancelBtn.onclick = cancelXuanfeng;
     div.appendChild(cancelBtn);
     
