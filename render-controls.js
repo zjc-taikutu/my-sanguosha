@@ -1195,7 +1195,7 @@ function renderControls(g){
     const div = document.createElement('div'); div.className = 'centered';
     const h4 = document.createElement('h4'); h4.textContent = '【眩惑】选择♥手牌';
     div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '选择要交给 ' + target.name + ' 的一张♥手牌：';
+    const p = document.createElement('p'); p.textContent = '直接点击下方手牌区的一张♥牌，或点击这里的快捷按钮：';
     div.appendChild(p);
     const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
     g.pending.heartCards.forEach((card, i) => {
@@ -1206,10 +1206,10 @@ function renderControls(g){
     });
     div.appendChild(cardDiv);
     const cb = document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消'; cb.onclick=()=>cancelHuanhuo();
+    cb.textContent='取消发动【眩惑】'; cb.onclick=()=>cancelHuanhuo();
     div.appendChild(cb);
     c.appendChild(div);
-    setBanner('选择要交给 ' + target.name + ' 的一张♥手牌');
+    setBanner('选择要交给 ' + target.name + ' 的一张♥手牌（可直接点击下方手牌）');
     return;
   }
 

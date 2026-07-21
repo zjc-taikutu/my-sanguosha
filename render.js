@@ -195,8 +195,12 @@ document.addEventListener('click', unlockAudioOnce, {once:true, passive:true});
 // matchMedia 的环境退回宽高比较——这只是兜底,不追求精确到"设备物理方向"这种细节,单纯
 // "宽>高就当横屏"这个近似对这个用途完全够用。
 function isPortrait(){
-  if(window.matchMedia) return window.matchMedia('(orientation: portrait)').matches;
-  return window.innerHeight > window.innerWidth;
+  // 以实际可交互视口为准。部分内嵌浏览器/桌面缩放环境的 orientation media query 会沿用
+  // 设备自然方向，明明当前内容区宽>高仍报告 portrait，导致全屏遮罩错误拦截所有按钮。
+  if(Number.isFinite(window.innerWidth)&&Number.isFinite(window.innerHeight)&&window.innerWidth>0&&window.innerHeight>0){
+    return window.innerHeight > window.innerWidth;
+  }
+  return !!(window.matchMedia&&window.matchMedia('(orientation: portrait)').matches);
 }
 function checkLandscapeGate(){
   const gate = document.getElementById('landscapeGate');

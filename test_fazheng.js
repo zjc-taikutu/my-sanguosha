@@ -31,6 +31,9 @@ describe('法正【恩怨/眩惑】',function(){
     assert.deepStrictEqual(Array.from(_g.pending.candidates),[1,2]);
     pickHuanhuoTarget(1);
     assert.strictEqual(_g.phase,'huanhuoPickCard');
+    // 真实线上下一次点击前会先经过 tx() 的 normalize；专项测试必须覆盖这层。
+    normalize(_g);
+    assert.strictEqual(_g.pending.type,'huanhuoPickCard');
     pickHuanhuoHeartCard(0);
     assert.strictEqual(_g.phase,'huanhuoPickGotCard');
     pickHuanhuoGotCard(0);
@@ -45,6 +48,19 @@ describe('法正【恩怨/眩惑】',function(){
     assert.ok(_g.players[1].hand.some(c=>c.id==='heart'));
     assert.ok(_g.players[2].hand.some(c=>c.id==='taken'));
     assert.ok(!_g.players[0].hand.some(c=>c.id==='taken'));
+  });
+
+  it('眩惑选择红桃阶段经过normalize后仍可取消',function(){
+    mySeat=0;
+    _g=fazhengGame();
+    _g.players[0].hand=[fazhengCard('闪','♥',3,'heart-cancel')];
+    startHuanhuo();
+    pickHuanhuoTarget(1);
+    normalize(_g);
+    assert.strictEqual(_g.pending.type,'huanhuoPickCard');
+    cancelHuanhuo();
+    assert.strictEqual(_g.pending,null);
+    assert.strictEqual(_g.phase,'play');
   });
 
   it('恩怨失去体力不是伤害，不会触发伤害类技能',function(){
