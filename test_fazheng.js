@@ -31,7 +31,8 @@ describe('法正【恩怨/眩惑】',function(){
     assert.deepStrictEqual(Array.from(_g.pending.candidates),[1,2]);
     pickHuanhuoTarget(1);
     assert.strictEqual(_g.phase,'huanhuoPickCard');
-    // 真实线上下一次点击前会先经过 tx() 的 normalize；专项测试必须覆盖这层。
+    // 模拟 Firebase 完整序列化/回读后再执行下一次点击，不能依赖旧牌对象快照。
+    _g=JSON.parse(JSON.stringify(_g));
     normalize(_g);
     assert.strictEqual(_g.pending.type,'huanhuoPickCard');
     pickHuanhuoHeartCard(0);
@@ -56,11 +57,27 @@ describe('法正【恩怨/眩惑】',function(){
     _g.players[0].hand=[fazhengCard('闪','♥',3,'heart-cancel')];
     startHuanhuo();
     pickHuanhuoTarget(1);
+    _g=JSON.parse(JSON.stringify(_g));
     normalize(_g);
     assert.strictEqual(_g.pending.type,'huanhuoPickCard');
     cancelHuanhuo();
     assert.strictEqual(_g.pending,null);
     assert.strictEqual(_g.phase,'play');
+  });
+
+  it('眩惑目标选择阶段取消后可再次发动，不残留死界面',function(){
+    mySeat=0;
+    _g=fazhengGame();
+    _g.players[0].hand=[fazhengCard('闪','♥',3,'heart-retry')];
+    startHuanhuo();
+    cancelHuanhuo();
+    _g=JSON.parse(JSON.stringify(_g));
+    normalize(_g);
+    assert.strictEqual(_g.pending,null);
+    assert.strictEqual(_g.phase,'play');
+    startHuanhuo();
+    assert.strictEqual(_g.pending.type,'huanhuoPick');
+    assert.strictEqual(_g.phase,'huanhuoPick');
   });
 
   it('恩怨失去体力不是伤害，不会触发伤害类技能',function(){

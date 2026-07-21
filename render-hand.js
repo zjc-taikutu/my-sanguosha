@@ -151,9 +151,8 @@ function renderHand(g){
       // 法正【眩惑】:选择交出的红桃时，允许直接点击真实手牌。旧界面只在控制区另外生成一排
       // 文本按钮，手牌本体反而是灰的，手机玩家自然会以为“红桃牌点不了”。按 card.id 对照
       // pending 快照找到服务端需要的候选下标，点击后仍走同一个 pickHuanhuoHeartCard 校验入口。
-      const pendingCardIndex=(g.pending.heartCards||[]).findIndex(c=>c&&c.id===card.id);
-      usable=card.suit==='♥'&&pendingCardIndex>=0;
-      if(usable) onClick=()=>pickHuanhuoHeartCard(pendingCardIndex);
+      usable=card.suit==='♥';
+      if(usable) onClick=()=>pickHuanhuoHeartCard(idx);
     } else if(g.phase==='guicai'&&guicaiMode&&g.pending&&g.pending.type==='guicai'&&g.pending.asking===mySeat){
       // 鬼才选牌模式:任意一张手牌都可以打出替换判定牌
       usable=true; onClick=()=>respondGuicai(true, idx);

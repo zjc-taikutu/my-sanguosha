@@ -1101,7 +1101,6 @@ function normalize(g){
   if(g.pending && g.pending.type==='huanhuoPick'){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.heartCards) || d.heartCards.length===0 ||
        !Array.isArray(d.candidates) || d.candidates.length===0){
       g.pending = null;
       g.phase = 'play';
@@ -1113,8 +1112,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !Array.isArray(d.heartCards) || d.heartCards.length===0 ||
-       !Array.isArray(d.candidates) || d.candidates.length===0){
+       !(g.players[d.sourceSeat].hand||[]).some(card=>card && card.suit==='♥')){
       g.pending = null;
       g.phase = 'play';
     }
@@ -1125,8 +1123,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !Array.isArray(d.targetHand) || d.targetHand.length===0 ||
-       !Array.isArray(d.candidates) || d.candidates.length===0){
+       !(g.players[d.targetSeat].hand||[]).length){
       g.pending = null;
       g.phase = 'play';
     }
@@ -6683,7 +6680,7 @@ function startHuanhuo() {
     const candidates=g.players.map((p,i)=>i!==mySeat&&p&&p.alive?i:null).filter(i=>i!==null);
     // 获得第一名角色的牌后必须交给另一名其他角色，所以场上至少需要两名其他存活角色。
     if(!heartCards.length || candidates.length<2) return g;
-    g.pending={type:'huanhuoPick',sourceSeat:mySeat,heartCards,candidates};
+    g.pending={type:'huanhuoPick',sourceSeat:mySeat,candidates};
     g.phase='huanhuoPick';
     g.log=pushLog(g.log,me.name+' 发动【眩惑】,选择目标角色…');
     return g;
@@ -6705,9 +6702,7 @@ function pickHuanhuoTarget(seat) {
     g.pending = {
       type: 'huanhuoPickCard',
       sourceSeat: mySeat,
-      targetSeat: seat,
-      heartCards,
-      candidates: heartCards.map((_, idx) => idx)
+      targetSeat: seat
     };
     g.phase='huanhuoPickCard';
     
@@ -6721,22 +6716,12 @@ function pickHuanhuoTarget(seat) {
 function pickHuanhuoHeartCard(cardIndex) {
   tx(g => {
     if(!g.pending || g.pending.type!=='huanhuoPickCard' || g.pending.sourceSeat!==mySeat) return g;
-    
-    if (cardIndex < 0 || cardIndex >= g.pending.heartCards.length) return g;
-    if (!g.pending.candidates.includes(cardIndex)) return g;
-    
     const me = g.players[mySeat];
     const target = g.players[g.pending.targetSeat];
     if(!me || !me.alive || !target || !target.alive) return g;
-    
-    // 获取选择的♥手牌
-    const card = g.pending.heartCards[cardIndex];
-    
-    // 从自己手牌中移除这张牌
     const hand = me.hand || [];
-    const idx = hand.findIndex(c => c.id === card.id);
-    if(idx===-1 || hand[idx].suit!=='♥') return g;
-    hand.splice(idx, 1);
+    if(!Number.isInteger(cardIndex) || cardIndex<0 || cardIndex>=hand.length || hand[cardIndex].suit!=='♥') return g;
+    const card=hand.splice(cardIndex,1)[0];
     
     // 将这张牌交给目标角色
     if (!target.hand) target.hand = [];
@@ -6756,9 +6741,7 @@ function pickHuanhuoHeartCard(cardIndex) {
     g.pending = {
       type: 'huanhuoPickGotCard',
       sourceSeat: mySeat,
-      targetSeat: g.pending.targetSeat,
-      targetHand: targetHand,
-      candidates: targetHand.map((_, idx) => idx)
+      targetSeat: g.pending.targetSeat
     };
     g.phase='huanhuoPickGotCard';
     
@@ -6772,23 +6755,13 @@ function pickHuanhuoHeartCard(cardIndex) {
 function pickHuanhuoGotCard(cardIndex) {
   tx(g => {
     if(!g.pending || g.pending.type!=='huanhuoPickGotCard' || g.pending.sourceSeat!==mySeat) return g;
-    
-    if (cardIndex < 0 || cardIndex >= g.pending.targetHand.length) return g;
-    if (!g.pending.candidates.includes(cardIndex)) return g;
-    
     const me = g.players[mySeat];
     const firstTargetSeat=g.pending.targetSeat;
     const target = g.players[firstTargetSeat];
     if(!me || !me.alive || !target || !target.alive) return g;
-    
-    // 获取选择的牌
-    const gotCard = g.pending.targetHand[cardIndex];
-    
-    // 从目标手牌中移除这张牌
     const targetHand = target.hand || [];
-    const idx = targetHand.findIndex(c => c.id === gotCard.id);
-    if(idx===-1) return g;
-    targetHand.splice(idx, 1);
+    if(!Number.isInteger(cardIndex) || cardIndex<0 || cardIndex>=targetHand.length) return g;
+    const gotCard=targetHand.splice(cardIndex,1)[0];
     
     // 添加到自己手牌
     if (!me.hand) me.hand = [];

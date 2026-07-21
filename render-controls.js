@@ -1108,7 +1108,8 @@ function renderControls(g){
     const p = document.createElement('p'); p.textContent = '选择要交给 ' + source.name + ' 的一张♥手牌：';
     div.appendChild(p);
     const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    g.pending.heartCards.forEach((card, i) => {
+    (g.players[mySeat].hand||[]).forEach((card, i) => {
+      if(!card || card.suit!=='♥') return;
       const cb = document.createElement('button'); cb.className='card-btn';
       cb.textContent='【'+card.name+'】';
       cb.onclick=()=>giveEnyuanCard(i);
@@ -1213,7 +1214,7 @@ function renderControls(g){
     const p = document.createElement('p'); p.textContent = '从 ' + target.name + ' 手牌中选择一张获得：';
     div.appendChild(p);
     const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    g.pending.targetHand.forEach((card, i) => {
+    (target.hand||[]).forEach((card, i) => {
       const cb = document.createElement('button'); cb.className='card-btn';
       cb.textContent='【'+card.name+'】';
       cb.onclick=()=>pickHuanhuoGotCard(i);
