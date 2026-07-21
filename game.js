@@ -1130,6 +1130,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='huanhuoPickSecond'){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.firstTargetSeat!=='number' || !g.players[d.firstTargetSeat] || !g.players[d.firstTargetSeat].alive ||
        typeof d.transferCard!=='object' || !d.transferCard ||
        !Array.isArray(d.candidates) || d.candidates.length===0){
       g.pending = null;
@@ -6463,11 +6464,27 @@ function cancelDuanbing() {
 
 // ===================== 法正技能实现 =====================
 
+// 【恩怨】要求的是“失去1点体力”，不是受到伤害：直接扣体力，不触发仁心、天香、遗计、
+// 刚烈、狂骨或另一轮恩怨等伤害事件；若降到0或以下，仍按通用濒死流程求桃并在结束后接回
+// 原伤害链的尾巴。
+function resolveEnyuanLoseHp(g, pending, resume){
+  const damager=g.players[pending.damagerSeat];
+  if(!damager || !damager.alive) return false;
+  damager.hp--;
+  g.log=pushLog(g.log,damager.name+' 因【恩怨】失去1点体力（体力'+damager.hp+'）');
+  if(damager.hp<=0){
+    startDying(g,pending.damagerSeat,'enyuan',undefined,1);
+    g.pending.resume={type:'enyuan',resume,seat:pending.sourceSeat};
+    return true;
+  }
+  return false;
+}
+
 // 法正【恩怨】：处理选择触发
 function triggerEnyuan() {
   tx(g => {
     const pending = g.pending;
-    if (!pending || pending.type !== 'enyuanChoose') return g;
+    if (!pending || pending.type !== 'enyuanChoose' || pending.damagerSeat!==mySeat) return g;
     
     const damager = g.players[pending.damagerSeat];
     const source = g.players[pending.sourceSeat]; // 法正
@@ -6498,11 +6515,7 @@ function triggerEnyuan() {
       // 没有♥手牌，只能选择失去1点体力
       g.pending = null;
       g.log = pushLog(g.log, damager.name + ' 没有♥手牌，发动【恩怨】效果');
-      const dying = dealDamage(g, pending.damagerSeat, 1, pending.sourceSeat, '【恩怨】', 'enyuan');
-      if(dying){
-        if(g.pending && g.pending.resume) g.pending.resume = { type:'enyuan', resume, seat: pending.sourceSeat };
-        return g;
-      }
+      if(resolveEnyuanLoseHp(g,pending,resume)) return g;
       if(checkWin(g)) return g;
       resumeAfterInterrupt(g, resume, pending.sourceSeat);
     }
@@ -6515,7 +6528,7 @@ function triggerEnyuan() {
 function chooseEnyuanOption(option) {
   tx(g => {
     const pending = g.pending;
-    if (!pending || pending.type !== 'enyuanChooseOption') return g;
+    if (!pending || pending.type !== 'enyuanChooseOption' || pending.damagerSeat!==mySeat) return g;
     
     const damager = g.players[pending.damagerSeat];
     const source = g.players[pending.sourceSeat]; // 法正
@@ -6542,11 +6555,7 @@ function chooseEnyuanOption(option) {
     } else if (option === 'loseHp') {
       g.pending = null;
       g.log = pushLog(g.log, damager.name + ' 选择失去1点体力');
-      const dying = dealDamage(g, pending.damagerSeat, 1, pending.sourceSeat, '【恩怨】', 'enyuan');
-      if(dying){
-        if(g.pending && g.pending.resume) g.pending.resume = { type:'enyuan', resume, seat: pending.sourceSeat };
-        return g;
-      }
+      if(resolveEnyuanLoseHp(g,pending,resume)) return g;
       if(checkWin(g)) return g;
       resumeAfterInterrupt(g, resume, pending.sourceSeat);
     }
@@ -6559,7 +6568,7 @@ function chooseEnyuanOption(option) {
 function giveEnyuanCard(cardIndex) {
   tx(g => {
     const pending = g.pending;
-    if (!pending || pending.type !== 'enyuanGiveCard') return g;
+    if (!pending || pending.type !== 'enyuanGiveCard' || pending.damagerSeat!==mySeat) return g;
     
     const damager = g.players[pending.damagerSeat];
     const source = g.players[pending.sourceSeat]; // 法正
@@ -6601,53 +6610,41 @@ function giveEnyuanCard(cardIndex) {
 
 // 法正【眩惑】：启动眩惑
 function startHuanhuo() {
-  const mySeat = window.mySeat;
-  const g = window.g;
-  
-  // 获取当前玩家的♥手牌
-  const me = g.players[mySeat];
-  const heartCards = (me.hand || []).filter(card => card.suit === '♥');
-  
-  // 进入选择目标角色阶段
-  g.pending = { 
-    type: 'huanhuoPick', 
-    sourceSeat: mySeat,
-    heartCards: heartCards,
-    candidates: []
-  };
-  
-  // 计算可选目标（其他存活角色）
-  for (let i = 0; i < g.players.length; i++) {
-    if (i !== mySeat && g.players[i] && g.players[i].alive) {
-      g.pending.candidates.push(i);
-    }
-  }
-  
-  g.log = pushLog(g.log, me.name + ' 发动【眩惑】,选择目标角色…');
-  render();
+  tx(g => {
+    if(g.phase!=='play' || g.turn!==mySeat || g.huanhuoUsed) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive || !hasCap(me,'huanhuo')) return g;
+    const heartCards=(me.hand||[]).filter(card=>card.suit==='♥');
+    const candidates=g.players.map((p,i)=>i!==mySeat&&p&&p.alive?i:null).filter(i=>i!==null);
+    // 获得第一名角色的牌后必须交给另一名其他角色，所以场上至少需要两名其他存活角色。
+    if(!heartCards.length || candidates.length<2) return g;
+    g.pending={type:'huanhuoPick',sourceSeat:mySeat,heartCards,candidates};
+    g.phase='huanhuoPick';
+    g.log=pushLog(g.log,me.name+' 发动【眩惑】,选择目标角色…');
+    return g;
+  });
 }
 
 // 法正【眩惑】：选择目标角色
 function pickHuanhuoTarget(seat) {
-  if (seat === window.mySeat) return;
-  
   tx(g => {
-    if (g.pending.type !== 'huanhuoPick') return g;
-    
-    const me = g.players[window.mySeat];
+    if(!g.pending || g.pending.type!=='huanhuoPick' || g.pending.sourceSeat!==mySeat) return g;
+    if(seat===mySeat || !g.pending.candidates.includes(seat)) return g;
+    const me = g.players[mySeat];
     const target = g.players[seat];
-    
     if (!target || !target.alive) return g;
-    if (!g.pending.candidates.includes(seat)) return g;
-    
+    // 重新按当前手牌校验，不能信任开始发动时保存的旧快照。
+    const heartCards=(me.hand||[]).filter(card=>card.suit==='♥');
+    if(!heartCards.length) return g;
     // 进入选择♥手牌阶段
     g.pending = {
       type: 'huanhuoPickCard',
-      sourceSeat: window.mySeat,
+      sourceSeat: mySeat,
       targetSeat: seat,
-      heartCards: g.pending.heartCards,
-      candidates: g.pending.heartCards.map((_, idx) => idx)
+      heartCards,
+      candidates: heartCards.map((_, idx) => idx)
     };
+    g.phase='huanhuoPickCard';
     
     g.log = pushLog(g.log, me.name + ' 选择 ' + target.name + ' 作为目标,请选择一张♥手牌');
     
@@ -6658,13 +6655,14 @@ function pickHuanhuoTarget(seat) {
 // 法正【眩惑】：选择要交出的♥手牌
 function pickHuanhuoHeartCard(cardIndex) {
   tx(g => {
-    if (g.pending.type !== 'huanhuoPickCard') return g;
+    if(!g.pending || g.pending.type!=='huanhuoPickCard' || g.pending.sourceSeat!==mySeat) return g;
     
     if (cardIndex < 0 || cardIndex >= g.pending.heartCards.length) return g;
     if (!g.pending.candidates.includes(cardIndex)) return g;
     
-    const me = g.players[window.mySeat];
+    const me = g.players[mySeat];
     const target = g.players[g.pending.targetSeat];
+    if(!me || !me.alive || !target || !target.alive) return g;
     
     // 获取选择的♥手牌
     const card = g.pending.heartCards[cardIndex];
@@ -6672,9 +6670,8 @@ function pickHuanhuoHeartCard(cardIndex) {
     // 从自己手牌中移除这张牌
     const hand = me.hand || [];
     const idx = hand.findIndex(c => c.id === card.id);
-    if (idx !== -1) {
-      hand.splice(idx, 1);
-    }
+    if(idx===-1 || hand[idx].suit!=='♥') return g;
+    hand.splice(idx, 1);
     
     // 将这张牌交给目标角色
     if (!target.hand) target.hand = [];
@@ -6693,11 +6690,12 @@ function pickHuanhuoHeartCard(cardIndex) {
     // 进入选择要获得的牌阶段
     g.pending = {
       type: 'huanhuoPickGotCard',
-      sourceSeat: window.mySeat,
+      sourceSeat: mySeat,
       targetSeat: g.pending.targetSeat,
       targetHand: targetHand,
       candidates: targetHand.map((_, idx) => idx)
     };
+    g.phase='huanhuoPickGotCard';
     
     g.log = pushLog(g.log, me.name + ' 交给 ' + target.name + ' 一张♥手牌,请选择要获得的牌');
     
@@ -6708,13 +6706,15 @@ function pickHuanhuoHeartCard(cardIndex) {
 // 法正【眩惑】：选择要获得的牌
 function pickHuanhuoGotCard(cardIndex) {
   tx(g => {
-    if (g.pending.type !== 'huanhuoPickGotCard') return g;
+    if(!g.pending || g.pending.type!=='huanhuoPickGotCard' || g.pending.sourceSeat!==mySeat) return g;
     
     if (cardIndex < 0 || cardIndex >= g.pending.targetHand.length) return g;
     if (!g.pending.candidates.includes(cardIndex)) return g;
     
-    const me = g.players[window.mySeat];
-    const target = g.players[g.pending.targetSeat];
+    const me = g.players[mySeat];
+    const firstTargetSeat=g.pending.targetSeat;
+    const target = g.players[firstTargetSeat];
+    if(!me || !me.alive || !target || !target.alive) return g;
     
     // 获取选择的牌
     const gotCard = g.pending.targetHand[cardIndex];
@@ -6722,9 +6722,8 @@ function pickHuanhuoGotCard(cardIndex) {
     // 从目标手牌中移除这张牌
     const targetHand = target.hand || [];
     const idx = targetHand.findIndex(c => c.id === gotCard.id);
-    if (idx !== -1) {
-      targetHand.splice(idx, 1);
-    }
+    if(idx===-1) return g;
+    targetHand.splice(idx, 1);
     
     // 添加到自己手牌
     if (!me.hand) me.hand = [];
@@ -6733,17 +6732,19 @@ function pickHuanhuoGotCard(cardIndex) {
     // 进入选择第二个目标阶段（交给另一名其他角色）
     g.pending = {
       type: 'huanhuoPickSecond',
-      sourceSeat: window.mySeat,
+      sourceSeat: mySeat,
+      firstTargetSeat,
       transferCard: gotCard,
       candidates: []
     };
     
     // 计算第二个目标候选（不能是自己，也不能是第一个目标）
     for (let i = 0; i < g.players.length; i++) {
-      if (i !== window.mySeat && i !== g.pending.targetSeat && g.players[i] && g.players[i].alive) {
+      if (i !== mySeat && i !== firstTargetSeat && g.players[i] && g.players[i].alive) {
         g.pending.candidates.push(i);
       }
     }
+    g.phase='huanhuoPickSecond';
     
     g.log = pushLog(g.log, me.name + ' 获得了 ' + target.name + ' 的一张牌,请选择要交给的角色');
     
@@ -6754,11 +6755,11 @@ function pickHuanhuoGotCard(cardIndex) {
 // 法正【眩惑】：选择第二个目标角色（交给牌）
 function pickHuanhuoSecondTarget(seat) {
   tx(g => {
-    if (g.pending.type !== 'huanhuoPickSecond') return g;
+    if(!g.pending || g.pending.type!=='huanhuoPickSecond' || g.pending.sourceSeat!==mySeat) return g;
     
     if (!g.pending.candidates.includes(seat)) return g;
     
-    const me = g.players[window.mySeat];
+    const me = g.players[mySeat];
     const secondTarget = g.players[seat];
     
     if (!secondTarget || !secondTarget.alive) return g;
@@ -6766,9 +6767,8 @@ function pickHuanhuoSecondTarget(seat) {
     // 从自己手牌中移除获得的牌
     const hand = me.hand || [];
     const idx = hand.findIndex(c => c.id === g.pending.transferCard.id);
-    if (idx !== -1) {
-      hand.splice(idx, 1);
-    }
+    if(idx===-1) return g;
+    hand.splice(idx, 1);
     
     // 将牌交给第二个目标
     if (!secondTarget.hand) secondTarget.hand = [];
@@ -6777,7 +6777,8 @@ function pickHuanhuoSecondTarget(seat) {
     // 标记已使用眩惑
     g.huanhuoUsed = true;
     
-    g.log = pushLog(g.log, me.name + ' 发动【眩惑】,交给 ' + g.players[g.pending.targetSeat].name + ' 一张♥手牌,获得其一张牌后交给 ' + secondTarget.name);
+    const firstTarget=g.players[g.pending.firstTargetSeat];
+    g.log = pushLog(g.log, me.name + ' 发动【眩惑】,交给 ' + (firstTarget?firstTarget.name:'?') + ' 一张♥手牌,获得其一张牌后交给 ' + secondTarget.name);
     markSkillSound(g, '眩惑');
     
     // 清理状态
@@ -6794,10 +6795,10 @@ function cancelHuanhuo() {
   tx(g => {
     if (g.pending && 
         (g.pending.type === 'huanhuoPick' || g.pending.type === 'huanhuoPickCard') &&
-        g.pending.sourceSeat === window.mySeat) {
+        g.pending.sourceSeat === mySeat) {
       g.pending = null;
       g.phase = 'play';
-      g.log = pushLog(g.log, g.players[window.mySeat].name + ' 取消发动【眩惑】');
+      g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【眩惑】');
     }
     return g;
   });

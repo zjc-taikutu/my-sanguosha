@@ -1530,15 +1530,15 @@ function qingNang(cardIdx, targetSeat){
     g.discard.push(card);
     tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【青囊】,令 '+tgt.name+' 回复1点体力');
+    const resolvedTargetSeat = g.players.findIndex(p => p === tgt);
     // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
-    if(hasCap(tgt, 'enyuan') && mySeat !== targetSeat) {
+    if(hasCap(tgt, 'enyuan') && mySeat !== resolvedTargetSeat) {
       ensureDeck(g);
       drawN(g, mySeat, 1);
       g.log = pushLog(g.log, tgt.name + ' 回复1点体力,' + me.name + ' 发动【恩怨】效果,摸一张牌');
     }
     // 周泰【不屈】:回复体力时移除一张不屈牌
-    const targetSeat = g.players.findIndex(p => p === tgt);
-    if (targetSeat !== -1 && hasCap(tgt,'buqu') && tgt.buquCards && tgt.buquCards.length > 0) {
+    if (resolvedTargetSeat !== -1 && hasCap(tgt,'buqu') && tgt.buquCards && tgt.buquCards.length > 0) {
       const removedCard = tgt.buquCards.pop();
       g.log = pushLog(g.log, tgt.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
       if(tgt.buquCards.length === 0) {
