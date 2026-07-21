@@ -5277,11 +5277,17 @@ function pickXuanfengTarget(seat) {
       return g;
     }
     
-    // 添加目标
-    if (!pending.targets.includes(seat)) {
-      pending.targets.push(seat);
-      pending.discardedCounts.push(0);
-    }
+    // 同一目标只能选择一次。旧实现允许重复选择同一目标，但第二次会覆盖第一次记录的
+    // discardedCounts，同时再次扣减 maxRemaining，最终出现“日志说选了两张、实际只弃一张”。
+    if (pending.targets.includes(seat)) return g;
+
+    const available = (target.hand || []).length +
+      EQUIP_SLOTS.filter(slot => target.equips && target.equips[slot]).length +
+      (target.delays || []).length;
+    if (available <= 0) return g;
+
+    pending.targets.push(seat);
+    pending.discardedCounts.push(0);
     
     // 进入选择弃牌数量阶段
     pending.stage = 'chooseCount';
@@ -5305,9 +5311,21 @@ function chooseXuanfengDiscardCount(count) {
     const targetSeat = pending.targets[pending.currentTargetIndex];
     const target = g.players[targetSeat];
     
-    // 检查数量是否合法
-    if (count < 0 || count > pending.maxRemaining) {
+    const available = (target.hand || []).length +
+      EQUIP_SLOTS.filter(slot => target.equips && target.equips[slot]).length +
+      (target.delays || []).length;
+
+    // 检查数量是否合法。0表示放弃刚选的这个目标，不能留下一个0张的幽灵目标。
+    if (!Number.isInteger(count) || count < 0 || count > pending.maxRemaining || count > available) {
       g.log = pushLog(g.log, `${me.name} 选择的弃牌数无效`);
+      return g;
+    }
+
+    if (count === 0) {
+      pending.targets.splice(pending.currentTargetIndex, 1);
+      pending.discardedCounts.splice(pending.currentTargetIndex, 1);
+      pending.currentTargetIndex = null;
+      pending.stage = 'selecting';
       return g;
     }
     
@@ -5325,6 +5343,19 @@ function chooseXuanfengDiscardCount(count) {
       executeXuanfeng(g);
     }
     
+    return g;
+  });
+}
+
+// “至多两张”允许只弃一张后主动结束。旧UI没有这个出口，玩家选1张后只能继续凑满2张，
+// 或点“取消”把整次旋风作废，造成“日志显示发动、实际没有弃牌”的直接体验。
+function finishXuanfengSelection() {
+  tx(g => {
+    const pending = g.pending;
+    if (!pending || pending.type !== 'xuanfengPick' || pending.from !== mySeat || pending.stage !== 'selecting') return g;
+    const selectedCount = (pending.discardedCounts || []).reduce((sum, count) => sum + count, 0);
+    if (selectedCount <= 0 || selectedCount > 2) return g;
+    executeXuanfeng(g);
     return g;
   });
 }
