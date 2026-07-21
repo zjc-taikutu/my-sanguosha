@@ -1023,6 +1023,11 @@ function normalize(g){
   // 凌统【旋风】:旋风选择阶段
   if(g.pending && g.pending.type==='xuanfengPick'){
     const d = g.pending;
+    // Firebase Realtime Database 不保留空数组。旋风刚触发、尚未选择目标时，targets 和
+    // discardedCounts 都是 []，同步回来后字段会直接缺失；这属于合法初始状态，不能当成
+    // 脏数据清掉 pending，否则真实联机局中旋风界面会在建立后立刻消失。
+    if(d.targets===undefined || d.targets===null) d.targets=[];
+    if(d.discardedCounts===undefined || d.discardedCounts===null) d.discardedCounts=[];
     if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
        !Array.isArray(d.targets) ||
        !Array.isArray(d.discardedCounts) ||

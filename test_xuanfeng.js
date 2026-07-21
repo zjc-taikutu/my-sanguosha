@@ -7,6 +7,26 @@ describe('凌统【旋风】修复', function() {
     };
   }
 
+  it('Firebase省略空数组后仍保留刚触发的旋风选择状态', function() {
+    const lingtong = player('凌统', 'lingtong');
+    const target = player('目标', 'liubei');
+    const g = {
+      players: [lingtong, target], turn: 0, phase: 'xuanfengPick',
+      pending: {
+        type: 'xuanfengPick', from: 0, trigger: 'equip', maxRemaining: 2,
+        stage: 'selecting', previousPhase: 'play'
+      },
+      deck: [], discard: [], log: []
+    };
+
+    normalize(g);
+
+    assert.strictEqual(g.pending.type, 'xuanfengPick');
+    assert.deepStrictEqual(Array.from(g.pending.targets), []);
+    assert.deepStrictEqual(Array.from(g.pending.discardedCounts), []);
+    assert.strictEqual(g.phase, 'xuanfengPick');
+  });
+
   it('选择1张后可以主动完成并真实弃牌', function() {
     mySeat = 0;
     const lingtong = player('凌统', 'lingtong');
