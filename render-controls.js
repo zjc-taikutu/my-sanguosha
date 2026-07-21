@@ -592,16 +592,19 @@ function renderControls(g){
     return;
   }
   
-  // 翻面状态提示——只在"不是我当前回合"时短路(此时反正也没有别的操作可做,提示"下次轮到你
-  // 会被跳过"无害)。若是我自己当前回合(myTurn===true),即使中途被翻面(悲歌黑桃/酒诗任一条
-  // 代码路径/仁心都可能中途把当前回合玩家自己翻成背面),也不能短路掉这个阶段正常的出牌/
-  // 结束回合等控制逻辑——"翻面跳过回合"只在 startTurn 里、新回合开始那一刻结算一次,和
-  // "回合进行到一半才被翻面"是两回事,后者本回合应该照常打完。
-  const faceupHtml = renderFaceupStatus(g);
-  if(faceupHtml && !myTurn) {
-    c.innerHTML = faceupHtml;
-    return;
-  }
+  // 翻面状态提示——不再在这里提前短路。上一版"只在!myTurn时短路"的写法有一个遗留缺口:
+  // !myTurn 覆盖了"当前不是我的回合"的绝大多数时间,包括我此刻正好需要响应别人操作(比如
+  // 对我出的杀,该不该出闪)的这些时刻——那些响应界面全都定义在这个函数后面几千行的
+  // g.pending 分派链条里,提前短路会把它们全部盖住,导致翻面玩家"无法看到任何响应按钮"。
+  // 官方规则本身也只管"轮到自己回合开始时被跳过",完全不影响响应别人操作的正常询问。
+  // 真正的修复点在下面的 `if(!myTurn){ setBanner('等待…'); return; }` 那个通用兜底
+  // 分支——不是函数末尾(那里试过一次,但函数在到达末尾之前早就 return 了,是死代码,已
+  // 撤回)。那个 `if(!myTurn)` 分支的位置本身就是这条分派链条天然确立的"真正空闲"边界:
+  // 它排在几千行 `g.pending.xxx===mySeat` 判断的最后面,只要前面任何一个分支命中过(说明
+  // 确实有什么东西需要这个玩家响应/关注),函数早就在到达这里之前 return 了;真正走到这里
+  // 就意味着——不需要在这里逐一枚举 pending 类型/字段名,直接复用分派链条本身已经做过的
+  // 判断——此刻既不是我的回合,也没有任何 pending 需要我响应。是我自己当前回合
+  // (myTurn===true)时,分派链条压根不会进入这个分支,同样天然不受影响。
 
   // 智迟状态提示
   const zhichiHtml = renderZhichiStatus(g);
@@ -3049,6 +3052,12 @@ function renderControls(g){
     return;
   }
   if(!myTurn){
+    // 到这里说明:上面几千行 g.pending.xxx===mySeat 的判断没有一条命中过——真正没有任何
+    // pending 需要我响应,是真正的空闲等待状态。只有在这个前提下才显示翻面提示;一旦真的
+    // 有响应类 pending(比如对我出的杀,该不该出闪),更早的分支早就 return 掉了,根本不会
+    // 走到这里,翻面提示不会盖住它们。
+    const faceupHtml = renderFaceupStatus(g);
+    if(faceupHtml) { c.innerHTML = faceupHtml; return; }
     setBanner('等待 '+escapeHtml(g.players[g.turn].name)+' 行动…');
     return;
   }
@@ -3910,7 +3919,7 @@ function renderControls(g){
     const b=document.createElement('button'); b.className='ghost';
     b.textContent='结束回合'; b.disabled=over>0 && !keji; b.onclick=endTurn; c.appendChild(b);
   }
-  
+
   // 袁术【同疾】状态显示:若袁术的手牌数大于体力值,且当前玩家在袁术攻击范围内,显示提示
   // 这个检查放在最后,不会覆盖前面各分支设置的banner
   const yuanshuSeatTongji = findPlayerWithCap(g, 'tongji');
