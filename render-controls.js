@@ -1197,7 +1197,10 @@ function renderControls(g){
     const p = document.createElement('p'); p.textContent = '直接点击下方手牌区的一张♥牌，或点击这里的快捷按钮：';
     div.appendChild(p);
     const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    g.pending.heartCards.forEach((card, i) => {
+    // game.js 的 huanhuoPickCard 只保存座位号；这里必须读取法正当前真实手牌，不能再访问
+    // 已删除的 pending.heartCards，否则该阶段渲染会直接抛错，整个操作区变成空白。
+    (g.players[mySeat].hand||[]).forEach((card, i) => {
+      if(!card || card.suit!=='♥') return;
       const cb = document.createElement('button'); cb.className='card-btn';
       cb.textContent='【'+card.name+'】';
       cb.onclick=()=>pickHuanhuoHeartCard(i);
@@ -1218,19 +1221,28 @@ function renderControls(g){
     const div = document.createElement('div'); div.className = 'centered';
     const h4 = document.createElement('h4'); h4.textContent = '【眩惑】选择获得的牌';
     div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '从 ' + target.name + ' 手牌中选择一张获得：';
+    const p = document.createElement('p'); p.textContent = '获得 ' + target.name + ' 的一张牌（手牌暗置随机，装备可指定）：';
     div.appendChild(p);
     const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    (target.hand||[]).forEach((card, i) => {
+    if((target.hand||[]).length){
       const cb = document.createElement('button'); cb.className='card-btn';
-      cb.textContent='【'+card.name+'】';
-      cb.onclick=()=>pickHuanhuoGotCard(i);
+      cb.textContent='随机获得一张手牌（共'+target.hand.length+'张）';
+      cb.onclick=()=>pickHuanhuoGotCard('hand');
+      cardDiv.appendChild(cb);
+    }
+    const slotNames={weapon:'武器',armor:'防具',plus1:'+1马',minus1:'-1马'};
+    EQUIP_SLOTS.forEach(slot=>{
+      const card=target.equips && target.equips[slot];
+      if(!card) return;
+      const cb=document.createElement('button'); cb.className='card-btn';
+      cb.textContent=slotNames[slot]+'【'+card.name+'】';
+      cb.onclick=()=>pickHuanhuoGotCard('equip',slot);
       cardDiv.appendChild(cb);
     });
     div.appendChild(cardDiv);
     // 眩惑实质性结算已开始，不提供取消按钮
     c.appendChild(div);
-    setBanner('从 ' + target.name + ' 手牌中选择一张获得');
+    setBanner('获得 ' + target.name + ' 的一张手牌或装备');
     return;
   }
 

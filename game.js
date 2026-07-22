@@ -1123,7 +1123,8 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !(g.players[d.targetSeat].hand||[]).length){
+       ((g.players[d.targetSeat].hand||[]).length +
+        EQUIP_SLOTS.filter(slot=>g.players[d.targetSeat].equips && g.players[d.targetSeat].equips[slot]).length)===0){
       g.pending = null;
       g.phase = 'play';
     }
@@ -4194,6 +4195,8 @@ function resumeAfterInterrupt(g, resume, seat){
   } else if(resume.type==='enyuan'){
     // 恩怨反伤致死后接回原伤害流程
     resumeAfterInterrupt(g, resume.resume || {type:'sha'}, resume.seat);
+  } else if(resume.type==='huanhuoTransfer'){
+    enterHuanhuoTransfer(g, resume.sourceSeat, resume.firstTargetSeat, resume.transferCardId);
   } else if(resume.type==='luanwu'){
     // 乱武失体力濒死接回(杀路径走 luanwuResume + finishSingleShaTarget)
     if(g.luanwuResume) continueLuanwuAfterSha(g);
@@ -6741,39 +6744,65 @@ function pickHuanhuoHeartCard(cardIndex) {
 }
 
 // 法正【眩惑】：选择要获得的牌
-function pickHuanhuoGotCard(cardIndex) {
+function enterHuanhuoTransfer(g, sourceSeat, firstTargetSeat, transferCardId) {
+  const me=g.players[sourceSeat];
+  const target=g.players[firstTargetSeat];
+  const gotCard=me && (me.hand||[]).find(card=>card && card.id===transferCardId);
+  if(!me || !me.alive || !target || !target.alive || !gotCard){
+    g.pending=null;
+    g.phase='play';
+    return;
+  }
+  const candidates=[];
+  for(let i=0;i<g.players.length;i++){
+    if(i!==sourceSeat && i!==firstTargetSeat && g.players[i] && g.players[i].alive) candidates.push(i);
+  }
+  g.pending={type:'huanhuoPickSecond',sourceSeat,firstTargetSeat,transferCard:gotCard,candidates};
+  g.phase='huanhuoPickSecond';
+  g.log=pushLog(g.log,me.name+' 获得了 '+target.name+' 的一张牌，请选择要交给的角色');
+}
+
+// 目标的手牌是暗置信息，只能随机取得；装备区是公开信息，可以指定一张装备。
+function pickHuanhuoGotCard(kind, value) {
   tx(g => {
     if(!g.pending || g.pending.type!=='huanhuoPickGotCard' || g.pending.sourceSeat!==mySeat) return g;
     const me = g.players[mySeat];
     const firstTargetSeat=g.pending.targetSeat;
     const target = g.players[firstTargetSeat];
     if(!me || !me.alive || !target || !target.alive) return g;
-    const targetHand = target.hand || [];
-    if(!Number.isInteger(cardIndex) || cardIndex<0 || cardIndex>=targetHand.length) return g;
-    const gotCard=targetHand.splice(cardIndex,1)[0];
+    let gotCard=null;
+    let lostEquip=false;
+    if(kind==='hand'){
+      const hand=target.hand||[];
+      if(!hand.length) return g;
+      gotCard=hand.splice(Math.floor(Math.random()*hand.length),1)[0];
+    } else if(kind==='equip'){
+      const slot=String(value||'');
+      if(!EQUIP_SLOTS.includes(slot) || !target.equips || !target.equips[slot]) return g;
+      gotCard=target.equips[slot];
+      target.equips[slot]=null;
+      lostEquip=true;
+    } else if(Number.isInteger(kind)){
+      const hand=target.hand||[];
+      if(!hand.length) return g;
+      gotCard=hand.splice(Math.floor(Math.random()*hand.length),1)[0];
+    } else return g;
     
     // 添加到自己手牌
     if (!me.hand) me.hand = [];
     me.hand.push(gotCard);
     
-    // 进入选择第二个目标阶段（交给另一名其他角色）
-    g.pending = {
-      type: 'huanhuoPickSecond',
-      sourceSeat: mySeat,
-      firstTargetSeat,
-      transferCard: gotCard,
-      candidates: []
-    };
-    
-    // 计算第二个目标候选（不能是自己，也不能是第一个目标）
-    for (let i = 0; i < g.players.length; i++) {
-      if (i !== mySeat && i !== firstTargetSeat && g.players[i] && g.players[i].alive) {
-        g.pending.candidates.push(i);
+    const transferCardId=gotCard.id;
+    g.pending=null;
+    g.phase='play';
+    if(lostEquip){
+      triggerHook(g,firstTargetSeat,'onLoseEquip',{count:1});
+      if(g.pending && g.pending.type==='xuanfengPick'){
+        g.pending.resume={type:'huanhuoTransfer',sourceSeat:mySeat,firstTargetSeat,transferCardId};
+        return g;
       }
     }
-    g.phase='huanhuoPickSecond';
-    
-    g.log = pushLog(g.log, me.name + ' 获得了 ' + target.name + ' 的一张牌,请选择要交给的角色');
+    enterHuanhuoTransfer(g,mySeat,firstTargetSeat,transferCardId);
     
     return g;
   });
