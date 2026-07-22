@@ -18,6 +18,14 @@ function fazhengGame(){
 }
 
 describe('法正【恩怨/眩惑】',function(){
+  it('眩惑目标阶段真实渲染不抛错',function(){
+    mySeat=0;
+    _g=fazhengGame();
+    _g.players[0].hand=[fazhengCard('闪','♥',3,'ui-heart')];
+    startHuanhuo();
+    assert.doesNotThrow(function(){ renderControls(_g); });
+  });
+
   it('眩惑可以完成交红桃、获得牌并转交另一名角色的完整流程',function(){
     mySeat=0;
     _g=fazhengGame();

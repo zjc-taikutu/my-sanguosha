@@ -30,6 +30,7 @@ const context = {
     createTextNode: function(t) { return { nodeValue: t, textContent: t }; },
     createDocumentFragment: function() { return { appendChild: function() { return {}; }, querySelector: function() { return null; }, querySelectorAll: function() { return []; } }; },
     querySelector: function() { return null; }, querySelectorAll: function() { return []; },
+    addEventListener: function() {}, removeEventListener: function() {},
     body: { innerHTML: '', appendChild: function() { return {}; }, removeChild: function() { return {}; }, insertBefore: function() { return {}; } },
     head: { appendChild: function() { return {}; } }, forms: [], images: [], scripts: []
   },
@@ -90,9 +91,9 @@ console.log('Loading Fazheng test environment...\n');
 
 console.log('Loading dependencies...\n');
 
-// 加载所有依赖文件(和 run_lidian_test.js 同一份清单:test_fazheng.js 只调用
-// game.js/skills.js 里的函数,不涉及渲染,不需要 render*.js)
-var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'skills.js'];
+// 法正曾出现过“逻辑测试全过、真实界面因缺失 helper 直接 ReferenceError”的问题，因此这里
+// 同时加载真实渲染层，让专项测试覆盖 renderControls，而不再只测 game.js 状态转换。
+var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'skills.js', 'render.js', 'render-controls.js'];
 var loaded = 0;
 
 files.forEach(function(file) {

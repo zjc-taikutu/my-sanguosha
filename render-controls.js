@@ -22,6 +22,13 @@
 // seatSlot(旧版环绕布局的槽位分配函数)已在骨架级重建(landscape-ui)里删除——对手行
 // 改用简单的回合顺序线性排列(见 render.js 的 oppOrder),不再需要按象限分配槽位。
 
+// 技能目标按钮共用的轻量座位校验。旧代码留下了六处调用却从未定义此函数；一进入眩惑等
+// 目标阶段，renderControls 就会抛 ReferenceError，连取消按钮也无法完成挂载，界面因此锁死。
+// 角色是否存在及存活仍由各调用处校验，这里只拒绝非法座位值。
+function isSeatClickable(seat){
+  return Number.isInteger(seat) && seat >= 0;
+}
+
 
 // ---------- helper functions ----------
 // hasWeaponToDiscard: 典韦【强袭】—— 检查玩家是否有可弃置的武器牌（装备区或手牌）
