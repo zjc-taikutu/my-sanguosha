@@ -147,7 +147,11 @@ function renderHand(g){
     el.classList.toggle('no-art', !imgSrc); // no-art 现在只控制插画区域的占位底色,不再控制牌名文字的显示/隐藏
 
     let usable=false, onClick=null;
-    if(g.phase==='huanhuoPickCard'&&g.pending&&g.pending.type==='huanhuoPickCard'&&g.pending.sourceSeat===mySeat){
+    if(g.phase==='enyuanGiveCard'&&g.pending&&g.pending.type==='enyuanGiveCard'&&g.pending.damagerSeat===mySeat){
+      // 【恩怨】交红桃：按钮与真实手牌统一使用同一个下标，红桃手牌本体也可直接点击。
+      usable=card.suit==='♥';
+      if(usable) onClick=()=>giveEnyuanCard(idx);
+    } else if(g.phase==='huanhuoPickCard'&&g.pending&&g.pending.type==='huanhuoPickCard'&&g.pending.sourceSeat===mySeat){
       // 法正【眩惑】:选择交出的红桃时，允许直接点击真实手牌。旧界面只在控制区另外生成一排
       // 文本按钮，手牌本体反而是灰的，手机玩家自然会以为“红桃牌点不了”。按 card.id 对照
       // pending 快照找到服务端需要的候选下标，点击后仍走同一个 pickHuanhuoHeartCard 校验入口。

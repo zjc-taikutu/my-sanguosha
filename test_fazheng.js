@@ -104,6 +104,24 @@ describe('法正【恩怨/眩惑】',function(){
     assert.ok(!_g.log.some(x=>String(x.text||x).includes('刚烈')));
   });
 
+  it('恩怨可交出不在手牌首位的桃',function(){
+    mySeat=1;
+    _g=fazhengGame();
+    const nonHeart=fazhengCard('杀','♣',4,'first-card');
+    const peach=fazhengCard('桃','♥',9,'second-peach');
+    _g.players[1].hand=[nonHeart,peach];
+    _g.pending={type:'enyuanGiveCard',sourceSeat:0,damagerSeat:1,resume:{type:'sha'}};
+    _g.phase='enyuanGiveCard';
+    _g=JSON.parse(JSON.stringify(_g));
+    normalize(_g);
+
+    giveEnyuanCard(1);
+
+    assert.strictEqual(_g.pending,null);
+    assert.ok(_g.players[0].hand.some(c=>c.id==='second-peach'));
+    assert.deepStrictEqual(Array.from(_g.players[1].hand).map(c=>c.id),['first-card']);
+  });
+
   it('非伤害来源不能替别人操作恩怨',function(){
     mySeat=2;
     _g=fazhengGame();

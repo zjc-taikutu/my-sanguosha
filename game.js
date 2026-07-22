@@ -1091,7 +1091,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
-       !Array.isArray(d.heartCards) || d.heartCards.length===0){
+       !(g.players[d.damagerSeat].hand||[]).some(card=>card && card.suit==='♥')){
       g.pending = null;
       g.phase = 'play';
     }
@@ -6609,7 +6609,6 @@ function chooseEnyuanOption(option) {
         type: 'enyuanGiveCard',
         sourceSeat: pending.sourceSeat,
         damagerSeat: pending.damagerSeat,
-        heartCards: pending.heartCards,
         resume: resume
       };
       g.phase = 'enyuanGiveCard';
@@ -6643,19 +6642,9 @@ function giveEnyuanCard(cardIndex) {
       return g;
     }
     
-    if (cardIndex < 0 || cardIndex >= pending.heartCards.length) {
-      return g;
-    }
-    
-    // 获取要交给的牌
-    const card = pending.heartCards[cardIndex];
-    
-    // 从damager手牌中移除这张牌
     const hand = damager.hand || [];
-    const idx = hand.findIndex(c => c.id === card.id);
-    if (idx !== -1) {
-      hand.splice(idx, 1);
-    }
+    if(!Number.isInteger(cardIndex) || cardIndex<0 || cardIndex>=hand.length || hand[cardIndex].suit!=='♥') return g;
+    const card=hand.splice(cardIndex,1)[0];
     
     // 添加到source手牌
     if (!source.hand) source.hand = [];
